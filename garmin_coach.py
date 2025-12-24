@@ -263,11 +263,12 @@ def sync_to_google_calendar(plan_data):
             # 2. 기존 한국어 설명 추가
             rationale = workout.get('description', '')
             if rationale:
-                desc_lines.append(f"📝 <b>코치 리포트:</b>\n{rationale}")
+                formatted_rationale = rationale.replace('\n', '<br>')
+                desc_lines.append(f"📝 <b>코치 리포트:</b><br>{formatted_rationale}")
             
             event = {
                 'summary': display_title,
-                'description': "\n".join(desc_lines),
+                'description': "<br>".join(desc_lines),
                 'start': {'date': event_date},
                 'end': {'date': event_date},
                 'colorId': '1' # 라벤더 색상
