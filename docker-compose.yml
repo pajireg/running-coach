@@ -1,12 +1,22 @@
 services:
+  # 가민 코치 서비스 설정
   garmin-coach:
     build: .
     container_name: garmin-coach
+    # 에러 발생 시 자동으로 재시작
     restart: unless-stopped
     volumes:
+      # 가민 로그인 세션(토큰) 저장소 연결
       - ./.garmin_tokens:/app/.garmin_tokens
+      # 환경 변수 설정 파일 연결
       - ./.env:/app/.env
     # 선택 사항: 실행 시간을 환경 변수나 커맨드로 조정 가능
     # command: python garmin_coach.py --service --hour 7
     environment:
+      # 근력 운동 포함 여부 (true/false)
       - INCLUDE_STRENGTH=${INCLUDE_STRENGTH:-false}
+      # 대회 정보 (선택 사항)
+      - RACE_DATE=${RACE_DATE:-}
+      - RACE_DISTANCE=${RACE_DISTANCE:-}
+      - RACE_GOAL_TIME=${RACE_GOAL_TIME:-}
+      - RACE_TARGET_PACE=${RACE_TARGET_PACE:-}

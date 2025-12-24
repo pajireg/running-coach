@@ -148,8 +148,8 @@ def pace_to_ms(pace_str, margin=0):
     except:
         return 0
 
-def ask_gemini_for_plan(metrics, include_strength=False):
-    """수집된 지표를 기반으로 Gemini에게 7일치 훈련 계획 요청"""
+def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_distance=None, race_goal_time=None, race_target_pace=None):
+    """지표 및 대회 구체적 목표를 기반으로 Gemini에게 7일치 훈련 계획 요청"""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("에러: GEMINI_API_KEY를 찾을 수 없음")
@@ -165,19 +165,28 @@ def ask_gemini_for_plan(metrics, include_strength=False):
     - Performance: {json.dumps(metrics['performance'])}
     - Context (Yesterday Actual vs Planned): {json.dumps(metrics['context'])}
     
+    RACE CONTEXT:
+    {"- RACE DATE: " + race_date if race_date else "- No specific race date."}
+    {"- RACE DISTANCE: " + race_distance if race_distance else "- No specific distance (Focus on overall fitness)."}
+    {"- GOAL TIME: " + race_goal_time if race_goal_time else ""}
+    {"- TARGET PACE: " + race_target_pace if race_target_pace else ""}
+    
     COACHING RULES:
     1. ADAPTIVE PLANNING: 
        - Look at 'yesterday_actual' in context. If the user skipped a planned workout or did extra, adjust TODAY and the rest of the week accordingly.
        - If they are over-trained (high load, low HRV), prioritize recovery/rest.
     2. SPORT TYPE:
-       - **ONLY RUNNING workouts are allowed.** Do not suggest strength training, swimming, or cycling unless explicitly stated.
-       - {"Include strength training or cross-training only if it complements the running plan." if include_strength else "STRICTLY RUNNING ONLY. Use 'Rest' for non-running days."}
-    3. Weekend: One "Long Run" (Saturday or Sunday).
-    4. Mid-week: One "Interval" or "Tempo" session.
-    5. PACE & TARGETS: 
-       - Calculate appropriate training paces (MM:SS per km) based on their PRs and Lactate Threshold.
+       - **ONLY RUNNING workouts are allowed.**
+       - {"Include strength training only if it complements the running plan." if include_strength else "STRICTLY RUNNING ONLY. Use 'Rest' for non-running days."}
+    3. PERIODIZATION & VOLUME:
+       - {"If a race is set: Calculate weeks until race. Adjust total weekly volume and long run distance based on RACE DISTANCE (" + race_distance + ") and proximity to RACE DATE." if race_date else "- Maintain a balanced mix of base runs, recovery, and one hard session."}
+    4. PACE & TARGETS: 
+       {"- If GOAL TIME (" + race_goal_time + ") is set for DISTANCE (" + race_distance + "), calculate the required target pace. Use this pace for race-specific intervals." if race_goal_time and race_distance else ""}
+       - Calculate training zones based on PRs and Lactate Threshold.
        - Use 'speed' target type for runs.
-    6. RATIONALE (Korean): For each workout, provide a brief rationale in Korean in the 'description' field, explaining why this workout was chosen based on the user's metrics AND context (e.g., "어제 계획보다 더 많이 뛰셨으므로 오늘은 강도를 낮췄습니다").
+    5. Weekend: One "Long Run" (Saturday or Sunday).
+    6. Mid-week: One "Interval" or "Tempo" session.
+    7. RATIONALE (Korean): For each workout, provide a brief rationale in Korean in the 'description' field, explaining how it helps with the specific RACE GOAL or general fitness.
     
     OUTPUT FORMAT:
     Return a JSON object with a key 'plan' containing a list of 7 days.
@@ -376,11 +385,30 @@ def run_once(garmin, include_strength=False):
     """전체 훈련 계획 생성 및 업로드 1회 실행"""
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 업데이트 시작...")
     
+    # 환경 변수에서 구체적인 대회 정보 가져오기 (전부 선택 사항)
+    race_date = os.getenv("RACE_DATE")
+    race_distance = os.getenv("RACE_DISTANCE")
+    race_goal_time = os.getenv("RACE_GOAL_TIME")
+    race_target_pace = os.getenv("RACE_TARGET_PACE")
+    
+    if race_date:
+        print(f"목표 대회 설정됨: {race_date}")
+        if race_distance: print(f" - 거리: {race_distance}")
+        if race_goal_time: print(f" - 목표 시간: {race_goal_time}")
+        if race_target_pace: print(f" - 타겟 페이스: {race_target_pace}")
+
     # 기존 계획 먼저 정리
     delete_gemini_workouts(garmin)
 
     metrics = get_advanced_metrics(garmin)
-    plan_data = ask_gemini_for_plan(metrics, include_strength=include_strength)
+    plan_data = ask_gemini_for_plan(
+        metrics, 
+        include_strength=include_strength, 
+        race_date=race_date, 
+        race_distance=race_distance,
+        race_goal_time=race_goal_time,
+        race_target_pace=race_target_pace
+    )
 
     if plan_data and "plan" in plan_data:
         print(f"\n훈련 계획 생성 완료!")

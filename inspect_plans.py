@@ -1,3 +1,5 @@
+# 가민의 공식 '훈련 계획(Training Plans)' 데이터를 검사하기 위한 스크립트
+# (가민 코치 등 공식 플랜의 구조를 분석할 때 사용함)
 import os
 import json
 from datetime import date
@@ -15,10 +17,10 @@ def main():
     garmin = Garmin(email, password)
     garmin.login()
 
-    print("--- Inspecting Training Plans ---")
+    print("--- 가민 훈련 계획(Training Plans) 검사 중 ---")
     try:
         plans = garmin.get_training_plans()
-        print(f"Total Plans Found: {len(plans)}")
+        print(f"총 {len(plans)}개의 계획을 찾았습니다.")
         print(json.dumps(plans, indent=2)[:2000]) # Print snippet
     except Exception as e:
         print(f"Error fetching plans: {e}")
