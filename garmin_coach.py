@@ -1,11 +1,18 @@
 import os
 import json
 import time
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from dotenv import load_dotenv
 from garminconnect import Garmin
 from google import genai
 from google.genai import types
+
+# 구글 캘린더 API 관련
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # 환경 변수 로드
 load_dotenv()
@@ -13,6 +20,9 @@ load_dotenv()
 # 가민 토큰 경로 설정
 TOKEN_DIR = os.path.abspath(".garmin_tokens")
 os.environ["GARMINTOKENS"] = TOKEN_DIR
+
+# 구글 OAuth 스코프 변경 허용 (라이브러리 경고 방지)
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 def login_to_garmin():
     """가민 커넥트 로그인 (환경 변수와 저장된 토큰 사용)"""
@@ -146,7 +156,127 @@ def pace_to_ms(pace_str, margin=0):
         
         return 1000 / total_seconds_per_km
     except:
-        return 0
+        return None
+
+def get_google_calendar_service():
+    """구글 캘린더 서비스 객체 생성 및 인증"""
+    SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar"]
+    creds = None
+    token_path = "token_google.json"
+    creds_path = "credentials.json"
+
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists(creds_path):
+                print(f"경고: 구글 인증 파일 '{creds_path}'가 없음. 구글 캘린더 동기화를 건너뜁니다.")
+                return None
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+            creds = flow.run_local_server(port=8080, open_browser=False)
+        with open(token_path, "w") as token:
+            token.write(creds.to_json())
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        return service
+    except Exception as e:
+        print(f"구글 캘린더 서비스 생성 에러: {e}")
+        return None
+
+def sync_to_google_calendar(plan_data):
+    """생성된 훈련 계획을 구글 캘린더에 동기화"""
+    service = get_google_calendar_service()
+    if not service:
+        return
+
+    calendar_name = "Coach Gemini"
+    calendar_id = None
+
+    try:
+        # 1. 전용 캘린더 찾기 또는 생성
+        calendars = service.calendarList().list().execute().get('items', [])
+        for cal in calendars:
+            if cal.get('summary') == calendar_name:
+                calendar_id = cal.get('id')
+                break
+        
+        if not calendar_id:
+            print(f"구글 캘린더 생성 중: {calendar_name}")
+            new_cal = {'summary': calendar_name, 'timeZone': 'Asia/Seoul'}
+            created_cal = service.calendars().insert(body=new_cal).execute()
+            calendar_id = created_cal.get('id')
+
+        # 2. 기존 일정 정리 (어제부터 10일치)
+        # 중요: 하루 종일 일정(all-day events)은 시간 없이 날짜만 있으므로 
+        # 범위를 UTC 자정 기준으로 넉넉히 잡아야 확실히 삭제됩니다.
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        start_cleanup = (now_utc - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_cleanup = (now_utc + timedelta(days=10)).replace(hour=23, minute=59, second=59, microsecond=0)
+        
+        time_min = start_cleanup.isoformat()
+        time_max = end_cleanup.isoformat()
+        
+        events = service.events().list(calendarId=calendar_id, timeMin=time_min, timeMax=time_max).execute().get('items', [])
+        for event in events:
+            service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
+
+        # 3. 새로운 일정 등록
+        print("구글 캘린더에 일정 등록 중...")
+        for day in plan_data.get('plan', []):
+            workout = day.get('workout')
+            if not workout or "Rest" in workout.get('workoutName', ''):
+                continue
+            
+            event_date = day.get('date')
+            
+            # 제목에서 "Coach Gemini: " 접두어 제거
+            display_title = workout.get('workoutName', '').replace("Coach Gemini: ", "").strip()
+            
+            # 상세 설명 구축 (운동 단계 + 한국어 설명)
+            desc_lines = []
+            
+            # 1. 운동 단계 요약 추가
+            steps = workout.get('steps', [])
+            if steps:
+                desc_lines.append("🏃‍♂️ <b>훈련 단계:</b>")
+                for i, step in enumerate(steps):
+                    s_type = step.get('type', 'Run')
+                    duration = step.get('durationValue', 0)
+                    
+                    # 초 단위 시간을 분:초로 변환
+                    if duration >= 60:
+                        dur_str = f"{duration // 60}분 {duration % 60}초" if duration % 60 else f"{duration // 60}분"
+                    else:
+                        dur_str = f"{duration}초"
+                        
+                    target = step.get('targetValue', '')
+                    target_str = f" (목표 페이스: {target})" if target and target != "0:00" else ""
+                    
+                    desc_lines.append(f"{i+1}. {s_type}: {dur_str}{target_str}")
+                desc_lines.append("") # 줄바꿈
+            
+            # 2. 기존 한국어 설명 추가
+            rationale = workout.get('description', '')
+            if rationale:
+                desc_lines.append(f"📝 <b>코치 리포트:</b>\n{rationale}")
+            
+            event = {
+                'summary': display_title,
+                'description': "\n".join(desc_lines),
+                'start': {'date': event_date},
+                'end': {'date': event_date},
+                'colorId': '1' # 라벤더 색상
+            }
+            service.events().insert(calendarId=calendar_id, body=event).execute()
+        print("구글 캘린더 동기화 완료!")
+
+    except Exception as e:
+        print(f"구글 캘린더 동기화 중 에러 발생: {e}")
 
 def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_distance=None, race_goal_time=None, race_target_pace=None):
     """지표 및 대회 구체적 목표를 기반으로 Gemini에게 7일치 훈련 계획 요청"""
@@ -200,10 +330,10 @@ def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_di
         "steps": [
           {{
             "type": "Warmup|Run|Interval|Recovery|Cooldown",
-            "durationValue": [seconds],
+            "durationValue": 1800,
             "durationUnit": "second",
             "targetType": "no_target|speed",
-            "targetValue": "MM:SS" (pace per km)
+            "targetValue": "MM:SS"
           }}
         ]
       }}
@@ -220,14 +350,27 @@ def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_di
                 contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            return json.loads(response.text)
+            text = response.text
+            # 마크다운 블록 제거 (혹시 있는 경우)
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            
+            # 잘못된 유니코드 이스케이프 및 제어 문자 제거 시도
+            import re
+            text = re.sub(r'\\u[0-9a-fA-F]{0,3}(?![0-9a-fA-F])', '', text) # 불완전한 \uXXXX 제거
+            
+            return json.loads(text)
         except Exception as e:
             if "429" in str(e):
                 print(f"API 할당량 초과. 45초 후 재시도... ({attempt+1}/3)")
                 time.sleep(45)
             else:
                 print(f"Gemini API 에러: {e}")
-                return None
+                if attempt == 2: return None
+                print(f"재시도 중... ({attempt+1}/3)")
+                time.sleep(2)
     return None
 
 from garminconnect.workout import (
@@ -361,8 +504,6 @@ def schedule_workout(garmin, workout_id, target_date):
     except Exception as e:
         print(f"예약 에러: {e}")
 
-from datetime import date, datetime
-
 def delete_gemini_workouts(garmin, future_only=True):
     """'Coach Gemini'가 포함된 기존 워크아웃 삭제"""
     print("기존 Coach Gemini 워크아웃 정리 중...")
@@ -412,16 +553,24 @@ def run_once(garmin, include_strength=False):
 
     if plan_data and "plan" in plan_data:
         print(f"\n훈련 계획 생성 완료!")
-        for day in plan_data["plan"]:
+        for day in plan_data['plan']:
             target_date = day["date"]
             workout = day["workout"]
-            print(f"[{target_date}] {workout['workoutName']}")
             
+            if "Rest" in workout['workoutName']:
+                print(f"[{target_date}] 휴식")
+                continue
+            
+            print(f"[{target_date}] {workout['workoutName']}")
             workout_id = create_garmin_workout(garmin, workout)
             if workout_id:
                 schedule_workout(garmin, workout_id, target_date)
             time.sleep(1) # API 부하 방지용 딜레이
-        print("업데이트 완료")
+        
+        # 구글 캘린더 동기화 추가
+        sync_to_google_calendar(plan_data)
+        
+        print("\n업데이트 완료")
     else:
         print("계획 생성 실패")
 

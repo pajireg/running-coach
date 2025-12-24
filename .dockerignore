@@ -1,6 +1,8 @@
 # Credentials & Tokens
 .env
 .garmin_tokens/
+credentials.json
+token_google.json
 
 # Python
 __pycache__/
