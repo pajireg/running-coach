@@ -1,0 +1,12 @@
+services:
+  garmin-coach:
+    build: .
+    container_name: garmin-coach
+    restart: unless-stopped
+    volumes:
+      - ./.garmin_tokens:/app/.garmin_tokens
+      - ./.env:/app/.env
+    # 선택 사항: 실행 시간을 환경 변수나 커맨드로 조정 가능
+    # command: python garmin_coach.py --service --hour 7
+    environment:
+      - INCLUDE_STRENGTH=${INCLUDE_STRENGTH:-false}

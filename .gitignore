@@ -1,0 +1,24 @@
+# Credentials & Tokens
+.env
+.garmin_tokens/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Inspection & Tests
+inspect_workouts.py
+test_calendar.py
+test_issue.py
+
+# System
+.DS_Store
+
+
+# IDE
+.idea
+.vscode
+.claude

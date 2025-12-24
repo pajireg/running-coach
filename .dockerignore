@@ -1,0 +1,23 @@
+# Credentials & Tokens
+.env
+.garmin_tokens/
+
+# Python
+__pycache__/
+venv/
+.venv/
+
+# Git
+.git
+.gitignore
+
+# Inspection & Tests
+inspect_workouts.py
+test_calendar.py
+test_issue.py
+
+# Task Artifacts (if you want to keep image small)
+brain/
+walkthrough.md
+implementation_plan.md
+task.md
