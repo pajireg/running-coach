@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import schedule
 from datetime import date, timedelta, datetime
 from dotenv import load_dotenv
 from garminconnect import Garmin
@@ -119,13 +120,65 @@ def get_advanced_metrics(garmin):
         print(f" - 바디 배터리 수집 실패: {e}")
         bb_val = "알 수 없음"
 
-    # 3. 개인 기록 (PR)
+    # 3. 개인 기록 (PR) 및 최대 심박수
     try:
-        prs = garmin.get_personal_record()
-        print(f" - 개인 기록(PR) 수집 완료: {len(prs) if prs else 0} 개의 기록")
+        prs_raw = garmin.get_personal_record()
+        major_prs = []
+        
+        PR_TYPE_MAP = {
+            1: '1K', 2: 'MILE', 3: '5K', 4: '10K', 
+            5: 'HALF_MARATHON', 6: 'MARATHON', 7: 'LONG_RUN'
+        }
+        
+        all_recs = []
+        if isinstance(prs_raw, dict):
+            for sport_recs in prs_raw.values():
+                if isinstance(sport_recs, list): all_recs.extend(sport_recs)
+        elif isinstance(prs_raw, list):
+            all_recs = prs_raw
+            
+        for group in all_recs:
+            recs = group.get('prs', []) if isinstance(group, dict) and 'prs' in group else [group]
+            for pr in recs:
+                if not isinstance(pr, dict): continue
+                t_id = pr.get('typeId')
+                p_type = pr.get('typeKey') or pr.get('type') or PR_TYPE_MAP.get(t_id)
+                val = (pr.get('value') or pr.get('recordValue') or pr.get('prValue') or 
+                       pr.get('personalRecordValue') or pr.get('time'))
+                
+                if p_type:
+                    norm_type = str(p_type).upper()
+                    target_matches = ['1K', 'MILE', '5K', '10K', 'HALF', 'MARATHON']
+                    if any(t in norm_type for t in target_matches) and val:
+                        try:
+                            v_float = float(val)
+                            h = int(v_float // 3600)
+                            m = int((v_float % 3600) // 60)
+                            s = int(v_float % 60)
+                            time_str = f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
+                            major_prs.append(f"{p_type}: {time_str}")
+                        except: continue
+        
+        pr_display = ", ".join(major_prs) if major_prs else f"{len(prs_raw) if prs_raw else 0} 개의 기록"
+        print(f" - 개인 기록(PR) 수집 완료: {pr_display}")
+        
+        # 3-2. 최대 심박수 (사용자 설정값 우선)
+        max_hr = os.getenv("MAX_HEART_RATE")
+        if max_hr:
+            try:
+                max_hr = int(max_hr)
+                print(f" - 최대 심박수 설정 확인: {max_hr} bpm (환경 변수)")
+            except:
+                print(f" - 최대 심박수 설정 오류: '{max_hr}'은 올바른 숫자가 아님")
+                max_hr = None
+        else:
+            # 설정값이 없으면 로그를 남기지 않거나 '미설정' 표시
+            pass
+        
     except Exception as e:
-        print(f" - 개인 기록 수집 실패: {e}")
-        prs = {}
+        print(f" - 개인 기록/최대심박수 수집 오류: {e}")
+        major_prs = []
+        max_hr = None
 
     # 4. 훈련 상태 및 부하
     try:
@@ -191,15 +244,33 @@ def get_advanced_metrics(garmin):
 
     # 5. 젖산 역치
     try:
-        # 가민 커넥트 라이브러리에 따라 인자가 다를 수 있음. 
-        # 에러 메시지: Garmin.get_lactate_threshold() takes 1 positional argument but 3 were given
-        # 이는 self(garmin)만 인자로 받고 날짜 인자는 받지 않는다는 뜻일 수 있음 (최신 또는 특정 버전)
-        # 일단 인자 없이 호출해보고 결과 확인
         threshold = garmin.get_lactate_threshold()
-        print(f" - 젖산 역치 정보 수집 완료: {threshold if threshold else '기록 없음'}")
+        threshold_display = "기록 없음"
+        threshold_for_gemini = None
+        
+        if threshold:
+            speed_raw = threshold.get('speed_and_heart_rate', {}).get('speed')
+            hr = threshold.get('speed_and_heart_rate', {}).get('heartRate')
+            if speed_raw and hr:
+                # 가민 API의 속도 값은 가끔 0.1배인 경우가 있음 (예: 0.355 m/s -> 3.55 m/s)
+                # 달리기의 경우 1.0 m/s 이하는 비정상적으로 느리므로 10배로 보정
+                speed = speed_raw * 10 if speed_raw < 1.0 else speed_raw
+                seconds_per_km = 1 / speed * 1000
+                m = int(seconds_per_km // 60)
+                s = int(seconds_per_km % 60)
+                threshold_display = f"페이스 {m}:{s:02d}/km, 심박수 {hr}bpm"
+                
+                # Gemini용 간소화된 객체
+                threshold_for_gemini = {
+                    "pace": f"{m}:{s:02d}/km",
+                    "heartRate": hr
+                }
+            else:
+                threshold_display = str(threshold)
+        print(f" - 젖산 역치 정보 수집 완료: {threshold_display}")
     except Exception as e:
         print(f" - 젖산 역치 수집 실패: {e}")
-        threshold = {}
+        threshold_for_gemini = None
 
     # 6. HRV (심박 변이도)
     try:
@@ -228,32 +299,109 @@ def get_advanced_metrics(garmin):
         print(f" - 어제 활동 내역 수집 실패: {e}")
         actual_yesterday = []
 
-    # 8. 기존 일정 (컨텍스트 파악용)
+    # 8. 최근 30일간의 일정 및 활동 (컨텍스트 파악용)
     try:
-        # date 객체에서 직접 연, 월 가져오기
-        curr_date = date.today()
-        year = curr_date.year
-        month = curr_date.month
-        # calendar-service URL 형식 수정 (버전에 따라 다를 수 있음)
-        # garth를 사용하는 경우 기본 URL 접두사가 붙으므로 /를 조심해야 함
-        # 로그에서 400 에러 발생: https://connectapi.garmin.com/calendar-service/year/2025/month/12
-        # 올바른 경로는 /calendar-service/year/{year}/month/{month-1} 일 수도 있고 (0-indexed)
-        # 혹은 /calendar-service/month/{year}/{month-1} 일 수도 있음.
-        # 일단 가장 일반적인 0-indexed로 시도 (현재 12월이면 11)
-        url = f"/calendar-service/year/{year}/month/{month-1}"
-        resp = garmin.garth.get("connectapi", url, api=True)
-        cal_data = resp.json()
+        today_date = date.today()
+        thirty_days_ago = today_date - timedelta(days=30)
+        
+        # 조회할 월 리스트 생성 (이번 달, 지난달)
+        months_to_fetch = []
+        curr = today_date
+        months_to_fetch.append((curr.year, curr.month))
+        
+        # 지난달 계산
+        first_of_curr = curr.replace(day=1)
+        last_month_end = first_of_curr - timedelta(days=1)
+        months_to_fetch.append((last_month_end.year, last_month_end.month))
+        
+        all_items = []
+        for y, m in months_to_fetch:
+            url = f"/calendar-service/year/{y}/month/{m-1}" # 0-indexed month
+            try:
+                resp = garmin.garth.get("connectapi", url, api=True)
+                cal_data = resp.json()
+                all_items.extend(cal_data.get("calendarItems", []))
+            except: continue
+
         existing_plan = []
-        for item in cal_data.get("calendarItems", []):
-            if item.get("itemType") == "workout":
-                existing_plan.append({
-                    "date": item.get("date"),
-                    "title": item.get("title")
-                })
-        print(f" - 기존 훈련 일정 수집 완료: {len(existing_plan)} 개의 워크아웃 (조회: {year}/{month})")
+        seen_ids = set() # 중복 처리용 (달이 겹칠 수 있음)
+        
+        for item in all_items:
+            item_id = item.get("id")
+            if item_id in seen_ids: continue
+            
+            item_date_str = item.get("date")
+            if not item_date_str: continue
+            item_date = date.fromisoformat(item_date_str)
+            
+            # 최근 30일 이내인지 확인
+            if thirty_days_ago <= item_date <= today_date:
+                item_type = item.get("itemType")
+                if item_type in ["workout", "activity"]:
+                    summary = ""
+                    if item_type == "activity":
+                        raw_dist = item.get('activeSplitSummaryDistance') or item.get('distance', 0)
+                        dist_km = round(float(raw_dist) / 1000, 2) if raw_dist else 0
+                        
+                        raw_dur = item.get('elapsedDuration') or (item.get('duration', 0) / 1000)
+                        h = int(raw_dur // 3600)
+                        m = int((raw_dur % 3600) // 60)
+                        s = int(raw_dur % 60)
+                        dur_str = f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
+                        
+                        avg_hr = item.get('averageHR', 'N/A')
+                        summary = f"({dist_km}km, {dur_str}, HR: {avg_hr})"
+
+                    existing_plan.append({
+                        "date": item_date_str,
+                        "title": item.get("title"),
+                        "type": item_type,
+                        "details": summary
+                    })
+                    seen_ids.add(item_id)
+        
+        # 날짜순 정렬
+        existing_plan.sort(key=lambda x: x['date'])
+        print(f" - 최근 30일 훈련 및 활동 수집 완료: {len(existing_plan)} 개의 항목")
+        # print("existing_plan:", existing_plan)
     except Exception as e:
-        print(f" - 기존 일정 수집 실패 (URL: {year}/{month-1}): {e}")
+        print(f" - 최근 일정 수집 실패: {e}")
         existing_plan = []
+
+    # 9. 연간 요약 (장기 트렌드 파악용)
+    try:
+        # 최근 1년치 활동 리스트 가져오기 (최대 500개)
+        all_activities = garmin.get_activities(0, 500)
+        yearly_stats = {} # {(year, month): {"dist": 0, "count": 0}}
+        
+        limit_date = datetime.now() - timedelta(days=365)
+        
+        for act in all_activities:
+            start_time_str = act.get("startTimeLocal")
+            if not start_time_str: continue
+            start_time = datetime.fromisoformat(start_time_str)
+            
+            if start_time < limit_date: break # 1년 이전 데이터면 조기 종료
+            
+            key = (start_time.year, start_time.month)
+            if key not in yearly_stats:
+                yearly_stats[key] = {"dist": 0, "count": 0}
+            
+            yearly_stats[key]["dist"] += (act.get("distance", 0) / 1000)
+            yearly_stats[key]["count"] += 1
+            
+        # 보기 좋게 정렬 및 포맷팅
+        sorted_keys = sorted(yearly_stats.keys(), reverse=True)
+        yearly_summary_display = []
+        for y, m in sorted_keys:
+            s = yearly_stats[(y, m)]
+            yearly_summary_display.append(f"{y}/{m:02d}: {s['dist']:.1f}km ({s['count']}회)")
+        
+        print(f" - 연간 훈련 요약 수집 완료: {len(yearly_summary_display)} 개월 데이터")
+        # print("yearly_summary_display:", yearly_summary_display)
+    except Exception as e:
+        print(f" - 연간 요약 수집 실패: {e}")
+        yearly_summary_display = []
 
     return {
         "date": today,
@@ -266,15 +414,17 @@ def get_advanced_metrics(garmin):
             "hrv": hrv_avg
         },
         "performance": {
-            "prs": prs,
+            "personalRecords": major_prs,
             "trainingStatus": train_status,
             "trainingDetails": training_info_for_gemini,
             "vo2Max": vo2_max,
-            "lactateThreshold": threshold
+            **( {"lactateThreshold": threshold_for_gemini} if threshold_for_gemini else {} ),
+            **( {"maxHeartRate": max_hr} if max_hr else {} )
         },
         "context": {
             "yesterday_actual": actual_yesterday,
-            "current_schedule": existing_plan
+            "current_schedule": existing_plan,
+            "yearly_trend": yearly_summary_display
         }
     }
 
@@ -431,9 +581,10 @@ def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_di
     You are an elite running coach. Based on the user's Garmin data, create a **7-day training plan** starting today ({metrics['date']}).
     
     USER DATA:
-    - Recent Health: {json.dumps(metrics['health'])}
-    - Performance: {json.dumps(metrics['performance'])}
-    - Context (Yesterday Actual vs Planned): {json.dumps(metrics['context'])}
+    - Recent Health: {json.dumps(metrics['health'], ensure_ascii=False)}
+    - Performance: {json.dumps(metrics['performance'], ensure_ascii=False)} (includes PRs, VO2Max, Lactate Threshold, and optionally Max Heart Rate if provided)
+    - Context (Yesterday Actual vs Planned): {json.dumps(metrics['context'], ensure_ascii=False)}
+
     
     RACE CONTEXT:
     {"- RACE DATE: " + race_date if race_date else "- No specific race date."}
@@ -482,28 +633,44 @@ def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_di
     Return ONLY valid JSON.
     """
 
-    # print("prompt:", prompt)
+    print("prompt:", prompt)
     
     print("Gemini로 7일 훈련 계획 생성 중...")
     for attempt in range(3):
         try:
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
+                # model="gemini-2.5-flash",
+                # model="gemini-3-flash-preview",
                 contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
             text = response.text
-            # 마크다운 블록 제거 (혹시 있는 경우)
+            
+            # 1. 마크다운 블록 제거 및 순수 JSON 추출
             if "```json" in text:
-                text = text.split("```json")[1].split("```")[0].strip()
+                text = text.split("```json")[-1].split("```")[0].strip()
             elif "```" in text:
-                text = text.split("```")[1].split("```")[0].strip()
+                text = text.split("```")[-1].split("```")[0].strip()
             
-            # 잘못된 유니코드 이스케이프 및 제어 문자 제거 시도
+            # 2. 제어 문자 및 잘못된 이스케이프 정제
             import re
-            text = re.sub(r'\\u[0-9a-fA-F]{0,3}(?![0-9a-fA-F])', '', text) # 불완전한 \uXXXX 제거
+            # 불완전하거나 유효하지 않은 백슬래시 이스케이프 처리
+            # JSON 표준에서 허용되지 않는 백슬래시들을 이중 백슬래시로 변환하거나 제거
+            # 특히 한국어 설명 부분에서 발생할 수 있는 이스케이프 오염 방지
+            text = text.replace('\n', ' ').replace('\r', '') 
+            # 유효하지 않은 이스케이브(\ 뒤에 " \ / b f n r t u 가 아닌 것)를 찾아서 백슬래시 제거
+            text = re.sub(r'\\(?![ux"\\\/bfnrt])', r'', text)
             
-            return json.loads(text)
+            try:
+                return json.loads(text.strip())
+            except json.JSONDecodeError as je:
+                print(f"JSON 파싱 실패 (위치: {je.pos}): {je.msg}")
+                # 디버깅을 위해 에러 주변 텍스트 출력
+                start = max(0, je.pos - 40)
+                end = min(len(text), je.pos + 40)
+                print(f"에러 주변 컨텍스트: ...{text[start:end]}...")
+                raise je
         except Exception as e:
             if "429" in str(e):
                 print(f"API 할당량 초과. 45초 후 재시도... ({attempt+1}/3)")
@@ -725,23 +892,27 @@ def main():
     args = parser.parse_args()
 
     print("--- Coach Gemini: Advanced Adaptive Trainer ---")
+    
+    # 시스템 시간 및 타임존 정보 출력 (KST 확인용)
+    now = datetime.now()
+    tz_info = time.strftime("%Z")
+    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')} {tz_info}] 시스템 시작됨")
+
     garmin = login_to_garmin()
     if not garmin: return
 
     if args.service:
-        print(f"서비스 모드 실행 중. 매일 {args.hour}:00에 예약됨. (근력운동 포함: {args.include_strength})")
-        last_run_date = None
+        target_time = f"{args.hour:02d}:00"
+        print(f"이미 서비스 모드 실행 중. 매일 {target_time}에 예약됨. (근력운동 포함: {args.include_strength})")
+        
+        # 스케줄 등록
+        schedule.every().day.at(target_time).do(run_once, garmin, include_strength=args.include_strength)
+        
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 스케줄러 시작됨. 다음 실행: {schedule.next_run()}")
+        
         while True:
-            now = datetime.now()
-            if now.hour == args.hour and last_run_date != now.date():
-                try:
-                    run_once(garmin, include_strength=args.include_strength)
-                    last_run_date = now.date()
-                except Exception as e:
-                    print(f"정기 실행 중 에러 발생: {e}")
-            
-            # 15분마다 체크
-            time.sleep(900) 
+            schedule.run_pending()
+            time.sleep(60) # 1분마다 스케줄만 체크
     else:
         run_once(garmin, include_strength=args.include_strength)
 

@@ -4,6 +4,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 의존성 설치
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -15,6 +16,7 @@ RUN mkdir -p .garmin_tokens
 
 # 환경 변수 설정
 ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Seoul
 ENV GARMINTOKENS=/app/.garmin_tokens
 
 # 기본적으로 서비스 모드로 실행 (매일 오전 6시 체크)
