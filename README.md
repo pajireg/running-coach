@@ -12,7 +12,21 @@
 
 ## 🚀 시작하기
 
-### 1. 환경 설정
+### 1. 패키지 설치
+
+#### 방법 A: pip 설치 (권장)
+
+```bash
+pip install -e .
+```
+
+#### 방법 B: 개발 환경 설정
+
+```bash
+pip install -e ".[dev]"
+```
+
+### 2. 환경 설정
 
 `.env` 파일을 생성하고 아래 정보를 입력합니다 (또는 `.env.example` 복사):
 
@@ -21,27 +35,52 @@ GARMIN_EMAIL=your_email@example.com
 GARMIN_PASSWORD=your_password
 GEMINI_API_KEY=your_gemini_api_key
 
+# 선택 사항: 최대 심박수 (기본값: 220 - 나이)
+MAX_HEART_RATE=185
+
 # 대회 목표 (선택 사항)
 RACE_DATE=2025-05-24
 RACE_DISTANCE=Full
 RACE_GOAL_TIME=3:59:59
+# 또는 목표 페이스 설정 (예: 5분 40초/km)
+# RACE_TARGET_PACE=5:40
 ```
 
-### 2. 가민 인증 (최초 1회)
+### 3. 가민 인증 (최초 1회)
 
 로컬 환경에서 가민 세션 토큰을 생성합니다:
 
 ```bash
-python setup_garmin.py
+python scripts/setup_garmin.py
 ```
 
-### 3. 구글 캘린더 설정 (선택 사항)
+### 4. 구글 캘린더 설정 (선택 사항)
 
 1.  Google Cloud Console에서 Google Calendar API를 활성화합니다.
 2.  `OAuth 클라이언트 ID`(데스크톱 앱)를 생성하고 JSON 파일을 다운로드하여 `credentials.json`으로 저장합니다.
 3.  최초 실행 시 출력되는 링크를 통해 권한을 승인하면 `token_google.json`이 생성됩니다.
 
-### 4. 도커 실행
+### 5. 실행 방법
+
+#### 일회성 실행
+
+```bash
+coach-gemini
+# 또는
+python -m coach_gemini
+```
+
+#### 서비스 모드 (매일 자동 실행)
+
+```bash
+# 매일 오전 6시에 실행
+coach-gemini --service --hour 6
+
+# 근력 운동 포함
+coach-gemini --service --hour 6 --include-strength
+```
+
+### 6. 도커 실행
 
 ```bash
 docker-compose up -d
@@ -49,14 +88,27 @@ docker-compose up -d
 
 ## 📂 프로젝트 구조
 
-*   `garmin_coach.py`: 메인 엔진 (데이터 수집, Gemini 연동, 가민/구글 동기화)
-*   `setup_garmin.py`: 가민 계정 최초 인증 도구
-*   `patch_garth.py`: 최신 파이썬 환경을 위한 가민 라이브러리 패치
-*   `docker-compose.yml`: 매일 자동 실행을 위한 도커 설정
-
-## 🛡️ 보안 주의사항
-
-*   `.env`, `.garmin_tokens/`, `credentials.json`, `token_google.json` 파일은 절대 외부나 공개된 깃 저장소에 공유하지 마십시오. `.gitignore`에 이미 포함되어 있습니다.
+```
+coach-gemini/
+├── src/coach_gemini/         # 메인 패키지
+│   ├── models/               # Pydantic 데이터 모델
+│   ├── config/               # 설정 관리 (환경변수, 상수)
+│   ├── clients/              # 외부 API 클라이언트
+│   │   ├── garmin/          # Garmin Connect API
+│   │   ├── gemini/          # Google Gemini AI
+│   │   └── google_calendar/ # Google Calendar API
+│   ├── core/                 # 핵심 비즈니스 로직
+│   │   ├── container.py     # 의존성 주입 컨테이너
+│   │   ├── orchestrator.py  # 훈련 계획 오케스트레이터
+│   │   └── scheduler.py     # 스케줄링 서비스
+│   ├── utils/                # 공통 유틸리티
+│   └── __main__.py           # CLI 엔트리포인트
+├── scripts/                  # 개발/운영 스크립트
+│   └── setup_garmin.py      # 가민 계정 최초 인증 도구
+├── tests/                    # 테스트 코드
+├── pyproject.toml           # 프로젝트 설정 및 의존성
+└── docker-compose.yml       # 도커 설정
+```
 
 ---
 오늘의 훈련도 파이팅입니다! 🏁

@@ -8,17 +8,27 @@ token_google.json
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 venv/
 .venv/
 
-# Inspection & Tests
-inspect_workouts.py
-test_calendar.py
-test_issue.py
+# Testing & Quality
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+logs/
+*.log
 
 # System
 .DS_Store
-
 
 # IDE
 .idea

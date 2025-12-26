@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coach-gemini"
+version = "2.0.0"
+description = "AI-powered adaptive running coach using Garmin data and Google Gemini"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Coach Gemini Team"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Health & Fitness",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "garminconnect",
+    "google-api-python-client==2.187.0",
+    "google-auth-httplib2==0.3.0",
+    "google-auth-oauthlib==1.2.3",
+    "google-genai",
+    "python-dotenv",
+    "schedule",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "tenacity>=8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.10",
+    "mypy>=1.0",
+    "types-requests",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "ipython",
+]
+
+[project.scripts]
+coach-gemini = "coach_gemini.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+exclude = [
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=src/coach_gemini --cov-report=term-missing"
