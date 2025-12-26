@@ -52,10 +52,58 @@ def get_advanced_metrics(garmin):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     print("상세 건강 및 퍼포먼스 데이터 수집 중...")
 
-    # 1. 기본 통계
+    # 1. 기본 통계 및 수면 점수
     try:
         stats = garmin.get_user_summary(today)
-    except: stats = {}
+        
+        # 수면 상세 데이터 추출 함수
+        def get_sleep_details(d):
+            try:
+                s_data = garmin.get_sleep_data(d)
+                dto = s_data.get('dailySleepDTO', {})
+                scores = dto.get('sleepScores', {}).get('overall', {})
+                
+                # 초 단위를 'H시간 M분' 형식으로 변환
+                def format_seconds(s):
+                    if not s: return "0분"
+                    h = s // 3600
+                    m = (s % 3600) // 60
+                    return f"{h}시간 {m}분" if h > 0 else f"{m}분"
+
+                return {
+                    "score": scores.get('value'),
+                    "quality": scores.get('qualifierKey'),
+                    "duration": format_seconds(dto.get('sleepTimeSeconds')),
+                    "deep": format_seconds(dto.get('deepSleepSeconds')),
+                    "light": format_seconds(dto.get('lightSleepSeconds')),
+                    "rem": format_seconds(dto.get('remSleepSeconds')),
+                    "awake": format_seconds(dto.get('awakeSleepSeconds'))
+                }
+            except: return None
+
+        sleep_details = get_sleep_details(today)
+        
+        # 폴백 제거: 오늘 데이터가 없으면 N/A 처리 (사용자 요청)
+        if not sleep_details or not sleep_details.get('score'):
+            sleep_score_display = 'N/A'
+            sleep_info_for_gemini = "기록 없음 (워치 미착용 등)"
+        else:
+            sleep_score_display = sleep_details['score']
+            sleep_info_for_gemini = (
+                f"점수: {sleep_details['score']} ({sleep_details['quality']}), "
+                f"총 수면: {sleep_details['duration']} (깊은: {sleep_details['deep']}, "
+                f"가벼운: {sleep_details['light']}, REM: {sleep_details['rem']}, 깨어남: {sleep_details['awake']})"
+            )
+        
+        print(f" - 기본 통계 수집 완료: 걸음 수 {stats.get('totalSteps', 0)}, 수면 점수 {sleep_score_display}")
+        if sleep_score_display != 'N/A':
+            print(f"   * 상세 수면: {sleep_info_for_gemini}")
+            
+    except Exception as e:
+        print(f" - 기본 통계 수집 실패: {e}")
+        stats = {}
+        sleep_score_display = 'N/A'
+        sleep_info_for_gemini = "데이터 수집 실패"
     
     # 2. 바디 배터리
     try:
@@ -66,27 +114,102 @@ def get_advanced_metrics(garmin):
             if 'bodyBatteryValuesArray' in last_entry:
                 values = last_entry['bodyBatteryValuesArray']
                 if values: bb_val = values[-1][1]
-    except: bb_val = "알 수 없음"
+        print(f" - 바디 배터리 수집 완료: {bb_val}")
+    except Exception as e:
+        print(f" - 바디 배터리 수집 실패: {e}")
+        bb_val = "알 수 없음"
 
     # 3. 개인 기록 (PR)
     try:
         prs = garmin.get_personal_record()
-    except: prs = {}
+        print(f" - 개인 기록(PR) 수집 완료: {len(prs) if prs else 0} 개의 기록")
+    except Exception as e:
+        print(f" - 개인 기록 수집 실패: {e}")
+        prs = {}
 
     # 4. 훈련 상태 및 부하
     try:
         status = garmin.get_training_status(today)
-    except: status = {}
+        
+        # VO2Max 안전하게 가져오기
+        vo2_max_obj = status.get('mostRecentVO2Max', {})
+        if isinstance(vo2_max_obj, dict):
+            vo2_max = vo2_max_obj.get('generic', {}).get('vo2MaxValue', 'N/A')
+        else:
+            vo2_max = 'N/A'
+        
+        # 훈련 상태 및 부하 피드백 추출
+        train_status = 'N/A'
+        load_balance_phrase = 'N/A'
+        acwr_val = 'N/A'
+        acute_load = 'N/A'
+        
+        # 1) 훈련 상태 및 ACWR 피드백 (mostRecentTrainingStatus -> latestTrainingStatusData 내부 순회)
+        mrt_status = status.get('mostRecentTrainingStatus', {})
+        if isinstance(mrt_status, dict):
+            ltsd = mrt_status.get('latestTrainingStatusData', {})
+            if isinstance(ltsd, dict):
+                for device_id, data in ltsd.items():
+                    if isinstance(data, dict):
+                        # 상태 문구
+                        phrase = data.get('trainingStatusFeedbackPhrase')
+                        if phrase: train_status = phrase
+                        
+                        # ACWR (급성/만성 부하 비율)
+                        acwr_dto = data.get('acuteTrainingLoadDTO', {})
+                        if isinstance(acwr_dto, dict):
+                            ratio = acwr_dto.get('dailyAcuteChronicWorkloadRatio')
+                            if ratio is not None: acwr_val = ratio
+                            acute_load = acwr_dto.get('dailyTrainingLoadAcute', 'N/A')
+                        break
+        
+        # 2) 훈련 부하 밸런스 (mostRecentTrainingLoadBalance -> metricsTrainingLoadBalanceDTOMap 내부 순회)
+        mrtl_balance = status.get('mostRecentTrainingLoadBalance', {})
+        if isinstance(mrtl_balance, dict):
+            mtlbdms = mrtl_balance.get('metricsTrainingLoadBalanceDTOMap', {})
+            if isinstance(mtlbdms, dict):
+                for device_id, data in mtlbdms.items():
+                    if isinstance(data, dict):
+                        phrase = data.get('trainingBalanceFeedbackPhrase')
+                        if phrase:
+                            load_balance_phrase = phrase
+                            break
+        
+        # 상세 훈련 데이터 요약 생성 (Gemini 분석용)
+        training_info_for_gemini = (
+            f"상태: {train_status}, 부하 밸런스: {load_balance_phrase}, "
+            f"ACWR: {acwr_val}, 급성 부하: {acute_load}"
+        )
+        
+        print(f" - 훈련 상태 수집 완료: {train_status} (ACWR: {acwr_val}), VO2Max: {vo2_max}")
+        print(f"   * 상세 부하: {training_info_for_gemini}")
+    except Exception as e:
+        print(f" - 훈련 상태 수집 실패: {e}")
+        vo2_max = 'N/A'
+        train_status = 'N/A'
+        training_info_for_gemini = "데이터 수집 실패"
 
     # 5. 젖산 역치
     try:
-        threshold = garmin.get_lactate_threshold(yesterday, today)
-    except: threshold = {}
+        # 가민 커넥트 라이브러리에 따라 인자가 다를 수 있음. 
+        # 에러 메시지: Garmin.get_lactate_threshold() takes 1 positional argument but 3 were given
+        # 이는 self(garmin)만 인자로 받고 날짜 인자는 받지 않는다는 뜻일 수 있음 (최신 또는 특정 버전)
+        # 일단 인자 없이 호출해보고 결과 확인
+        threshold = garmin.get_lactate_threshold()
+        print(f" - 젖산 역치 정보 수집 완료: {threshold if threshold else '기록 없음'}")
+    except Exception as e:
+        print(f" - 젖산 역치 수집 실패: {e}")
+        threshold = {}
 
     # 6. HRV (심박 변이도)
     try:
-        hrv = garmin.get_hrv_data(today)
-    except: hrv = {}
+        hrv_data = garmin.get_hrv_data(today)
+        hrv_summary = hrv_data.get("hrvSummary", {})
+        hrv_avg = hrv_summary.get("lastNightAvg", "알 수 없음")
+        print(f" - HRV 정보 수집 완료: {hrv_avg}")
+    except Exception as e:
+        print(f" - HRV 수집 실패: {e}")
+        hrv_avg = "알 수 없음"
 
     # 7. 어제 활동 내역
     try:
@@ -100,13 +223,24 @@ def get_advanced_metrics(garmin):
                 "duration": act.get("duration"),
                 "calories": act.get("calories")
             })
-    except: actual_yesterday = []
+        print(f" - 어제 활동 내역 수집 완료: {len(actual_yesterday)} 개의 활동")
+    except Exception as e:
+        print(f" - 어제 활동 내역 수집 실패: {e}")
+        actual_yesterday = []
 
     # 8. 기존 일정 (컨텍스트 파악용)
     try:
-        year = date.today().year
-        month = date.today().month - 1
-        url = f"/calendar-service/year/{year}/month/{month}"
+        # date 객체에서 직접 연, 월 가져오기
+        curr_date = date.today()
+        year = curr_date.year
+        month = curr_date.month
+        # calendar-service URL 형식 수정 (버전에 따라 다를 수 있음)
+        # garth를 사용하는 경우 기본 URL 접두사가 붙으므로 /를 조심해야 함
+        # 로그에서 400 에러 발생: https://connectapi.garmin.com/calendar-service/year/2025/month/12
+        # 올바른 경로는 /calendar-service/year/{year}/month/{month-1} 일 수도 있고 (0-indexed)
+        # 혹은 /calendar-service/month/{year}/{month-1} 일 수도 있음.
+        # 일단 가장 일반적인 0-indexed로 시도 (현재 12월이면 11)
+        url = f"/calendar-service/year/{year}/month/{month-1}"
         resp = garmin.garth.get("connectapi", url, api=True)
         cal_data = resp.json()
         existing_plan = []
@@ -116,21 +250,26 @@ def get_advanced_metrics(garmin):
                     "date": item.get("date"),
                     "title": item.get("title")
                 })
-    except: existing_plan = []
+        print(f" - 기존 훈련 일정 수집 완료: {len(existing_plan)} 개의 워크아웃 (조회: {year}/{month})")
+    except Exception as e:
+        print(f" - 기존 일정 수집 실패 (URL: {year}/{month-1}): {e}")
+        existing_plan = []
 
     return {
         "date": today,
         "health": {
             "steps": stats.get("totalSteps"),
-            "sleepScore": stats.get("sleepScore"),
+            "sleepScore": sleep_score_display,
+            "sleepDetails": sleep_info_for_gemini,
             "restingHR": stats.get("restingHeartRate"),
             "bodyBattery": bb_val,
-            "hrv": hrv.get("lastNightAvg") if hrv else "알 수 없음"
+            "hrv": hrv_avg
         },
         "performance": {
             "prs": prs,
-            "trainingStatus": status.get("trainingStatus"),
-            "vo2Max": status.get("vo2Max"),
+            "trainingStatus": train_status,
+            "trainingDetails": training_info_for_gemini,
+            "vo2Max": vo2_max,
             "lactateThreshold": threshold
         },
         "context": {
@@ -342,6 +481,8 @@ def ask_gemini_for_plan(metrics, include_strength=False, race_date=None, race_di
     
     Return ONLY valid JSON.
     """
+
+    # print("prompt:", prompt)
     
     print("Gemini로 7일 훈련 계획 생성 중...")
     for attempt in range(3):
