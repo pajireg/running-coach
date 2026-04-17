@@ -30,6 +30,16 @@ class _SummaryHistoryService(CoachingHistoryService):
                     "run_count": 14,
                 }
             ]
+        if "SELECT\n                ds.day," in query and "load_units" in query:
+            return [
+                {"day": date(2026, 4, 11), "load_units": 0.0},
+                {"day": date(2026, 4, 12), "load_units": 5.0},
+                {"day": date(2026, 4, 13), "load_units": 8.0},
+                {"day": date(2026, 4, 14), "load_units": 0.0},
+                {"day": date(2026, 4, 15), "load_units": 7.0},
+                {"day": date(2026, 4, 16), "load_units": 4.0},
+                {"day": date(2026, 4, 17), "load_units": 6.0},
+            ]
         if "FROM availability_rules" in query:
             return [
                 {
@@ -165,6 +175,9 @@ def test_summarize_coaching_state_combines_load_feedback_and_adherence():
     assert state["meaningfulMatchThreshold"] == 0.75
     assert state["historyConfidence"] == 1.0
     assert state["load"]["last7dDistanceKm"] == 40.0
+    assert state["load"]["acuteEwmaLoad"] > 0
+    assert state["load"]["chronicEwmaLoad"] > 0
+    assert state["load"]["ewmaLoadRatio"] > 0
     assert state["load"]["daysSinceQuality"] == 2
     assert state["subjectiveFeedback"]["motivationScore"] == 8
     assert state["adherence"]["avgTargetMatchScore"] == 0.91

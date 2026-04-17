@@ -1050,6 +1050,148 @@ class CoachingHistoryService:
                 "d28": as_of - timedelta(days=27),
             },
         ) or {}
+        load_variability_row = self._fetchone(
+            """
+            WITH day_series AS (
+                SELECT generate_series(%(d7)s::date, %(as_of)s::date, interval '1 day')::date AS day
+            ),
+            daily_loads AS (
+                SELECT
+                    activity_date,
+                    ROUND(
+                        COALESCE(SUM(CASE
+                            WHEN sport_type IN ('running', 'treadmill_running', 'trail_running')
+                            THEN distance_km ELSE 0
+                        END), 0)::numeric,
+                        2
+                    ) AS running_km,
+                    ROUND(
+                        COALESCE(SUM(CASE
+                            WHEN sport_type NOT IN ('running', 'treadmill_running', 'trail_running')
+                            THEN duration_seconds ELSE 0
+                        END), 0)::numeric / 60,
+                        2
+                    ) AS cross_training_minutes,
+                    ROUND(
+                        (
+                            COALESCE(SUM(CASE
+                                WHEN sport_type IN ('running', 'treadmill_running', 'trail_running')
+                                THEN distance_km ELSE 0
+                            END), 0)
+                            + COALESCE(
+                                SUM(CASE
+                                    WHEN sport_type NOT IN (
+                                        'running',
+                                        'treadmill_running',
+                                        'trail_running'
+                                    )
+                                    THEN duration_seconds ELSE 0
+                                END),
+                                0
+                            ) / 600.0
+                        )::numeric,
+                        2
+                    ) AS load_units
+                FROM activities
+                WHERE athlete_id = %(athlete_id)s
+                  AND activity_date BETWEEN %(d7)s AND %(as_of)s
+                GROUP BY activity_date
+            ),
+            normalized_loads AS (
+                SELECT
+                    ds.day,
+                    COALESCE(dl.running_km, 0) AS running_km,
+                    COALESCE(dl.cross_training_minutes, 0) AS cross_training_minutes,
+                    COALESCE(dl.load_units, 0) AS load_units
+                FROM day_series ds
+                LEFT JOIN daily_loads dl
+                  ON dl.activity_date = ds.day
+            )
+            SELECT
+                ROUND(AVG(load_units)::numeric, 2) AS avg_daily_load,
+                ROUND(COALESCE(STDDEV_POP(load_units), 0)::numeric, 2) AS sd_daily_load,
+                ROUND(SUM(load_units)::numeric, 2) AS total_load,
+                ROUND(MAX(load_units)::numeric, 2) AS peak_daily_load,
+                ROUND(SUM(cross_training_minutes)::numeric, 2) AS last_7d_cross_training_minutes,
+                COUNT(*) FILTER (WHERE load_units > 0) AS active_days
+            FROM normalized_loads
+            """,
+            {
+                "athlete_id": athlete_id,
+                "d7": as_of - timedelta(days=6),
+                "as_of": as_of,
+            },
+        ) or {}
+        daily_load_rows = self._fetchall(
+            """
+            WITH day_series AS (
+                SELECT
+                    generate_series(
+                        %(d42)s::date,
+                        %(as_of)s::date,
+                        interval '1 day'
+                    )::date AS day
+            ),
+            daily_loads AS (
+                SELECT
+                    activity_date,
+                    ROUND(
+                        (
+                            COALESCE(SUM(CASE
+                                WHEN sport_type IN ('running', 'treadmill_running', 'trail_running')
+                                THEN distance_km ELSE 0
+                            END), 0)
+                            + COALESCE(
+                                SUM(CASE
+                                    WHEN sport_type NOT IN (
+                                        'running',
+                                        'treadmill_running',
+                                        'trail_running'
+                                    )
+                                    THEN duration_seconds ELSE 0
+                                END),
+                                0
+                            ) / 600.0
+                        )::numeric,
+                        2
+                    ) AS load_units
+                FROM activities
+                WHERE athlete_id = %(athlete_id)s
+                  AND activity_date BETWEEN %(d42)s AND %(as_of)s
+                GROUP BY activity_date
+            )
+            SELECT
+                ds.day,
+                COALESCE(dl.load_units, 0) AS load_units
+            FROM day_series ds
+            LEFT JOIN daily_loads dl
+              ON dl.activity_date = ds.day
+            ORDER BY ds.day
+            """,
+            {
+                "athlete_id": athlete_id,
+                "d42": as_of - timedelta(days=41),
+                "as_of": as_of,
+            },
+        )
+        acute_ewma_load = self._ewma_load(daily_load_rows, span_days=7)
+        chronic_ewma_load = self._ewma_load(daily_load_rows, span_days=28)
+        ewma_load_ratio = self._ewma_ratio(acute_ewma_load, chronic_ewma_load)
+        recovery_row = self._fetchone(
+            """
+            SELECT
+                body_battery,
+                hrv,
+                sleep_score,
+                training_status
+            FROM daily_metrics
+            WHERE athlete_id = %(athlete_id)s
+              AND metric_date <= %(as_of)s
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """,
+            {"athlete_id": athlete_id, "as_of": as_of},
+        ) or {}
         adherence_row = self._fetchone(
             """
             WITH recent_plans AS (
@@ -1152,11 +1294,37 @@ class CoachingHistoryService:
             {"athlete_id": athlete_id, "as_of": as_of},
         ) or {}
 
-        readiness_score = self._readiness_score_from_history(load_row, adherence_row, feedback_row)
-        fatigue_score = self._fatigue_score_from_history(load_row, feedback_row)
-        injury_risk_score = self._injury_risk_score_from_history(
-            load_row, feedback_row, injury_row
+        readiness_score = self._readiness_score_from_history(
+            load_row,
+            load_variability_row,
+            acute_ewma_load,
+            chronic_ewma_load,
+            ewma_load_ratio,
+            recovery_row,
+            adherence_row,
+            feedback_row,
         )
+        fatigue_score = self._fatigue_score_from_history(
+            load_row,
+            load_variability_row,
+            acute_ewma_load,
+            chronic_ewma_load,
+            ewma_load_ratio,
+            recovery_row,
+            feedback_row,
+        )
+        injury_risk_score = self._injury_risk_score_from_history(
+            load_row,
+            load_variability_row,
+            acute_ewma_load,
+            chronic_ewma_load,
+            ewma_load_ratio,
+            recovery_row,
+            feedback_row,
+            injury_row,
+        )
+        monotony = CoachingHistoryService._training_monotony(load_variability_row)
+        strain = CoachingHistoryService._training_strain(load_variability_row)
 
         return {
             "readinessScore": readiness_score,
@@ -1171,8 +1339,25 @@ class CoachingHistoryService:
                 "last7dDistanceKm": float(load_row.get("last_7d_distance_km") or 0.0),
                 "last28dDistanceKm": float(load_row.get("last_28d_distance_km") or 0.0),
                 "last7dRunCount": int(load_row.get("last_7d_run_count") or 0),
+                "last7dCrossTrainingMinutes": float(
+                    load_variability_row.get("last_7d_cross_training_minutes") or 0.0
+                ),
+                "avgDailyLoad": float(load_variability_row.get("avg_daily_load") or 0.0),
+                "peakDailyLoad": float(load_variability_row.get("peak_daily_load") or 0.0),
+                "activeDays": int(load_variability_row.get("active_days") or 0),
+                "acuteEwmaLoad": acute_ewma_load,
+                "chronicEwmaLoad": chronic_ewma_load,
+                "ewmaLoadRatio": ewma_load_ratio,
+                "trainingMonotony": monotony,
+                "trainingStrain": strain,
                 "daysSinceLongRun": self._days_since(as_of, load_row.get("last_long_run_date")),
                 "daysSinceQuality": self._days_since(as_of, load_row.get("last_quality_date")),
+            },
+            "recovery": {
+                "bodyBattery": self._int_or_none(recovery_row.get("body_battery")),
+                "hrv": self._int_or_none(recovery_row.get("hrv")),
+                "sleepScore": self._int_or_none(recovery_row.get("sleep_score")),
+                "trainingStatus": recovery_row.get("training_status"),
             },
             "adherence": {
                 "plannedWorkoutCount": int(adherence_row.get("planned_workout_count") or 0),
@@ -1683,15 +1868,31 @@ class CoachingHistoryService:
     @staticmethod
     def _readiness_score_from_history(
         load_row: dict[str, Any],
+        load_variability_row: dict[str, Any],
+        acute_ewma_load: float,
+        chronic_ewma_load: float,
+        ewma_load_ratio: float,
+        recovery_row: dict[str, Any],
         adherence_row: dict[str, Any],
         feedback_row: dict[str, Any],
     ) -> float:
         history_confidence = CoachingHistoryService._adherence_history_confidence(
             adherence_row.get("planned_workout_count")
         )
+        monotony = CoachingHistoryService._training_monotony(load_variability_row)
+        strain = CoachingHistoryService._training_strain(load_variability_row)
+        cross_training_minutes = float(
+            load_variability_row.get("last_7d_cross_training_minutes") or 0.0
+        )
         score = 60.0
-        score -= float(load_row.get("last_7d_distance_km") or 0.0) * 0.35
+        score -= float(load_row.get("last_7d_distance_km") or 0.0) * 0.22
         score += float(load_row.get("last_28d_distance_km") or 0.0) * 0.04
+        score -= min(12.0, cross_training_minutes * 0.03)
+        score -= max(0.0, monotony - 2.0) * 6.0
+        score -= max(0.0, strain - 55.0) * 0.12
+        score += min(6.0, chronic_ewma_load * 0.18)
+        score -= max(0.0, ewma_load_ratio - 1.15) * 18.0
+        score += max(0.0, 1.05 - abs(ewma_load_ratio - 1.0)) * 3.0
         score += (
             (float(adherence_row.get("avg_target_match_score") or 0.0) - 0.7)
             * 20
@@ -1708,11 +1909,14 @@ class CoachingHistoryService:
         score -= (
             float(adherence_row.get("skipped_workout_count") or 0.0) * 3.0 * history_confidence
         )
+        score += (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.35
+        score += (float(recovery_row.get("sleep_score") or 70.0) - 70.0) * 0.12
+        score += (float(recovery_row.get("hrv") or 60.0) - 60.0) * 0.08
         score -= float(feedback_row.get("fatigue_score") or 5) * 2.0
         score -= float(feedback_row.get("soreness_score") or 4) * 1.5
         score += float(feedback_row.get("motivation_score") or 5) * 1.5
         score += float(feedback_row.get("sleep_quality_score") or 5) * 1.0
-        return round(max(0.0, min(score, 100.0)), 2)
+        return float(round(max(0.0, min(score, 100.0)), 2))
 
     @staticmethod
     def _completion_rate(matched: Any, planned: Any) -> float:
@@ -1729,34 +1933,109 @@ class CoachingHistoryService:
 
     @staticmethod
     def _fatigue_score_from_history(
-        load_row: dict[str, Any], feedback_row: dict[str, Any]
+        load_row: dict[str, Any],
+        load_variability_row: dict[str, Any],
+        acute_ewma_load: float,
+        chronic_ewma_load: float,
+        ewma_load_ratio: float,
+        recovery_row: dict[str, Any],
+        feedback_row: dict[str, Any],
     ) -> float:
         last_7d = float(load_row.get("last_7d_distance_km") or 0.0)
         last_28d = float(load_row.get("last_28d_distance_km") or 0.0)
+        cross_training_minutes = float(
+            load_variability_row.get("last_7d_cross_training_minutes") or 0.0
+        )
+        monotony = CoachingHistoryService._training_monotony(load_variability_row)
+        strain = CoachingHistoryService._training_strain(load_variability_row)
         baseline_weekly = last_28d / 4 if last_28d > 0 else 0.0
         overload_ratio = (last_7d / baseline_weekly) if baseline_weekly > 0 else 1.0
         score = 20.0
-        score += min(40.0, last_7d * 0.8)
-        score += max(0.0, overload_ratio - 1.0) * 18.0
+        score += min(30.0, last_7d * 0.65)
+        score += min(18.0, cross_training_minutes * 0.05)
+        score += max(0.0, overload_ratio - 1.0) * 14.0
+        score += max(0.0, monotony - 1.8) * 8.0
+        score += max(0.0, strain - 50.0) * 0.18
+        score += min(8.0, acute_ewma_load * 0.35)
+        score += max(0.0, ewma_load_ratio - 1.05) * 15.0
+        score += max(0.0, chronic_ewma_load - acute_ewma_load) * -0.2
+        score -= (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.18
+        score -= (float(recovery_row.get("sleep_score") or 70.0) - 70.0) * 0.08
         score += float(feedback_row.get("fatigue_score") or 5) * 3.0
         score += float(feedback_row.get("stress_score") or 5) * 1.5
         score += float(feedback_row.get("soreness_score") or 4) * 2.5
-        return round(max(0.0, min(score, 100.0)), 2)
+        return float(round(max(0.0, min(score, 100.0)), 2))
 
     @staticmethod
     def _injury_risk_score_from_history(
         load_row: dict[str, Any],
+        load_variability_row: dict[str, Any],
+        acute_ewma_load: float,
+        chronic_ewma_load: float,
+        ewma_load_ratio: float,
+        recovery_row: dict[str, Any],
         feedback_row: dict[str, Any],
         injury_row: dict[str, Any],
     ) -> float:
         last_7d = float(load_row.get("last_7d_distance_km") or 0.0)
         last_28d = float(load_row.get("last_28d_distance_km") or 0.0)
+        cross_training_minutes = float(
+            load_variability_row.get("last_7d_cross_training_minutes") or 0.0
+        )
+        monotony = CoachingHistoryService._training_monotony(load_variability_row)
+        strain = CoachingHistoryService._training_strain(load_variability_row)
         baseline_weekly = last_28d / 4 if last_28d > 0 else 0.0
         overload_ratio = (last_7d / baseline_weekly) if baseline_weekly > 0 else 1.0
         score = 10.0
-        score += max(0.0, overload_ratio - 1.15) * 22.0
+        score += max(0.0, overload_ratio - 1.1) * 16.0
+        score += max(0.0, monotony - 2.0) * 7.0
+        score += max(0.0, strain - 55.0) * 0.15
+        score += min(8.0, cross_training_minutes * 0.02)
+        score += min(6.0, acute_ewma_load * 0.25)
+        score += max(0.0, ewma_load_ratio - 1.1) * 18.0
+        score -= min(3.0, chronic_ewma_load * 0.08)
+        score -= (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.1
         score += float(feedback_row.get("soreness_score") or 4) * 3.0
         score += float(feedback_row.get("fatigue_score") or 5) * 1.2
         score += 12.0 if feedback_row.get("pain_notes") else 0.0
         score += float(injury_row.get("severity") or 0) * 5.0
-        return round(max(0.0, min(score, 100.0)), 2)
+        return float(round(max(0.0, min(score, 100.0)), 2))
+
+    @staticmethod
+    def _training_monotony(load_variability_row: dict[str, Any]) -> float:
+        avg_daily_load = float(load_variability_row.get("avg_daily_load") or 0.0)
+        sd_daily_load = float(load_variability_row.get("sd_daily_load") or 0.0)
+        if avg_daily_load <= 0:
+            return 0.0
+        if sd_daily_load <= 0:
+            return round(avg_daily_load, 2)
+        return round(avg_daily_load / sd_daily_load, 2)
+
+    @staticmethod
+    def _training_strain(load_variability_row: dict[str, Any]) -> float:
+        total_load = float(load_variability_row.get("total_load") or 0.0)
+        if total_load <= 0:
+            return 0.0
+        return float(
+            round(
+                total_load * CoachingHistoryService._training_monotony(load_variability_row),
+                2,
+            )
+        )
+
+    @staticmethod
+    def _ewma_load(rows: list[dict[str, Any]], span_days: int) -> float:
+        if not rows:
+            return 0.0
+        alpha = 2.0 / (span_days + 1)
+        ewma = 0.0
+        for row in rows:
+            load_value = float(row.get("load_units") or 0.0)
+            ewma = (alpha * load_value) + ((1 - alpha) * ewma)
+        return float(round(ewma, 2))
+
+    @staticmethod
+    def _ewma_ratio(acute_ewma_load: float, chronic_ewma_load: float) -> float:
+        if chronic_ewma_load <= 0:
+            return 1.0 if acute_ewma_load <= 0 else round(acute_ewma_load, 2)
+        return float(round(acute_ewma_load / chronic_ewma_load, 2))
