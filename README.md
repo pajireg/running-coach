@@ -1,11 +1,13 @@
 # Running Coach
 
-Garmin Connect 데이터를 기반으로 7일 러닝 계획을 생성하고, Garmin 워크아웃과 Google Calendar까지 동기화하는 AI 러닝 코치입니다. 현재 구조는 단순 계획 생성기를 넘어서, Postgres에 훈련 히스토리와 코치 판단 근거를 저장하는 장기 코칭 백엔드로 확장되어 있습니다.
+Garmin Connect 데이터를 기반으로 7일 러닝 계획을 생성하고, Garmin 워크아웃과 Google Calendar까지 동기화하는 AI 러닝 코치입니다. 현재는 단순 계획 생성기를 넘어서, Postgres에 훈련 히스토리와 코치 판단 근거를 저장하고 장기 부하와 회복 상태까지 반영하는 코칭 백엔드로 확장되어 있습니다.
 
 ## 주요 기능
 
 - Garmin 건강, 퍼포먼스, 활동 데이터를 수집합니다.
 - 최근 훈련량, 주관 피드백, 목표 레이스, 가용 요일을 반영해 7일 계획을 만듭니다.
+- 최근 러닝뿐 아니라 자전거 등 크로스트레이닝 부하도 함께 반영합니다.
+- `training monotony`, `training strain`, `EWMA acute/chronic load`를 계산해 readiness를 보정합니다.
 - 생성한 계획을 Garmin 워크아웃으로 업로드하고 캘린더에 예약합니다.
 - Postgres에 `daily_metrics`, `activities`, `planned_workouts`, `workout_executions`, `coach_decisions`를 저장합니다.
 - Google Calendar에 두 개의 전용 캘린더를 동기화합니다.
@@ -144,5 +146,21 @@ tests/unit/         단위 테스트
 
 - 계획 생성은 규칙 기반 skeleton + LLM 보정 구조입니다.
 - 실제 운동 기록은 Garmin 활동 기준으로 DB에 저장됩니다.
+- 코치 상태는 최근 7일/28일 거리, 크로스트레이닝 시간, 부하 변동성, 수면/바디배터리, 주관 피드백을 함께 반영합니다.
 - `Workout` 캘린더에는 실제 수행만 기록하고, 설명에 계획 대비 상태를 표시합니다.
 - `미수행`은 캘린더가 아니라 DB에서만 관리합니다.
+
+## 코치 엔진 개요
+
+- `storage/history_service.py`에서 최근 42일 활동을 기반으로 코칭 상태를 계산합니다.
+- 현재 점수는 `readiness`, `fatigue`, `injury risk` 세 축으로 저장됩니다.
+- 계산에 사용하는 핵심 신호:
+  - 최근 7일/28일 러닝 거리와 횟수
+  - 최근 7일 크로스트레이닝 시간
+  - `training monotony`, `training strain`
+  - `EWMA acute/chronic load`와 load ratio
+  - Garmin 회복 지표: `body_battery`, `sleep_score`, `hrv`, `training_status`
+  - 주관 피드백: 피로도, 근육통, 스트레스, 수면 체감, 통증
+  - 계획 대비 수행률과 target match
+
+이 구조 때문에 LLM은 계획을 처음부터 창조하는 역할보다, 규칙 기반 skeleton 안에서 세션 내용과 설명을 보정하는 역할에 더 가깝습니다.
