@@ -1,6 +1,7 @@
 """캘린더 동기화 서비스"""
 
 from datetime import date, datetime, timedelta, timezone
+from typing import cast
 
 from ...config.constants import (
     ACTIVITY_CALENDAR_NAME,
@@ -54,17 +55,26 @@ class CalendarSyncService:
         activities: list[dict[str, object]],
         as_of: date,
         calendar_name: str = ACTIVITY_CALENDAR_NAME,
-        days_back: int = 30,
+        days_back: int | None = None,
     ) -> None:
         """실제 수행 활동을 별도 캘린더에 동기화."""
         try:
             calendar_id = self._get_or_create_calendar(calendar_name)
-            self._cleanup_existing_events(
-                calendar_id=calendar_id,
-                start_date=as_of - timedelta(days=days_back - 1),
-                end_date=as_of,
+            sync_start_date, sync_end_date = self._activity_cleanup_range(
+                activities=activities,
+                as_of=as_of,
+                days_back=days_back,
             )
-            self._create_activity_events(calendar_id, activities)
+            existing_events = self._list_events(
+                calendar_id=calendar_id,
+                start_date=sync_start_date,
+                end_date=sync_end_date,
+            )
+            self._upsert_activity_events(
+                calendar_id=calendar_id,
+                activities=activities,
+                existing_events=existing_events,
+            )
             logger.info("실제 운동 기록 캘린더 동기화 완료!")
         except Exception as e:
             logger.error(f"실제 운동 기록 동기화 중 에러 발생: {e}")
@@ -140,6 +150,28 @@ class CalendarSyncService:
 
         logger.info(f"{len(events)}개의 기존 일정 삭제됨")
 
+    def _list_events(
+        self,
+        calendar_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, object]]:
+        start_at = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_at = datetime.combine(
+            end_date, datetime.max.time().replace(microsecond=0), tzinfo=timezone.utc
+        )
+        items = (
+            self.service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=start_at.isoformat(),
+                timeMax=end_at.isoformat(),
+            )
+            .execute()
+            .get("items", [])
+        )
+        return cast(list[dict[str, object]], items)
+
     def _create_events(self, calendar_id: str, plan: TrainingPlan) -> None:
         """새로운 일정 등록
 
@@ -178,21 +210,69 @@ class CalendarSyncService:
 
         logger.info(f"{created_count}개의 일정 등록 완료")
 
-    def _create_activity_events(
+    def _upsert_activity_events(
         self,
         calendar_id: str,
         activities: list[dict[str, object]],
+        existing_events: list[dict[str, object]],
     ) -> None:
-        """실제 수행 활동 이벤트 등록."""
-        logger.info("실제 운동 기록 이벤트 등록 중...")
+        """실제 수행 활동 이벤트 생성 또는 갱신."""
+        logger.info("실제 운동 기록 이벤트 증분 동기화 중...")
         created_count = 0
+        updated_count = 0
+        existing_by_activity_id: dict[str, dict[str, object]] = {}
+        for event in existing_events:
+            extended = event.get("extendedProperties")
+            if not isinstance(extended, dict):
+                continue
+            private = extended.get("private")
+            if not isinstance(private, dict):
+                continue
+            activity_id = private.get("garminActivityId")
+            if activity_id:
+                existing_by_activity_id[str(activity_id)] = event
 
         for activity in activities:
             event = self._build_activity_event(activity)
-            self.service.events().insert(calendarId=calendar_id, body=event).execute()
-            created_count += 1
+            activity_id = str(activity.get("garminActivityId") or "")
+            existing_event = existing_by_activity_id.get(activity_id)
 
-        logger.info(f"{created_count}개의 실제 운동 기록 등록 완료")
+            if existing_event and existing_event.get("id"):
+                self.service.events().update(
+                    calendarId=calendar_id,
+                    eventId=existing_event["id"],
+                    body=event,
+                ).execute()
+                updated_count += 1
+            else:
+                self.service.events().insert(calendarId=calendar_id, body=event).execute()
+                created_count += 1
+
+        logger.info(
+            "%s개의 실제 운동 기록 생성, %s개의 기존 기록 갱신 완료",
+            created_count,
+            updated_count,
+        )
+
+    def _activity_cleanup_range(
+        self,
+        activities: list[dict[str, object]],
+        as_of: date,
+        days_back: int | None,
+    ) -> tuple[date, date]:
+        if activities:
+            activity_dates = [
+                date.fromisoformat(str(activity["activityDate"]))
+                for activity in activities
+                if activity.get("activityDate")
+            ]
+            if activity_dates:
+                return min(activity_dates), max(activity_dates)
+
+        if days_back is None:
+            return as_of - timedelta(days=1), as_of
+
+        return as_of - timedelta(days=days_back - 1), as_of
 
     def _build_activity_event(self, activity: dict[str, object]) -> dict[str, object]:
         sport_type = str(activity.get("sportType") or "workout")

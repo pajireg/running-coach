@@ -7,8 +7,12 @@ class _EventsApi:
     def __init__(self):
         self.inserted = []
         self.deleted = []
+        self.updated = []
+        self.list_calls = []
+        self.list_response_items = []
 
-    def list(self, **_kwargs):
+    def list(self, **kwargs):
+        self.list_calls.append(kwargs)
         return self
 
     def insert(self, **kwargs):
@@ -19,8 +23,12 @@ class _EventsApi:
         self.deleted.append(kwargs)
         return self
 
+    def update(self, **kwargs):
+        self.updated.append(kwargs)
+        return self
+
     def execute(self):
-        return {"items": []}
+        return {"items": self.list_response_items}
 
 
 class _CalendarsApi:
@@ -90,6 +98,7 @@ def test_sync_completed_activities_creates_workout_events():
     assert event["extendedProperties"]["private"]["source"] == "running_coach_activity"
     assert event["start"]["dateTime"] == "2026-04-17T06:00:00+09:00"
     assert "상태: 비계획 수행" in event["description"]
+    assert len(service._events.updated) == 0
 
 
 def test_sync_completed_activities_includes_plan_comparison_lines():
@@ -127,3 +136,63 @@ def test_sync_completed_activities_includes_plan_comparison_lines():
     assert "실제 유형: base" in description
     assert "매칭 점수: 72점" in description
     assert "상태: 대체 수행" in description
+
+
+def test_sync_completed_activities_cleans_up_full_activity_range():
+    service = _FakeService()
+    sync = CalendarSyncService(service)
+
+    sync.sync_completed_activities(
+        activities=[
+            {
+                "garminActivityId": 1,
+                "activityDate": "2025-01-03",
+                "title": "러닝",
+                "sportType": "러닝",
+            },
+            {
+                "garminActivityId": 2,
+                "activityDate": "2026-04-17",
+                "title": "러닝",
+                "sportType": "러닝",
+            },
+        ],
+        as_of=date(2026, 4, 18),
+    )
+
+    list_call = service._events.list_calls[0]
+    assert list_call["timeMin"].startswith("2025-01-03T00:00:00")
+    assert list_call["timeMax"].startswith("2026-04-17T23:59:59")
+
+
+def test_sync_completed_activities_updates_existing_event_by_garmin_activity_id():
+    service = _FakeService()
+    service._events.list_response_items = [
+        {
+            "id": "event-1",
+            "extendedProperties": {
+                "private": {
+                    "garminActivityId": "123",
+                }
+            },
+        }
+    ]
+    sync = CalendarSyncService(service)
+
+    sync.sync_completed_activities(
+        activities=[
+            {
+                "garminActivityId": 123,
+                "activityDate": "2026-04-17",
+                "startedAt": "2026-04-17T06:00:00+09:00",
+                "title": "러닝",
+                "sportType": "러닝",
+            }
+        ],
+        as_of=date(2026, 4, 18),
+        days_back=2,
+    )
+
+    assert len(service._events.inserted) == 0
+    assert len(service._events.updated) == 1
+    assert service._events.updated[0]["eventId"] == "event-1"

@@ -12,7 +12,7 @@ Garmin Connect 데이터를 기반으로 7일 러닝 계획을 생성하고, Gar
 - Postgres에 `daily_metrics`, `activities`, `planned_workouts`, `workout_executions`, `coach_decisions`를 저장합니다.
 - Google Calendar에 두 개의 전용 캘린더를 동기화합니다.
   - `Running Coach`: 앞으로의 계획
-  - `Workout`: 최근 실제 운동 기록과 계획 대비 상태
+  - `Workout`: 실제 운동 기록과 계획 대비 상태
 
 ## 빠른 시작
 
@@ -148,6 +148,8 @@ tests/unit/         단위 테스트
 - 실제 운동 기록은 Garmin 활동 기준으로 DB에 저장됩니다.
 - 코치 상태는 최근 7일/28일 거리, 크로스트레이닝 시간, 부하 변동성, 수면/바디배터리, 주관 피드백을 함께 반영합니다.
 - `Workout` 캘린더에는 실제 수행만 기록하고, 설명에 계획 대비 상태를 표시합니다.
+- `Workout` 캘린더는 매일 최근 2일 actual만 증분 동기화합니다.
+- 작년부터 같은 장기 백필은 필요할 때만 별도로 수행하는 방식입니다.
 - `미수행`은 캘린더가 아니라 DB에서만 관리합니다.
 
 ## 코치 엔진 개요

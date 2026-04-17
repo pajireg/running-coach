@@ -123,12 +123,13 @@ class TrainingOrchestrator:
                 completed_activities = (
                     self.container.history_service.list_recent_completed_activities(
                         as_of=metrics.date,
-                        days=30,
+                        days=2,
                     )
                 )
                 sync_service.sync_completed_activities(
                     activities=completed_activities,
                     as_of=metrics.date,
+                    days_back=2,
                 )
             except Exception as e:
                 logger.warning(f"Google Calendar 동기화 실패 (계속 진행): {e}")

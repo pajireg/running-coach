@@ -869,9 +869,11 @@ class CoachingHistoryService:
         self,
         as_of: date,
         days: int = 30,
+        from_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """캘린더 표출용 최근 실제 활동 목록."""
         athlete_id = self._athlete_id()
+        start_date = from_date or (as_of - timedelta(days=days - 1))
         rows = self._fetchall(
             """
             SELECT
@@ -903,7 +905,7 @@ class CoachingHistoryService:
             """,
             {
                 "athlete_id": athlete_id,
-                "from_date": as_of - timedelta(days=days - 1),
+                "from_date": start_date,
                 "to_date": as_of,
             },
         )
