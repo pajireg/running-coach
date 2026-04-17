@@ -3,14 +3,14 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "coach-gemini"
+name = "running-coach"
 version = "2.0.0"
-description = "AI-powered adaptive running coach using Garmin data and Google Gemini"
+description = "AI-powered adaptive running coach using Garmin data and an LLM"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Coach Gemini Team"}
+    {name = "Running Coach Team"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -23,11 +23,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "garminconnect",
+    "garminconnect>=0.3.0",
     "google-api-python-client==2.187.0",
     "google-auth-httplib2==0.3.0",
     "google-auth-oauthlib==1.2.3",
     "google-genai",
+    "psycopg[binary]>=3.2",
     "python-dotenv",
     "schedule",
     "pydantic>=2.0",
@@ -48,7 +49,7 @@ dev = [
 ]
 
 [project.scripts]
-coach-gemini = "coach_gemini.__main__:main"
+running-coach = "running_coach.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -68,16 +69,18 @@ exclude = '''
 
 [tool.ruff]
 line-length = 100
-select = ["E", "F", "I", "N", "W"]
-ignore = []
-fixable = ["ALL"]
-unfixable = []
 exclude = [
     ".git",
     ".venv",
     "build",
     "dist",
 ]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
 
 [tool.mypy]
 python_version = "3.10"
@@ -93,4 +96,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=src/coach_gemini --cov-report=term-missing"
+addopts = "-v --cov=src/running_coach --cov-report=term-missing"

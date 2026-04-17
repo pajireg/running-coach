@@ -24,6 +24,6 @@ ENV PYTHONUNBUFFERED=1
 ENV TZ=Asia/Seoul
 ENV GARMINTOKENS=/app/.garmin_tokens
 
-# 기본적으로 서비스 모드로 실행 (매일 오전 6시 체크)
+# 기본적으로 서비스 모드로 실행 (매일 오전 5시 체크)
 # 환경 변수에 따라 명령어를 구성하기 위해 쉘 형태로 실행
-CMD python -m coach_gemini --service --hour 6 $( [ "$INCLUDE_STRENGTH" = "true" ] && echo "--include-strength" )
+CMD python -m running_coach run --service --hour 5 $( [ "$INCLUDE_STRENGTH" = "true" ] && echo "--include-strength" )

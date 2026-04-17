@@ -57,8 +57,8 @@ python scripts/setup_garmin.py
 ### 4. 구글 캘린더 설정 (선택 사항)
 
 1.  Google Cloud Console에서 Google Calendar API를 활성화합니다.
-2.  `OAuth 클라이언트 ID`(데스크톱 앱)를 생성하고 JSON 파일을 다운로드하여 `credentials.json`으로 저장합니다.
-3.  최초 실행 시 출력되는 링크를 통해 권한을 승인하면 `token_google.json`이 생성됩니다.
+2.  `OAuth 클라이언트 ID`(데스크톱 앱)를 생성하고 JSON 파일을 다운로드하여 `./.google/credentials.json`으로 저장합니다.
+3.  최초 실행 시 출력되는 링크를 통해 권한을 승인하면 `./.google/token_google.json`이 생성됩니다.
 
 ### 5. 실행 방법
 

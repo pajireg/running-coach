@@ -1,21 +1,43 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-running_coach}
+      POSTGRES_USER: ${POSTGRES_USER:-coach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coach}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coach} -d ${POSTGRES_DB:-running_coach}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # 가민 코치 서비스 설정
   garmin-coach:
     build: .
     container_name: garmin-coach
     # 에러 발생 시 자동으로 재시작
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       # 가민 로그인 세션(토큰) 저장소 연결
       - ./.garmin_tokens:/app/.garmin_tokens
       # 환경 변수 설정 파일 연결
       - ./.env:/app/.env
-      # 구글 캘린더 인증 토큰 및 자격 증명
-      - ./credentials.json:/app/credentials.json
-      - ./token_google.json:/app/token_google.json
+      # 구글 캘린더 인증 디렉터리 연결
+      - ./.google:/app/.google
     # 선택 사항: 실행 시간을 환경 변수나 커맨드로 조정 가능
     # command: python garmin_coach.py --service --hour 7
     environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://coach:coach@postgres:5432/running_coach}
       # 근력 운동 포함 여부 (true/false)
       - INCLUDE_STRENGTH=${INCLUDE_STRENGTH:-false}
       # 대회 정보 (선택 사항)
@@ -23,3 +45,6 @@ services:
       - RACE_DISTANCE=${RACE_DISTANCE:-}
       - RACE_GOAL_TIME=${RACE_GOAL_TIME:-}
       - RACE_TARGET_PACE=${RACE_TARGET_PACE:-}
+
+volumes:
+  postgres-data:

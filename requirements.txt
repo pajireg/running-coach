@@ -1,8 +1,9 @@
-garminconnect
+garminconnect>=0.3.0
 google-api-python-client==2.187.0
 google-auth-httplib2==0.3.0
 google-auth-oauthlib==1.2.3
 google-genai
+psycopg[binary]>=3.2
 python-dotenv
 schedule
 pydantic>=2.0
