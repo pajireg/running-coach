@@ -1,43 +1,62 @@
 # Running Coach
 
-Garmin Connect 데이터를 기반으로 7일 러닝 계획을 생성하고, Garmin 워크아웃과 Google Calendar까지 동기화하는 AI 러닝 코치입니다. 현재는 단순 계획 생성기를 넘어서, Postgres에 훈련 히스토리와 코치 판단 근거를 저장하고 장기 부하와 회복 상태까지 반영하는 코칭 백엔드로 확장되어 있습니다.
+English | [한국어](README.ko.md)
 
-## 주요 기능
+Running Coach is an always-on adaptive running coach built around Garmin Connect data, a Postgres coaching-history database, and a hybrid planning engine that combines rule-based safety constraints with LLM-assisted session detail.
 
-- Garmin 건강, 퍼포먼스, 활동 데이터를 수집합니다.
-- 최근 훈련량, 주관 피드백, 목표 레이스, 가용 요일을 반영해 7일 계획을 만듭니다.
-- 최근 러닝뿐 아니라 자전거 등 크로스트레이닝 부하도 함께 반영합니다.
-- `training monotony`, `training strain`, `EWMA acute/chronic load`를 계산해 readiness를 보정합니다.
-- 생성한 계획을 Garmin 워크아웃으로 업로드하고 캘린더에 예약합니다.
-- Postgres에 `daily_metrics`, `activities`, `planned_workouts`, `workout_executions`, `coach_decisions`를 저장합니다.
-- Google Calendar에 두 개의 전용 캘린더를 동기화합니다.
-  - `Running Coach`: 앞으로의 계획
-  - `Workout`: 실제 운동 기록과 계획 대비 상태
+It is designed to do more than generate workouts. The system collects athlete history, estimates current training state, explains why a plan was chosen, uploads workouts to Garmin, and syncs both planned and completed sessions to Google Calendar.
 
-## 빠른 시작
+## Core Capabilities
 
-### 1. 설치
+- Collect Garmin health, performance, activity, and calendar data
+- Persist coaching history, execution history, and decision rationale in Postgres
+- Build a 7-day running plan from training load, recovery, race goals, availability, injuries, and subjective feedback
+- Incorporate cross-training load from cycling, hiking, strength work, and other non-running sessions
+- Interpret planned vs actual execution, including schedule shifts, reduced or excessive stimulus, and unplanned sessions
+- Upload workouts to Garmin Connect and schedule them automatically
+- Sync two Google Calendars:
+  - `Running Coach` for future plans
+  - `Workout` for completed activities
+
+## System Model
+
+Running Coach is not an LLM-only planner.
+
+The current design is:
+
+1. Garmin and user inputs provide raw state
+2. Postgres stores normalized long-term history
+3. A rule engine builds a safe weekly skeleton
+4. The LLM fills in workout detail and coaching explanation inside those constraints
+
+The operating principle is:
+
+`Code owns safety and structure. The LLM owns bounded interpretation and explanation.`
+
+## Quick Start
+
+### 1. Install
 
 ```bash
 pip install -e .
 ```
 
-개발 도구까지 설치하려면:
+For development tools:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-### 2. 환경 변수
+### 2. Configure Environment
 
-프로젝트 루트에 `.env`를 두고 최소한 아래 값을 채우십시오.
+Create a `.env` file in the repository root:
 
 ```ini
 GARMIN_EMAIL=your_email@example.com
 GARMIN_PASSWORD=your_password
 GEMINI_API_KEY=your_gemini_api_key
 
-# 선택 사항
+# Optional
 MAX_HEART_RATE=197
 DATABASE_URL=postgresql://coach:coach@localhost:5432/running_coach
 RACE_DATE=2026-05-24
@@ -46,70 +65,73 @@ RACE_GOAL_TIME=49:00
 RACE_TARGET_PACE=4:54
 ```
 
-### 3. Garmin 인증
+### 3. Garmin Authentication
 
-최초 1회 Garmin 세션 토큰을 생성합니다.
+Create Garmin session tokens once:
 
 ```bash
 python scripts/setup_garmin.py
 ```
 
-토큰은 `./.garmin_tokens/`에 저장됩니다.
+Tokens are stored in `./.garmin_tokens/`.
 
-### 4. Google Calendar 인증
+### 4. Google Calendar Authentication
 
-1. Google Cloud Console에서 Google Calendar API를 활성화합니다.
-2. OAuth Desktop App 클라이언트를 생성합니다.
-3. 내려받은 JSON을 `./.google/credentials.json`에 둡니다.
-4. 앱을 한 번 실행해 OAuth 승인을 완료하면 `./.google/token_google.json`이 생성됩니다.
+1. Enable Google Calendar API in Google Cloud Console
+2. Create an OAuth Desktop App client
+3. Save the downloaded file as `./.google/credentials.json`
+4. Run the app once and complete the OAuth flow
+5. `./.google/token_google.json` will be created automatically
 
-### 5. 실행
+### 5. Run
 
-일회성 실행:
+One-off execution:
 
 ```bash
 python -m running_coach
-# 또는
+# or
 running-coach
 ```
 
-서비스 모드:
+Service mode:
 
 ```bash
 python -m running_coach run --service --hour 5
 ```
 
-기본 스케줄 시간은 오전 5시입니다.
+The default scheduler time is `05:00`, which is intended to create or refresh the daily plan before early-morning training.
 
-## CLI 명령
+## CLI Commands
 
 - `python -m running_coach`
-  - 하루치 수집, 계획 생성, Garmin/Calendar 동기화
+  - Collect data, generate a plan, sync Garmin, sync calendars
 - `python -m running_coach feedback ...`
-  - 피로도, 근육통, 수면 체감 등 주관 피드백 저장
+  - Store subjective fatigue, soreness, stress, motivation, and sleep-quality input
 - `python -m running_coach availability ...`
-  - 요일별 훈련 가능 여부와 최대 시간 저장
+  - Store weekday availability, preferred workout types, and session-duration limits
 - `python -m running_coach goal ...`
-  - 목표 레이스 저장
+  - Store race-goal data
 - `python -m running_coach block ...`
-  - `base/build/peak/taper` 블록 저장
+  - Store `base / build / peak / taper` block information
 - `python -m running_coach injury ...`
-  - 부상 상태 저장
+  - Store active injury status and severity
 
-## Docker 실행
+## Docker
 
 ```bash
 docker-compose up -d --build
 ```
 
-서비스 구성:
+Main services:
 
-- `postgres`: 코칭 히스토리 저장소
-- `garmin-coach`: 수집, 계획 생성, Garmin 업로드, Google Calendar 동기화
+- `postgres`
+  - durable coaching-history database
+- `garmin-coach`
+  - ingestion, planning, Garmin sync, and Google Calendar sync
 
-Google Calendar를 Docker에서도 쓰려면 `./.google/` 디렉터리가 있어야 합니다.
+If you use Google Calendar in Docker, keep `./.google/` mounted into the container.
 
-## 품질 검사
+## Quality Checks
 
 ```bash
 pytest
@@ -118,57 +140,73 @@ black src tests
 mypy src
 ```
 
-## 프로젝트 구조
+## Repository Layout
 
 ```text
 src/running_coach/
-  clients/          Garmin, Gemini, Google Calendar 연동
-  config/           설정, 상수
-  core/             orchestrator, scheduler, container
-  models/           Pydantic 모델
-  storage/          Postgres 저장 및 코칭 히스토리 서비스
-  utils/            공통 유틸리티
-db/init/            Postgres 초기 스키마
-docs/               운영 및 아키텍처 문서
-scripts/            인증/운영 스크립트
-tests/unit/         단위 테스트
+  clients/          Garmin, Gemini, Google Calendar integrations
+  config/           settings and constants
+  core/             orchestrator, scheduler, dependency container
+  models/           Pydantic models
+  storage/          Postgres persistence and coaching history
+  utils/            shared utilities
+db/init/            Postgres schema bootstrap
+docs/               architecture and algorithm documents
+scripts/            auth and operational scripts
+tests/unit/         unit tests
 ```
 
-문서:
+## Documentation
+
+English:
+
 - [Coaching Architecture](docs/COACHING_ARCHITECTURE.md)
 - [Coaching Algorithm](docs/COACHING_ALGORITHM.md)
 
-## 보안 주의사항
+Korean:
 
-다음 파일과 디렉터리는 커밋하지 마십시오.
+- [Coaching Architecture (KO)](docs/COACHING_ARCHITECTURE.ko.md)
+- [Coaching Algorithm (KO)](docs/COACHING_ALGORITHM.ko.md)
+
+## Current Coaching Signals
+
+The current coach state combines:
+
+- running volume and run frequency
+- cross-training load
+- training monotony and strain
+- EWMA acute and chronic load
+- Garmin-native load signals
+  - training status
+  - acute load
+  - chronic load
+  - ACWR
+  - load balance
+- subjective recovery and fatigue feedback
+- race-goal and training-block context
+- injury constraints
+- planned-vs-actual adherence
+- lap-based execution quality
+
+## Current Operating Policy
+
+- `Running Coach` calendar keeps future plans
+- `Workout` calendar keeps completed sessions only
+- `Workout` sync is incremental for recent actuals
+- long historical backfill is treated as a manual operation
+- Garmin completed activities are the execution source of truth
+- Google Calendar is a presentation and review layer, not the canonical state store
+
+## Security Notes
+
+Do not commit:
 
 - `.env`
 - `.garmin_tokens/`
 - `.google/`
 
-## 현재 동작 요약
+## Status
 
-- 계획 생성은 규칙 기반 skeleton + LLM 보정 구조입니다.
-- 실제 운동 기록은 Garmin 활동 기준으로 DB에 저장됩니다.
-- 코치 상태는 최근 7일/28일 거리, 크로스트레이닝 시간, 부하 변동성, 수면/바디배터리, 주관 피드백을 함께 반영합니다.
-- `Workout` 캘린더에는 실제 수행만 기록하고, 설명에 계획 대비 상태를 표시합니다.
-- `Workout` 캘린더는 매일 최근 2일 actual만 증분 동기화합니다.
-- 작년부터 같은 장기 백필은 필요할 때만 별도로 수행하는 방식입니다.
-- `미수행`은 캘린더가 아니라 DB에서만 관리합니다.
+The system currently works end to end with live Garmin data, Postgres persistence, Garmin workout upload, and Google Calendar synchronization.
 
-## 코치 엔진 개요
-
-- `storage/history_service.py`에서 최근 42일 활동을 기반으로 코칭 상태를 계산합니다.
-- 현재 점수는 `readiness`, `fatigue`, `injury risk` 세 축으로 저장됩니다.
-- 계산에 사용하는 핵심 신호:
-  - 최근 7일/28일 러닝 거리와 횟수
-  - 최근 7일 크로스트레이닝 시간
-  - `training monotony`, `training strain`
-  - `EWMA acute/chronic load`와 load ratio
-  - Garmin 회복 지표: `body_battery`, `sleep_score`, `hrv`, `training_status`
-  - 주관 피드백: 피로도, 근육통, 스트레스, 수면 체감, 통증
-  - 계획 대비 수행률과 target match
-
-이 구조 때문에 LLM은 계획을 처음부터 창조하는 역할보다, 규칙 기반 skeleton 안에서 세션 내용과 설명을 보정하는 역할에 더 가깝습니다.
-
-알고리즘 상세 설명은 [Coaching Algorithm](docs/COACHING_ALGORITHM.md) 문서를 참고하십시오.
+The detailed decision model is documented in [Coaching Algorithm](docs/COACHING_ALGORITHM.md), and the runtime/component view is documented in [Coaching Architecture](docs/COACHING_ARCHITECTURE.md).

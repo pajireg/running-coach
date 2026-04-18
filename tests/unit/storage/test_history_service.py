@@ -91,6 +91,9 @@ class _SummaryHistoryService(CoachingHistoryService):
                 "unplanned_session_count": 1,
                 "unplanned_easy_count": 1,
                 "unplanned_hard_count": 0,
+                "quality_well_executed_count": 1,
+                "recovery_too_hard_count": 1,
+                "long_run_too_hard_count": 1,
             }
         if "FROM subjective_feedback" in query:
             return {
@@ -102,6 +105,17 @@ class _SummaryHistoryService(CoachingHistoryService):
                 "sleep_quality_score": 7,
                 "pain_notes": None,
                 "notes": "컨디션 양호",
+            }
+        if "FROM daily_metrics" in query:
+            return {
+                "body_battery": 72,
+                "hrv": 66,
+                "sleep_score": 81,
+                "training_status": "MAINTAINING_2",
+                "load_balance_phrase": "BALANCED",
+                "acute_load": 685.0,
+                "chronic_load": 720.0,
+                "acwr": 0.95,
             }
         if "FROM injury_status" in query:
             return {}
@@ -173,7 +187,19 @@ def test_planned_workout_category_and_target_match_score():
     )
 
     assert category == "quality"
-    assert score == 0.94
+    assert score == 0.88
+
+
+def test_profile_match_adjustment_rewards_quality_lap_pattern():
+    score = CoachingHistoryService._target_match_score(
+        planned_category="quality",
+        actual_category="quality",
+        target_duration=3600,
+        actual_duration=3300,
+        activity_profile={"fastLapCount": 3, "intervalLikeLapCount": 1, "avgHr": 168},
+    )
+
+    assert score == 1.0
 
 
 def test_summarize_coaching_state_combines_load_feedback_and_adherence():
@@ -189,6 +215,11 @@ def test_summarize_coaching_state_combines_load_feedback_and_adherence():
     assert state["load"]["chronicEwmaLoad"] > 0
     assert state["load"]["ewmaLoadRatio"] > 0
     assert state["load"]["daysSinceQuality"] == 2
+    assert state["load"]["garminAcuteLoad"] == 685.0
+    assert state["load"]["garminChronicLoad"] == 720.0
+    assert state["load"]["garminAcwr"] == 0.95
+    assert state["recovery"]["trainingStatus"] == "MAINTAINING_2"
+    assert state["recovery"]["loadBalancePhrase"] == "BALANCED"
     assert state["subjectiveFeedback"]["motivationScore"] == 8
     assert state["adherence"]["avgTargetMatchScore"] == 0.91
     assert state["adherence"]["executionRate"] == 0.83
@@ -196,8 +227,26 @@ def test_summarize_coaching_state_combines_load_feedback_and_adherence():
     assert state["executionInsights"]["excessiveStimulusCount"] == 1
     assert state["executionInsights"]["unplannedEasyCount"] == 1
     assert state["executionInsights"]["unplannedHardCount"] == 0
+    assert state["executionInsights"]["qualityWellExecutedCount"] == 1
+    assert state["executionInsights"]["recoveryTooHardCount"] == 1
+    assert state["executionInsights"]["longRunTooHardCount"] == 1
     assert state["readinessScore"] > 0
     assert state["fatigueScore"] > state["injuryRiskScore"]
+
+
+def test_garmin_hybrid_adjustments_affect_scores():
+    assert CoachingHistoryService._garmin_status_readiness_adjustment("PRODUCTIVE") > 0
+    assert CoachingHistoryService._garmin_status_readiness_adjustment("OVERREACHING") < 0
+    assert CoachingHistoryService._garmin_balance_readiness_adjustment("BALANCED") > 0
+    assert (
+        CoachingHistoryService._garmin_load_risk_adjustment(
+            garmin_acute_load=900,
+            garmin_chronic_load=700,
+            garmin_acwr=1.3,
+            ewma_ratio=1.05,
+        )
+        > 0
+    )
 
 
 def test_record_subjective_feedback_uses_upsert_query():
@@ -359,6 +408,27 @@ def test_deviation_reason_and_interpretation_classification():
     )
 
 
+def test_execution_quality_label_distinguishes_recovery_and_quality():
+    assert (
+        CoachingHistoryService._execution_quality_label(
+            planned_category="quality",
+            actual_category="quality",
+            activity_profile={"fastLapCount": 3, "intervalLikeLapCount": 1, "avgHr": 170},
+            target_match_score=0.78,
+        )
+        == "의도한 강도 자극이 잘 들어간 품질 세션"
+    )
+    assert (
+        CoachingHistoryService._execution_quality_label(
+            planned_category="recovery",
+            actual_category="base",
+            activity_profile={"fastLapCount": 2, "intervalLikeLapCount": 0, "avgHr": 165},
+            target_match_score=0.55,
+        )
+        == "회복 세션치고 강도가 높았음"
+    )
+
+
 def test_build_decision_summary_includes_execution_insights():
     summary = CoachingHistoryService._build_decision_summary(
         "MAINTAINING 상태에서 5개 세션 계획 생성",
@@ -369,6 +439,9 @@ def test_build_decision_summary_includes_execution_insights():
                 "scheduleShiftCount": 1,
                 "unplannedSessionCount": 2,
                 "unplannedHardCount": 1,
+                "qualityWellExecutedCount": 1,
+                "recoveryTooHardCount": 1,
+                "longRunTooHardCount": 1,
             }
         },
     )
@@ -378,3 +451,24 @@ def test_build_decision_summary_includes_execution_insights():
     assert "일정 이동" in summary
     assert "비계획 세션" in summary
     assert "비계획 고강도" in summary
+    assert "품질 세션의 실제 자극" in summary
+    assert "회복주가 강해져" in summary
+    assert "롱런 후반 강도 상승" in summary
+
+
+def test_execution_quality_label_detects_long_run_too_hard():
+    assert (
+        CoachingHistoryService._execution_quality_label(
+            planned_category="long_run",
+            actual_category="long_run",
+            activity_profile={
+                "fastLapCount": 0,
+                "intervalLikeLapCount": 0,
+                "avgHr": 158,
+                "latePaceChangeRatio": 0.08,
+                "hrDrift": 8,
+            },
+            target_match_score=0.74,
+        )
+        == "롱런 후반 강도가 과하게 올라감"
+    )

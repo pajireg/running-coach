@@ -339,6 +339,9 @@ class TrainingPlanner:
         unplanned_session_count = int(execution_insights.get("unplannedSessionCount") or 0)
         unplanned_easy_count = int(execution_insights.get("unplannedEasyCount") or 0)
         unplanned_hard_count = int(execution_insights.get("unplannedHardCount") or 0)
+        quality_well_executed_count = int(execution_insights.get("qualityWellExecutedCount") or 0)
+        recovery_too_hard_count = int(execution_insights.get("recoveryTooHardCount") or 0)
+        long_run_too_hard_count = int(execution_insights.get("longRunTooHardCount") or 0)
         recent_7d = float(metrics.context.recent_7d_run_distance_km or 0.0)
         recent_30d = float(metrics.context.recent_30d_run_distance_km or 0.0)
         recent_count = int(metrics.context.recent_30d_run_count or 0)
@@ -410,6 +413,12 @@ class TrainingPlanner:
             run_days = 5 if recent_count < 20 else 6
             quality_count = 1
             volume_factor = 1.0
+        if quality_well_executed_count >= 2 and readiness >= 60 and fatigue <= 50 and injury <= 30:
+            volume_factor *= 1.03
+            planning_notes.append(
+                "최근 품질 세션의 실제 자극이 안정적으로 들어가 "
+                "이번 주 구조를 크게 줄이지 않았습니다."
+            )
         if non_running_minutes >= 240:
             quality_count = max(0, quality_count - 1)
             run_days = max(4, run_days - 1)
@@ -439,6 +448,19 @@ class TrainingPlanner:
             )
             planning_notes.append(note)
             execution_adjustment_notes.append(note)
+        if recovery_too_hard_count >= 1:
+            quality_count = max(0, quality_count - 1)
+            note = "최근 회복주가 너무 강해져 이번 주 easy/recovery 강도 통제를 더 강화합니다."
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
+        if long_run_too_hard_count >= 1:
+            quality_count = max(0, quality_count - 1)
+            note = (
+                "최근 롱런 후반 강도가 과해 다음 long run은 "
+                "길이와 후반 강도를 더 보수적으로 가져갑니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
 
         target_weekly_km = baseline_weekly_km * volume_factor
         phase = str(block.get("phase") or "").lower()
@@ -462,6 +484,8 @@ class TrainingPlanner:
         base_minutes = self._minutes_from_distance(max(5.0, target_weekly_km * 0.16))
         recovery_minutes = max(25, base_minutes - 10)
         quality_minutes = max(base_minutes + 10, 45)
+        if long_run_too_hard_count >= 1:
+            long_run_minutes = max(60, int(long_run_minutes * 0.9))
 
         days = [{"date": (start_date + timedelta(days=index))} for index in range(7)]
         weekend_indexes = [i for i, day in enumerate(days) if day["date"].weekday() in {5, 6}]
@@ -730,7 +754,11 @@ class TrainingPlanner:
             if adjustment_note:
                 notes.append(adjustment_note)
         elif session_type == "quality":
-            notes.extend(note for note in planning_notes if "품질훈련" in note)
+            notes.extend(
+                note
+                for note in planning_notes
+                if "품질훈련" in note or "품질 세션의 실제 자극" in note
+            )
             adjustment_note = next(
                 (
                     note

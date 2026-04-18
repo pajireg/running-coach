@@ -895,6 +895,7 @@ class CoachingHistoryService:
                 we.execution_payload->>'executionStatus' AS execution_status,
                 we.execution_payload->>'deviationReason' AS deviation_reason,
                 we.execution_payload->>'coachInterpretation' AS coach_interpretation,
+                we.execution_payload->>'executionQuality' AS execution_quality,
                 pw.workout_name AS planned_workout_name
             FROM activities a
             LEFT JOIN workout_executions we
@@ -935,6 +936,7 @@ class CoachingHistoryService:
                 "executionStatus": row.get("execution_status"),
                 "deviationReason": row.get("deviation_reason"),
                 "coachInterpretation": row.get("coach_interpretation"),
+                "executionQuality": row.get("execution_quality"),
                 "targetMatchScore": self._float_or_none(row.get("target_match_score")),
                 "notes": self._actual_activity_note(row),
             }
@@ -1190,7 +1192,11 @@ class CoachingHistoryService:
                 body_battery,
                 hrv,
                 sleep_score,
-                training_status
+                training_status,
+                load_balance_phrase,
+                acute_load,
+                chronic_load,
+                acwr
             FROM daily_metrics
             WHERE athlete_id = %(athlete_id)s
               AND metric_date <= %(as_of)s
@@ -1293,7 +1299,17 @@ class CoachingHistoryService:
                           'quality',
                           'long_run'
                       )
-                ) AS unplanned_hard_count
+                ) AS unplanned_hard_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionQuality' =
+                        '의도한 강도 자극이 잘 들어간 품질 세션'
+                ) AS quality_well_executed_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionQuality' = '회복 세션치고 강도가 높았음'
+                ) AS recovery_too_hard_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionQuality' = '롱런 후반 강도가 과하게 올라감'
+                ) AS long_run_too_hard_count
             FROM workout_executions
             WHERE athlete_id = %(athlete_id)s
               AND execution_date BETWEEN %(from_date)s AND %(to_date)s
@@ -1396,6 +1412,10 @@ class CoachingHistoryService:
                 "ewmaLoadRatio": ewma_load_ratio,
                 "trainingMonotony": monotony,
                 "trainingStrain": strain,
+                "garminAcuteLoad": self._float_or_none(recovery_row.get("acute_load")),
+                "garminChronicLoad": self._float_or_none(recovery_row.get("chronic_load")),
+                "garminAcwr": self._float_or_none(recovery_row.get("acwr")),
+                "garminLoadBalance": recovery_row.get("load_balance_phrase"),
                 "daysSinceLongRun": self._days_since(as_of, load_row.get("last_long_run_date")),
                 "daysSinceQuality": self._days_since(as_of, load_row.get("last_quality_date")),
             },
@@ -1404,6 +1424,7 @@ class CoachingHistoryService:
                 "hrv": self._int_or_none(recovery_row.get("hrv")),
                 "sleepScore": self._int_or_none(recovery_row.get("sleep_score")),
                 "trainingStatus": recovery_row.get("training_status"),
+                "loadBalancePhrase": recovery_row.get("load_balance_phrase"),
             },
             "adherence": {
                 "plannedWorkoutCount": int(adherence_row.get("planned_workout_count") or 0),
@@ -1435,6 +1456,15 @@ class CoachingHistoryService:
                 ),
                 "unplannedEasyCount": int(execution_pattern_row.get("unplanned_easy_count") or 0),
                 "unplannedHardCount": int(execution_pattern_row.get("unplanned_hard_count") or 0),
+                "qualityWellExecutedCount": int(
+                    execution_pattern_row.get("quality_well_executed_count") or 0
+                ),
+                "recoveryTooHardCount": int(
+                    execution_pattern_row.get("recovery_too_hard_count") or 0
+                ),
+                "longRunTooHardCount": int(
+                    execution_pattern_row.get("long_run_too_hard_count") or 0
+                ),
             },
             "subjectiveFeedback": self._serialize_feedback(feedback_row),
             "activeInjury": {
@@ -1481,6 +1511,7 @@ class CoachingHistoryService:
         duration_seconds: Optional[int],
     ) -> None:
         actual_category = self._actual_activity_category(activity_id)
+        activity_profile = self._activity_execution_profile(activity_id)
         planned = self._select_best_planned_workout(
             athlete_id=athlete_id,
             activity_date=activity_date,
@@ -1498,6 +1529,7 @@ class CoachingHistoryService:
             actual_category=actual_category,
             target_duration=target_duration,
             actual_duration=duration_seconds,
+            activity_profile=activity_profile,
         )
         execution_status = self._execution_status(
             planned_category=planned_category,
@@ -1518,6 +1550,12 @@ class CoachingHistoryService:
             actual_category=actual_category,
             completion_ratio=completion_ratio,
             deviation_reason=deviation_reason,
+        )
+        execution_quality = self._execution_quality_label(
+            planned_category=planned_category,
+            actual_category=actual_category,
+            activity_profile=activity_profile,
+            target_match_score=target_match_score,
         )
 
         self._execute(
@@ -1568,6 +1606,7 @@ class CoachingHistoryService:
                         "executionStatus": execution_status,
                         "deviationReason": deviation_reason,
                         "coachInterpretation": coach_interpretation,
+                        "executionQuality": execution_quality,
                         "matchedPlannedDate": (
                             planned["workout_date"].isoformat()
                             if planned and planned.get("workout_date") is not None
@@ -1693,6 +1732,7 @@ class CoachingHistoryService:
         execution_status = row.get("execution_status") or "completed_unplanned"
         deviation_reason = row.get("deviation_reason")
         coach_interpretation = row.get("coach_interpretation")
+        execution_quality = row.get("execution_quality")
         target_match_score = CoachingHistoryService._float_or_none(row.get("target_match_score"))
         status_label = CoachingHistoryService._execution_status_label(execution_status)
         if planned_name:
@@ -1708,6 +1748,7 @@ class CoachingHistoryService:
                 f"계획 유형: {planned_category or '-'}\n"
                 f"실제 유형: {actual_category or '-'}\n"
                 f"매칭 점수: {score_label}\n"
+                f"수행 품질: {execution_quality or '-'}\n"
                 f"이탈 사유: {CoachingHistoryService._deviation_reason_label(deviation_reason)}\n"
                 f"코치 해석: {coach_interpretation or '-'}"
             )
@@ -1715,6 +1756,7 @@ class CoachingHistoryService:
             "Garmin 실제 수행 기록\n"
             f"상태: {status_label}\n"
             f"실제 유형: {actual_category or '-'}\n"
+            f"수행 품질: {execution_quality or '기록형 세션'}\n"
             f"계획 대비: {CoachingHistoryService._unplanned_session_label(actual_category)}\n"
             "코치 해석: "
             f"{CoachingHistoryService._unplanned_session_interpretation(actual_category)}"
@@ -1958,6 +2000,7 @@ class CoachingHistoryService:
         )
         if not row:
             return "unknown"
+        activity_profile = self._activity_execution_profile(activity_id, activity_row=row)
         raw_payload = cast(dict[str, Any], row.get("raw_payload") or {})
         summary = cast(dict[str, Any], raw_payload.get("summary") or {})
         details = cast(dict[str, Any], raw_payload.get("details") or {})
@@ -1972,6 +2015,8 @@ class CoachingHistoryService:
             return "long_run"
         if duration_seconds and duration_seconds >= 75 * 60:
             return "long_run"
+        if activity_profile["fastLapCount"] >= 2 and activity_profile["avgHr"] >= 160:
+            return "quality"
         if avg_hr and self._looks_easy_run(avg_hr):
             return "recovery"
 
@@ -1980,12 +2025,89 @@ class CoachingHistoryService:
             return "quality"
         return "base"
 
+    def _activity_execution_profile(
+        self,
+        activity_id: str,
+        activity_row: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        row = activity_row or self._fetchone(
+            """
+            SELECT avg_pace, avg_hr, duration_seconds
+            FROM activities
+            WHERE activity_id = %(activity_id)s
+            """,
+            {"activity_id": activity_id},
+        )
+        avg_pace_seconds = self._pace_to_seconds(row.get("avg_pace") if row else None)
+        avg_hr = self._int_or_none(row.get("avg_hr") if row else None) or 0
+        lap_rows = self._fetchall(
+            """
+            SELECT avg_pace, avg_hr, duration_seconds, raw_payload
+            FROM activity_laps
+            WHERE activity_id = %(activity_id)s
+            ORDER BY lap_index
+            """,
+            {"activity_id": activity_id},
+        )
+        fast_lap_count = 0
+        interval_like_lap_count = 0
+        first_half_paces: list[int] = []
+        second_half_paces: list[int] = []
+        first_half_hrs: list[int] = []
+        second_half_hrs: list[int] = []
+        split_index = max(len(lap_rows) // 2, 1)
+        for lap_position, lap in enumerate(lap_rows):
+            lap_pace_seconds = self._pace_to_seconds(lap.get("avg_pace"))
+            lap_duration = self._int_or_none(lap.get("duration_seconds")) or 0
+            lap_hr = self._int_or_none(lap.get("avg_hr")) or 0
+            lap_payload = cast(dict[str, Any], lap.get("raw_payload") or {})
+            if str(lap_payload.get("intensityType") or "").upper() == "INTERVAL":
+                interval_like_lap_count += 1
+            if (
+                avg_pace_seconds is not None
+                and lap_pace_seconds is not None
+                and lap_duration >= 120
+                and lap_pace_seconds <= avg_pace_seconds * 0.92
+            ):
+                fast_lap_count += 1
+            if lap_pace_seconds is not None:
+                if lap_position < split_index:
+                    first_half_paces.append(lap_pace_seconds)
+                else:
+                    second_half_paces.append(lap_pace_seconds)
+            if lap_hr > 0:
+                if lap_position < split_index:
+                    first_half_hrs.append(lap_hr)
+                else:
+                    second_half_hrs.append(lap_hr)
+        hr_drift = 0
+        pace_change_ratio = 0.0
+        if first_half_hrs and second_half_hrs:
+            hr_drift = round(
+                (sum(second_half_hrs) / len(second_half_hrs))
+                - (sum(first_half_hrs) / len(first_half_hrs))
+            )
+        if first_half_paces and second_half_paces:
+            first_avg_pace = sum(first_half_paces) / len(first_half_paces)
+            second_avg_pace = sum(second_half_paces) / len(second_half_paces)
+            if first_avg_pace > 0:
+                pace_change_ratio = round((first_avg_pace - second_avg_pace) / first_avg_pace, 2)
+        return {
+            "avgPaceSeconds": avg_pace_seconds,
+            "avgHr": avg_hr,
+            "fastLapCount": fast_lap_count,
+            "intervalLikeLapCount": interval_like_lap_count,
+            "hrDrift": hr_drift,
+            "latePaceChangeRatio": pace_change_ratio,
+        }
+
     @staticmethod
     def _target_match_score(
         planned_category: str,
         actual_category: str,
         target_duration: Optional[int],
         actual_duration: Optional[int],
+        activity_profile: Optional[dict[str, Any]] = None,
     ) -> Optional[float]:
         if target_duration is None and actual_duration is None:
             return None
@@ -2001,11 +2123,89 @@ class CoachingHistoryService:
             type_score = 0.2
         elif planned_category == "long_run" and actual_category == "base":
             type_score = 0.6
-        return round((duration_score * 0.7) + (type_score * 0.3), 2)
+        profile_adjustment = CoachingHistoryService._profile_match_adjustment(
+            planned_category=planned_category,
+            actual_category=actual_category,
+            activity_profile=activity_profile or {},
+        )
+        return round(
+            max(0.0, min((duration_score * 0.7) + (type_score * 0.3) + profile_adjustment, 1.0)),
+            2,
+        )
 
     @staticmethod
     def _looks_easy_run(avg_hr: int) -> bool:
         return avg_hr < 150
+
+    @staticmethod
+    def _profile_match_adjustment(
+        planned_category: str,
+        actual_category: str,
+        activity_profile: dict[str, Any],
+    ) -> float:
+        fast_lap_count = int(activity_profile.get("fastLapCount") or 0)
+        interval_like_lap_count = int(activity_profile.get("intervalLikeLapCount") or 0)
+        avg_hr = int(activity_profile.get("avgHr") or 0)
+        if planned_category == "quality" and actual_category == "quality":
+            if fast_lap_count >= 2 or interval_like_lap_count >= 1:
+                return 0.08
+            return -0.06
+        if planned_category == "recovery" and (fast_lap_count >= 2 or avg_hr >= 160):
+            return -0.12
+        if planned_category == "base" and actual_category == "base" and avg_hr < 155:
+            return 0.04
+        return 0.0
+
+    @staticmethod
+    def _execution_quality_label(
+        planned_category: str,
+        actual_category: str,
+        activity_profile: dict[str, Any],
+        target_match_score: Optional[float],
+    ) -> str:
+        fast_lap_count = int(activity_profile.get("fastLapCount") or 0)
+        interval_like_lap_count = int(activity_profile.get("intervalLikeLapCount") or 0)
+        avg_hr = int(activity_profile.get("avgHr") or 0)
+        if target_match_score is not None and target_match_score >= 0.85:
+            return "계획 의도에 매우 가깝게 수행"
+        if planned_category == "quality":
+            if fast_lap_count >= 2 or interval_like_lap_count >= 1:
+                return "의도한 강도 자극이 잘 들어간 품질 세션"
+            return "품질 세션이지만 자극이 다소 약하게 들어감"
+        if planned_category == "long_run":
+            if (
+                float(activity_profile.get("latePaceChangeRatio") or 0.0) >= 0.06
+                and int(activity_profile.get("hrDrift") or 0) >= 6
+            ):
+                return "롱런 후반 강도가 과하게 올라감"
+            return "지구력 자극이 충분한 장거리 세션"
+        if planned_category == "recovery":
+            if avg_hr >= 160 or fast_lap_count >= 2:
+                return "회복 세션치고 강도가 높았음"
+            return "회복 의도에 맞는 가벼운 세션"
+        if actual_category == "long_run":
+            if (
+                float(activity_profile.get("latePaceChangeRatio") or 0.0) >= 0.06
+                and int(activity_profile.get("hrDrift") or 0) >= 6
+            ):
+                return "롱런 후반 강도가 과하게 올라감"
+            return "지구력 자극이 충분한 장거리 세션"
+        if actual_category == "base":
+            return "기본 지구력 유지용 안정 세션"
+        return "세션 기록은 있으나 품질 해석은 제한적"
+
+    @staticmethod
+    def _pace_to_seconds(value: Any) -> Optional[int]:
+        if not isinstance(value, str) or ":" not in value:
+            return None
+        normalized = value.replace("/km", "").strip()
+        parts = normalized.split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            return (int(parts[0]) * 60) + int(parts[1])
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _days_since(as_of: date, candidate: Any) -> Optional[int]:
@@ -2091,6 +2291,14 @@ class CoachingHistoryService:
             summary_parts.append("비계획 세션 누적분을 다음 주 부하 해석에 반영함")
         if int(execution_insights.get("unplannedHardCount") or 0) > 0:
             summary_parts.append("비계획 고강도/장거리 세션이 있어 회복 쪽으로 계획을 기울임")
+        if int(execution_insights.get("qualityWellExecutedCount") or 0) > 0:
+            summary_parts.append("최근 품질 세션의 실제 자극이 좋아 품질 유지 여력을 확인함")
+        if int(execution_insights.get("recoveryTooHardCount") or 0) > 0:
+            summary_parts.append("최근 회복주가 강해져 easy day 통제를 더 강화함")
+        if int(execution_insights.get("longRunTooHardCount") or 0) > 0:
+            summary_parts.append(
+                "최근 롱런 후반 강도 상승이 커 다음 long run을 더 보수적으로 설계함"
+            )
         return " | ".join(summary_parts)
 
     @staticmethod
@@ -2140,6 +2348,18 @@ class CoachingHistoryService:
         score += (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.35
         score += (float(recovery_row.get("sleep_score") or 70.0) - 70.0) * 0.12
         score += (float(recovery_row.get("hrv") or 60.0) - 60.0) * 0.08
+        score += CoachingHistoryService._garmin_status_readiness_adjustment(
+            recovery_row.get("training_status")
+        )
+        score += CoachingHistoryService._garmin_balance_readiness_adjustment(
+            recovery_row.get("load_balance_phrase")
+        )
+        score += CoachingHistoryService._garmin_load_alignment_adjustment(
+            garmin_acute_load=recovery_row.get("acute_load"),
+            garmin_chronic_load=recovery_row.get("chronic_load"),
+            garmin_acwr=recovery_row.get("acwr"),
+            ewma_ratio=ewma_load_ratio,
+        )
         score -= float(feedback_row.get("fatigue_score") or 5) * 2.0
         score -= float(feedback_row.get("soreness_score") or 4) * 1.5
         score += float(feedback_row.get("motivation_score") or 5) * 1.5
@@ -2187,6 +2407,18 @@ class CoachingHistoryService:
         score += min(8.0, acute_ewma_load * 0.35)
         score += max(0.0, ewma_load_ratio - 1.05) * 15.0
         score += max(0.0, chronic_ewma_load - acute_ewma_load) * -0.2
+        score += CoachingHistoryService._garmin_status_fatigue_adjustment(
+            recovery_row.get("training_status")
+        )
+        score += CoachingHistoryService._garmin_balance_fatigue_adjustment(
+            recovery_row.get("load_balance_phrase")
+        )
+        score += CoachingHistoryService._garmin_load_risk_adjustment(
+            garmin_acute_load=recovery_row.get("acute_load"),
+            garmin_chronic_load=recovery_row.get("chronic_load"),
+            garmin_acwr=recovery_row.get("acwr"),
+            ewma_ratio=ewma_load_ratio,
+        )
         score -= (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.18
         score -= (float(recovery_row.get("sleep_score") or 70.0) - 70.0) * 0.08
         score += float(feedback_row.get("fatigue_score") or 5) * 3.0
@@ -2222,12 +2454,139 @@ class CoachingHistoryService:
         score += min(6.0, acute_ewma_load * 0.25)
         score += max(0.0, ewma_load_ratio - 1.1) * 18.0
         score -= min(3.0, chronic_ewma_load * 0.08)
+        score += CoachingHistoryService._garmin_status_injury_adjustment(
+            recovery_row.get("training_status")
+        )
+        score += CoachingHistoryService._garmin_balance_injury_adjustment(
+            recovery_row.get("load_balance_phrase")
+        )
+        score += CoachingHistoryService._garmin_load_risk_adjustment(
+            garmin_acute_load=recovery_row.get("acute_load"),
+            garmin_chronic_load=recovery_row.get("chronic_load"),
+            garmin_acwr=recovery_row.get("acwr"),
+            ewma_ratio=ewma_load_ratio,
+        )
         score -= (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.1
         score += float(feedback_row.get("soreness_score") or 4) * 3.0
         score += float(feedback_row.get("fatigue_score") or 5) * 1.2
         score += 12.0 if feedback_row.get("pain_notes") else 0.0
         score += float(injury_row.get("severity") or 0) * 5.0
         return float(round(max(0.0, min(score, 100.0)), 2))
+
+    @staticmethod
+    def _garmin_status_readiness_adjustment(status: Any) -> float:
+        normalized = str(status or "").upper()
+        adjustments = {
+            "PRODUCTIVE": 4.0,
+            "MAINTAINING": 2.0,
+            "MAINTAINING_2": 2.0,
+            "RECOVERY": -2.0,
+            "RECOVERY_1": -2.0,
+            "PEAKING": 1.5,
+            "OVERREACHING": -5.0,
+            "OVERREACHING_1": -5.0,
+            "DETRAINING": -3.0,
+            "UNPRODUCTIVE": -4.0,
+            "UNPRODUCTIVE_1": -4.0,
+            "NO_STATUS": 0.0,
+            "N/A": 0.0,
+        }
+        return adjustments.get(normalized, 0.0)
+
+    @staticmethod
+    def _garmin_status_fatigue_adjustment(status: Any) -> float:
+        normalized = str(status or "").upper()
+        adjustments = {
+            "PRODUCTIVE": -2.0,
+            "MAINTAINING": -1.0,
+            "MAINTAINING_2": -1.0,
+            "RECOVERY": 2.0,
+            "RECOVERY_1": 2.0,
+            "OVERREACHING": 6.0,
+            "OVERREACHING_1": 6.0,
+            "UNPRODUCTIVE": 4.0,
+            "UNPRODUCTIVE_1": 4.0,
+            "DETRAINING": 1.5,
+        }
+        return adjustments.get(normalized, 0.0)
+
+    @staticmethod
+    def _garmin_status_injury_adjustment(status: Any) -> float:
+        normalized = str(status or "").upper()
+        adjustments = {
+            "PRODUCTIVE": -1.0,
+            "MAINTAINING": 0.0,
+            "MAINTAINING_2": 0.0,
+            "RECOVERY": 1.0,
+            "RECOVERY_1": 1.0,
+            "OVERREACHING": 4.0,
+            "OVERREACHING_1": 4.0,
+            "UNPRODUCTIVE": 3.0,
+            "UNPRODUCTIVE_1": 3.0,
+        }
+        return adjustments.get(normalized, 0.0)
+
+    @staticmethod
+    def _garmin_balance_readiness_adjustment(balance_phrase: Any) -> float:
+        normalized = str(balance_phrase or "").upper()
+        shortage_keywords = ("LOW", "HIGH_AEROBIC_SHORTAGE", "ANAEROBIC_SHORTAGE")
+        if any(keyword in normalized for keyword in shortage_keywords):
+            return -1.5
+        if "BALANCED" in normalized:
+            return 1.5
+        if any(keyword in normalized for keyword in ("OPTIMAL", "WELL_BALANCED")):
+            return 2.0
+        return 0.0
+
+    @staticmethod
+    def _garmin_balance_fatigue_adjustment(balance_phrase: Any) -> float:
+        normalized = str(balance_phrase or "").upper()
+        if any(keyword in normalized for keyword in ("OVERLOAD", "HIGH")):
+            return 2.0
+        return 0.0
+
+    @staticmethod
+    def _garmin_balance_injury_adjustment(balance_phrase: Any) -> float:
+        normalized = str(balance_phrase or "").upper()
+        if any(keyword in normalized for keyword in ("OVERLOAD", "HIGH")):
+            return 1.5
+        return 0.0
+
+    @staticmethod
+    def _garmin_load_alignment_adjustment(
+        garmin_acute_load: Any,
+        garmin_chronic_load: Any,
+        garmin_acwr: Any,
+        ewma_ratio: float,
+    ) -> float:
+        acute = CoachingHistoryService._float_or_none(garmin_acute_load)
+        chronic = CoachingHistoryService._float_or_none(garmin_chronic_load)
+        acwr = CoachingHistoryService._float_or_none(garmin_acwr)
+        score = 0.0
+        if acute is not None and chronic is not None and acute > 0 and chronic > 0:
+            score += min(3.0, chronic / max(acute, 1.0) * 0.8)
+        if acwr is not None:
+            score -= max(0.0, acwr - 1.15) * 10.0
+            score += max(0.0, 1.05 - abs(acwr - ewma_ratio)) * 2.5
+        return round(score, 2)
+
+    @staticmethod
+    def _garmin_load_risk_adjustment(
+        garmin_acute_load: Any,
+        garmin_chronic_load: Any,
+        garmin_acwr: Any,
+        ewma_ratio: float,
+    ) -> float:
+        acute = CoachingHistoryService._float_or_none(garmin_acute_load)
+        chronic = CoachingHistoryService._float_or_none(garmin_chronic_load)
+        acwr = CoachingHistoryService._float_or_none(garmin_acwr)
+        score = 0.0
+        if acute is not None and chronic is not None and acute > chronic:
+            score += min(4.0, (acute - chronic) * 0.05)
+        if acwr is not None:
+            score += max(0.0, acwr - 1.1) * 8.0
+            score += max(0.0, abs(acwr - ewma_ratio) - 0.2) * 6.0
+        return round(score, 2)
 
     @staticmethod
     def _training_monotony(load_variability_row: dict[str, Any]) -> float:

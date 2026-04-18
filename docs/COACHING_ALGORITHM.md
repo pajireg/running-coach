@@ -1,39 +1,62 @@
 # Coaching Algorithm
 
+English | [한국어](COACHING_ALGORITHM.ko.md)
+
 ## Purpose
-`Running Coach`는 단순히 LLM에게 7일 계획을 맡기는 구조가 아닙니다. 현재 구현은 다음 4단계를 결합한 하이브리드 코치 엔진입니다.
 
-1. Garmin과 사용자 입력에서 데이터를 수집합니다.
-2. DB에 장기 히스토리를 쌓고 상태를 추정합니다.
-3. 규칙 엔진이 안전한 주간 skeleton을 먼저 만듭니다.
-4. LLM은 그 skeleton 안에서 세션 설명과 구체 내용을 보정합니다.
+Running Coach is not designed as an LLM-only workout generator. The current coaching engine is a hybrid system that combines persistent athlete history, rule-based safety logic, and bounded LLM refinement.
 
-핵심 원칙은 `안전 제약과 구조는 코드가 담당하고, LLM은 해석과 설명을 담당한다`입니다.
+The design principle is:
+
+`Code owns safety and structure. The LLM owns bounded interpretation and explanation.`
+
+This document explains what the engine looks at, how it turns raw data into planning signals, and why the current architecture was chosen.
+
+## Coaching Layers
+
+The system works in four layers:
+
+1. **Data collection**
+   Garmin and user inputs provide health, performance, activity, and constraint data.
+2. **State storage and normalization**
+   Postgres stores normalized history, not only raw payloads.
+3. **Rule-based planning**
+   A weekly skeleton is generated from recovery, load, execution history, and constraints.
+4. **LLM refinement**
+   The LLM fills in workout descriptions and workout-step detail inside fixed safety boundaries.
 
 ## Data Inputs
-현재 코치 엔진은 아래 데이터를 사용합니다.
 
 ### Garmin daily metrics
+
 - `body_battery`
 - `hrv`
 - `sleep_score`
 - `resting_hr`
 - `training_status`
+- `load_balance_phrase`
+- `acute_load`
+- `chronic_load`
+- `acwr`
 
 ### Garmin performance metrics
-- PR
+
+- PRs
 - VO2max
-- lactate threshold pace / HR
+- lactate threshold pace and HR
 - max HR
 
 ### Garmin activity history
-- 러닝 거리, 시간, 심박, 고도
-- lap / split
-- training effect label
-- 최근 7일/30일 러닝량
-- 최근 7일 비러닝 운동 시간
 
-### User constraints
+- distance, duration, heart rate, elevation
+- activity type
+- laps and splits
+- training-effect labels when available
+- recent 7-day and 30-day running volume
+- recent non-running duration
+
+### User-provided constraints
+
 - `availability_rules`
 - `race_goals`
 - `training_blocks`
@@ -41,39 +64,45 @@
 - `injury_status`
 
 ### Execution history
+
 - `planned_workouts`
 - `activities`
 - `workout_executions`
 
-## System Flow
-실행 흐름은 대략 아래와 같습니다.
+## End-to-End Flow
 
-1. Garmin에서 건강, 퍼포먼스, 활동, 캘린더 데이터를 수집합니다.
-2. `activities`, `daily_metrics`, `planned_workouts` 등에 정규화해서 저장합니다.
-3. 실제 활동과 과거 계획을 연결해 `workout_executions`를 계산합니다.
-4. 최근 6주, 12개월, 평생 배경과 최근 42일 load를 요약합니다.
-5. `readiness`, `fatigue`, `injury_risk`를 계산합니다.
-6. 규칙 엔진이 7일 skeleton을 생성합니다.
-7. LLM이 skeleton을 유지한 채 description과 steps를 만듭니다.
-8. 결과를 Garmin, Google Calendar, Postgres에 동기화합니다.
+1. Collect Garmin health, performance, activity, and scheduled-workout context
+2. Normalize and persist data into Postgres
+3. Rebuild planned-vs-actual execution links
+4. Summarize recent load, long-term background, and current coaching state
+5. Estimate `readinessScore`, `fatigueScore`, and `injuryRiskScore`
+6. Build a rule-based 7-day weekly skeleton
+7. Ask the LLM to refine session descriptions and workout steps without breaking the skeleton
+8. Save plan rows and explainable decision rationale
+9. Sync Garmin workouts and Google Calendar
 
-관련 구현 위치:
+Main implementation:
+
 - `src/running_coach/storage/history_service.py`
 - `src/running_coach/clients/gemini/planner.py`
 - `src/running_coach/core/orchestrator.py`
 
 ## Load Model
-이 시스템은 단순히 최근 7일 거리만 보지 않습니다. 러닝과 크로스트레이닝을 함께 반영한 `load_units`를 만듭니다.
 
-현재 일일 load 정의:
-- running load: 그날 러닝 거리 km 합계
-- cross-training load: 비러닝 운동 시간(초) / 600
-- total daily load: `running_km + non_running_seconds / 600`
+The engine does not look only at recent running distance. It builds a mixed load model that includes both running and non-running work.
 
-즉 자전거, 등산, 근력운동도 러닝 계획에 영향을 줍니다. 다만 러닝과 비러닝을 같은 척도로 완벽히 환산하는 것이 아니라, `추가 부하 신호`로 사용하는 보수적 모델입니다.
+### Daily load definition
 
-### Derived signals
-최근 7일, 28일, 42일 데이터를 바탕으로 다음 값을 계산합니다.
+- running load: total running distance in km for that day
+- cross-training load: non-running duration in seconds divided by `600`
+- total daily load:
+  - `running_km + non_running_seconds / 600`
+
+This is intentionally conservative. Cycling, hiking, and strength work are not converted into a fake running equivalent; they are treated as additional load signals.
+
+### Derived load signals
+
+The system computes:
 
 - `last7dDistanceKm`
 - `last28dDistanceKm`
@@ -82,64 +111,94 @@
 - `avgDailyLoad`
 - `peakDailyLoad`
 - `activeDays`
-- `trainingMonotony = avg_daily_load / sd_daily_load`
-- `trainingStrain = total_load * training_monotony`
-- `acuteEwmaLoad` (7일 EWMA)
-- `chronicEwmaLoad` (28일 EWMA)
-- `ewmaLoadRatio = acute / chronic`
+- `trainingMonotony`
+- `trainingStrain`
+- `acuteEwmaLoad`
+- `chronicEwmaLoad`
+- `ewmaLoadRatio`
 
-여기서 ACWR류 지표는 `단독 의사결정 기준`이 아니라, monotony / strain / recovery와 함께 보는 보조 신호입니다.
+### Garmin-native hybrid load
+
+The database model is not used alone. Garmin-native signals are used as a correction layer:
+
+- `trainingStatus`
+- `loadBalancePhrase`
+- `garminAcuteLoad`
+- `garminChronicLoad`
+- `garminAcwr`
+
+Interpretation principle:
+
+- the DB-based model is the primary normalized history model
+- Garmin-native load is a secondary correction signal
+- Garmin metrics do not override explicit injury, pain, or strong subjective fatigue inputs
+
+This hybrid design reduces dependence on any single model.
 
 ## Recovery Model
-회복 상태는 Garmin과 사용자 피드백을 함께 봅니다.
 
-사용 신호:
+Recovery is estimated from both objective device data and subjective athlete feedback.
+
+### Recovery inputs
+
 - `body_battery`
 - `sleep_score`
 - `hrv`
-- `subjective fatigue`
-- `soreness`
-- `stress`
-- `sleep_quality`
-- `motivation`
+- `training_status`
+- `load_balance_phrase`
+- subjective fatigue
+- soreness
+- stress
+- sleep quality
+- motivation
+- active injury severity
 
-원칙:
-- 객관 지표와 주관 지표를 함께 봅니다.
-- Garmin 수치가 좋아도 사용자가 통증과 피로를 강하게 보고하면 보수적으로 해석합니다.
-- 반대로 최근 부하가 높아도 회복 신호가 안정적이면 readiness를 지나치게 깎지 않습니다.
+### Recovery principles
 
-## Adherence and Planned-vs-Actual
-전문 코치화에서 중요한 부분은 `무엇을 했는가`뿐 아니라 `계획과 어떻게 달랐는가`입니다.
+- objective and subjective signals are combined
+- good device recovery does not cancel strong soreness or pain
+- high recent load is not always bad if recovery signals remain stable
+- injury severity is treated as a hard conservatism signal
 
-현재 시스템은 활동마다 가장 가까운 계획 세션을 찾습니다.
+## Planned-vs-Actual Interpretation
 
-매칭 기준:
-- 날짜 근접성: `-2일 ~ +3일`
-- planned vs actual category
-- duration 유사성
-- 이미 매칭된 계획인지 여부
+Professional coaching requires more than “did the athlete run?” The engine tries to understand how actual execution differed from the intended session.
 
-세션 카테고리:
+### Matching logic
+
+Each completed activity is matched to the most plausible planned workout using:
+
+- date proximity: `-2 days to +3 days`
+- planned-vs-actual category similarity
+- duration similarity
+- whether the planned candidate was already matched
+
+### Session categories
+
 - `recovery`
 - `base`
 - `long_run`
 - `quality`
 - `unplanned`
 
-매칭 후 아래 값을 저장합니다.
+### Stored execution fields
+
 - `completion_ratio`
 - `target_match_score`
 - `executionStatus`
 - `deviationReason`
 - `coachInterpretation`
+- `executionQuality`
 
 ### executionStatus
+
 - `completed_as_planned`
 - `completed_partial`
 - `completed_substituted`
 - `completed_unplanned`
 
 ### deviationReason
+
 - `as_planned`
 - `schedule_shift`
 - `reduced_stimulus`
@@ -147,173 +206,215 @@
 - `execution_variation`
 - `unplanned_session`
 
-예:
-- Recovery Run 계획인데 실제로 quality 성격으로 수행하면 `excessive_stimulus`
-- Quality 계획인데 base 성격으로 수행하면 `reduced_stimulus`
-- 같은 성격이지만 하루 밀리면 `schedule_shift`
+Examples:
 
-이 정보는 단순 로그가 아니라 다음 주 계획에도 반영됩니다.
+- a recovery run executed like a hard session becomes `excessive_stimulus`
+- a quality session executed like a base run becomes `reduced_stimulus`
+- a similar workout performed one or two days late becomes `schedule_shift`
+- an extra session with no reasonable planned match becomes `unplanned_session`
+
+These interpretations do not stay in logs only. They feed back into the next weekly plan.
+
+## Lap-Based Execution Quality
+
+The engine also looks inside activities using lap and split data.
+
+### Current activity profile fields
+
+- `avgPaceSeconds`
+- `avgHr`
+- `fastLapCount`
+- `intervalLikeLapCount`
+- `hrDrift`
+- `latePaceChangeRatio`
+
+### What these signals mean
+
+- repeated fast laps or interval-like laps suggest that the planned hard stimulus actually happened
+- high average HR or repeated fast laps during a recovery run suggest that the easy session was too hard
+- a long run whose second half becomes meaningfully faster while HR drift rises may be too aggressive late in the session
+
+### executionQuality examples
+
+- `의도한 강도 자극이 잘 들어간 품질 세션`
+- `품질 세션이지만 자극이 다소 약하게 들어감`
+- `회복 세션치고 강도가 높았음`
+- `지구력 자극이 충분한 장거리 세션`
+- `롱런 후반 강도가 과하게 올라감`
+
+### Why this matters
+
+The engine is no longer asking only:
+
+- “Was there a quality session?”
+
+It also asks:
+
+- “Was the intended quality stimulus actually achieved?”
+- “Was the recovery session actually easy?”
+- “Did the long run get out of control late?”
+
+These quality interpretations are aggregated and fed into next-week planning.
 
 ## State Estimation
-현재 엔진은 3개 점수를 계산합니다.
+
+The engine computes three top-level coaching scores:
+
+- `readinessScore`
+- `fatigueScore`
+- `injuryRiskScore`
+
+These are coaching signals, not medical diagnoses.
 
 ### readinessScore
-높을수록 훈련을 소화할 준비가 된 상태입니다.
 
-올리는 신호:
-- 충분한 chronic load
-- 안정적인 EWMA ratio
-- 좋은 adherence
-- 높은 body battery
-- 좋은 sleep / HRV
-- 높은 motivation
+Higher means the athlete is more ready to absorb training.
 
-내리는 신호:
-- 높은 최근 7일 거리
-- 과한 비러닝 부하
-- 높은 monotony / strain
-- 높은 unplanned / skipped workload
-- 높은 subjective fatigue / soreness
+Positive signals:
+
+- stable chronic load
+- reasonable EWMA ratio
+- good adherence
+- high body battery
+- good sleep and HRV
+- Garmin `PRODUCTIVE` or stable `MAINTAINING` signals
+- strong motivation
+- recent quality sessions executed well
+
+Negative signals:
+
+- high recent running and non-running load
+- high monotony or strain
+- many skipped or unplanned hard sessions
+- strong subjective fatigue or soreness
+- Garmin `OVERREACHING`, `UNPRODUCTIVE`, or high Garmin ACWR
+- recovery sessions repeatedly executed too hard
 
 ### fatigueScore
-높을수록 최근 피로가 큰 상태입니다.
 
-올리는 신호:
-- 높은 최근 7일 load
-- 높은 cross-training minutes
-- 급격한 overload ratio
-- 높은 monotony / strain
-- 높은 acute EWMA
-- fatigue / stress / soreness 주관 점수
+Higher means recent fatigue is likely elevated.
 
-내리는 신호:
-- 높은 body battery
-- 좋은 sleep score
+Positive fatigue signals:
+
+- high recent load
+- high cross-training duration
+- overload-ratio spikes
+- high monotony or strain
+- elevated acute EWMA
+- Garmin acute-load overload patterns
+- fatigue, soreness, or stress reports
+
+Negative fatigue signals:
+
+- high body battery
+- good sleep score
 
 ### injuryRiskScore
-높을수록 부상 리스크가 높은 상태입니다.
 
-올리는 신호:
-- overload ratio 상승
-- monotony / strain 상승
-- acute EWMA 상승
-- soreness / fatigue / pain notes
+Higher means the engine should be more conservative.
+
+Positive risk signals:
+
+- overload-ratio spikes
+- high monotony or strain
+- high acute EWMA
+- Garmin acute/chronic imbalance
+- soreness, fatigue, pain notes
 - active injury severity
+- repeated hard long-run endings or excessive-stimulus patterns
 
-내리는 신호:
-- 충분한 chronic load
-- 안정적인 recovery 지표
+Negative risk signals:
 
-이 점수들은 의학적 진단이 아니라 `planning signal`입니다. 즉 의료 판단이 아니라 훈련 계획의 보수성 수준을 조절하는 데 사용됩니다.
+- stable chronic load
+- stable recovery signals
 
-## Rule-Based Weekly Skeleton
-LLM 이전에 규칙 엔진이 먼저 7일 구조를 만듭니다.
+## Weekly Skeleton Rules
 
-결정하는 것:
-- run day 수
-- quality 세션 수
-- long run 배치
-- recovery / rest 위치
-- target minutes
-- availability와 preferred day 반영
+Before the LLM is called, a rule engine decides:
 
-현재 규칙 예시:
-- readiness가 낮거나 fatigue / injury가 높으면 quality 제거
-- active injury severity가 높으면 quality 제거, volume 감산
-- 최근 비계획 고강도나 장거리 세션이 있으면 recovery 쪽으로 기울임
-- long run은 토/일과 사용자 선호 요일을 우선 반영
-- quality는 mid-week와 사용자 선호 요일을 우선 반영
-- 불가 요일은 rest로 강제
-- high non-running load가 있으면 run day와 quality를 줄임
+- number of run days
+- number of quality sessions
+- long-run placement
+- recovery and rest placement
+- session-duration targets
+- availability and preferred-day constraints
 
-즉 LLM은 `요일 구조를 창조`하지 않습니다. 안전성과 periodization의 바깥 테두리는 코드가 먼저 고정합니다.
+### Examples of current rules
+
+- low readiness or high fatigue removes or reduces quality
+- active injury reduces volume and removes quality
+- repeated unplanned hard work pushes the next week toward recovery
+- repeated reduced-stimulus sessions lower future intensity expectations
+- well-executed quality sessions prevent the engine from becoming too conservative
+- recovery sessions that were too hard make the next week stricter on easy-day control
+- long runs finished too hard shorten the next long run and reduce intensity pressure
+- long runs prefer weekend and user-preferred long-run days
+- quality prefers mid-week and user-preferred quality days
+- unavailable weekdays are forced to rest
+- high cross-training load reduces run days and quality count
+
+The LLM does not own the weekly structure. It operates inside this boundary.
 
 ## LLM Role
-LLM은 아래 역할만 합니다.
 
-- skeleton을 유지한 채 세션 description 작성
-- 세션 step 구성
-- race context를 반영한 wording 보정
-- 한국어 코치 설명 생성
+The LLM is used for:
 
-LLM이 할 수 없는 것:
-- skeleton 날짜 변경
-- session type 변경
-- workout name 임의 변경
-- 과도한 볼륨 증가
+- workout descriptions
+- workout-step detail
+- race-context explanation
+- coaching-language refinement
 
-출력 후에도 정규화 단계를 다시 거칩니다.
-- invalid pace 제거
-- zero-duration step 제거
-- 잘못된 date / workout name 교정
-- skeleton과 크게 어긋난 step은 fallback step으로 대체
+The LLM is not allowed to:
+
+- move dates
+- change session type
+- create unsafe volume spikes
+- break hard constraints from rules, injuries, or availability
+
+After generation, output is normalized again:
+
+- invalid pace formats are removed
+- zero-duration steps are fixed
+- wrong dates or workout names are corrected
+- invalid steps can be replaced by safe fallbacks
 
 ## Why This Design
-이 구조를 택한 이유는 세 가지입니다.
 
-1. LLM 단독 계획은 일관성과 안전성이 흔들릴 수 있습니다.
-2. 단순 규칙 엔진만으로는 개인의 최근 반응과 맥락 해석이 부족합니다.
-3. 실제 코치는 `데이터 해석 + 안전 제약 + 설명`을 함께 합니다.
+This architecture exists because none of the single-layer alternatives are good enough.
 
-따라서 현재 시스템은:
-- 규칙 엔진으로 안전성과 일관성을 확보하고
-- DB 히스토리로 장기 맥락을 유지하고
-- LLM으로 설명력과 유연성을 보강합니다.
+### Why not LLM-only planning?
 
-## Scientific References
-이 시스템은 특정 논문 하나를 그대로 구현한 것이 아니라, 아래 문헌의 원칙을 실무형으로 조합한 것입니다.
+- it is less consistent
+- it is harder to trust for safety-critical structure
+- it can ignore long-term constraints or produce unstable plans
 
-### Training load, monotony, EWMA, ACWR caution
-- Rico-González et al. *Acute:chronic workload ratio and training monotony variations over the season in professional soccer: A systematic review*  
-  https://journals.sagepub.com/doi/10.1177/17543371231194283
-- Afonso et al. *A Novel Approach to Training Monotony and Acute-Chronic Workload Index*  
-  https://pubmed.ncbi.nlm.nih.gov/34136806/
+### Why not rules only?
 
-해석:
-- ACWR는 단독 injury predictor로 과신하지 않습니다.
-- monotony, strain, EWMA, recovery를 함께 봅니다.
+- rules alone struggle to interpret messy real-world athlete context
+- planned-vs-actual behavior and recovery signals need interpretation, not only threshold checks
 
-### Planned vs actual mismatch
-- Gomes et al. *Internal Training Load Perceived by Athletes and Planned by Coaches: A Systematic Review and Meta-Analysis*  
-  https://pubmed.ncbi.nlm.nih.gov/35244801/
-- Frontiers exploratory study on planned vs actual external load  
-  https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2026.1768705/full
+### Why not Garmin-only?
 
-해석:
-- 코치가 의도한 자극과 실제 자극은 자주 어긋납니다.
-- 따라서 완료 여부만이 아니라 `어떤 방향으로 어긋났는지`를 저장해야 합니다.
+- Garmin provides valuable signals but is not the full state model
+- subjective feedback, injuries, goals, and historical coaching interpretation still matter
 
-### Sleep and recovery
-- Hamlin et al. *The Effect of Sleep Quality and Quantity on Athlete's Health and Perceived Training Quality*  
-  https://pubmed.ncbi.nlm.nih.gov/34568820/
-- Boardman et al. *The impact of sleep loss on performance monitoring and error-monitoring*  
-  https://pubmed.ncbi.nlm.nih.gov/33894599/
+The current hybrid model uses:
 
-해석:
-- 수면과 회복 상태는 훈련 수행과 건강에 직접적 영향을 줍니다.
-- 따라서 sleep / HRV / body battery는 readiness에 포함됩니다.
+- **rules** for safety and consistency
+- **the database** for memory and longitudinal context
+- **Garmin** for device-derived training and recovery signals
+- **the LLM** for bounded explanation and workout-detail generation
 
-### Endurance periodization
-- Mølmen et al. *Block periodization of endurance training - a systematic review and meta-analysis*  
-  https://pubmed.ncbi.nlm.nih.gov/31802956/
-- Wilmore et al. *Cross-training and periodization in running*  
-  https://pubmed.ncbi.nlm.nih.gov/24572330/
+## External References
 
-해석:
-- 레이스 목표, 블록, 크로스트레이닝은 주간 구조 설계에 반영해야 합니다.
-- 특히 running-specific plan이라도 cross-training load를 무시하면 안 됩니다.
+This design is informed by coaching practice, athlete-monitoring literature, and workload-model critiques rather than any single paper.
 
-## Current Limits
-현재 알고리즘은 이미 실동작하지만, 아직 개선 여지가 있습니다.
+Representative references include:
 
-- Garmin native acute/chronic load를 자체 load 모델과 더 정교하게 통합 가능
-- 세션 강도 판정은 현재 category 기반이라 향후 pace/HR drift 기반으로 더 정밀화 가능
-- 개인별 반응 모델은 아직 rule-heavy이며, 장기 히스토리가 더 쌓이면 personalization을 강화할 수 있음
-- 의료적 부상 판단 엔진은 아님
+- acute:chronic workload critique and limits of single-ratio thinking
+- EWMA-based workload proposals
+- athlete-monitoring reviews
+- sleep and recovery literature
+- planned-vs-actual training-load mismatch studies
 
-## Summary
-현재 `Running Coach`의 코치 알고리즘은 다음 한 문장으로 요약할 수 있습니다.
-
-`Garmin + 사용자 입력 + DB 히스토리로 상태를 추정하고, 규칙 엔진이 안전한 주간 구조를 만든 뒤, LLM이 그 구조 안에서 세션 설명과 디테일을 보정하는 하이브리드 코치 시스템`
-
-즉 이 프로젝트의 목표는 `그럴듯한 플랜 생성기`가 아니라, `설명 가능하고 누적 학습되는 실행형 러닝 코치`입니다.
+The goal is not to implement one academic formula literally. The goal is to combine robust practical signals into a conservative, explainable coaching engine.

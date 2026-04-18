@@ -31,6 +31,7 @@ class _CalendarHistoryService(CoachingHistoryService):
                     "actual_category": "base",
                     "planned_workout_name": "Running Coach: Recovery Run",
                     "target_match_score": 0.72,
+                    "execution_quality": "회복 세션치고 강도가 높았음",
                 }
             ]
         return []
@@ -47,6 +48,7 @@ def test_list_recent_completed_activities_returns_calendar_payload():
     assert activities[0]["distanceKm"] == 5.11
     assert activities[0]["executionStatus"] == "completed_substituted"
     assert "상태: 대체 수행" in activities[0]["notes"]
+    assert "수행 품질: 회복 세션치고 강도가 높았음" in activities[0]["notes"]
 
 
 class _UnplannedCalendarHistoryService(CoachingHistoryService):
@@ -73,6 +75,7 @@ class _UnplannedCalendarHistoryService(CoachingHistoryService):
                     "actual_category": "quality",
                     "planned_workout_name": None,
                     "target_match_score": None,
+                    "execution_quality": "의도한 강도 자극이 잘 들어간 품질 세션",
                     "deviation_reason": "unplanned_session",
                     "coach_interpretation": (
                         "계획에 없던 세션으로, 다음 주 부하 해석 시 "
@@ -91,3 +94,4 @@ def test_list_recent_completed_activities_describes_unplanned_hard_session():
     assert len(activities) == 1
     assert "비계획 고강도 러닝" in activities[0]["notes"]
     assert "계획 밖 고강도 세션" in activities[0]["notes"]
+    assert "수행 품질: 의도한 강도 자극이 잘 들어간 품질 세션" in activities[0]["notes"]

@@ -375,6 +375,105 @@ def test_build_weekly_skeleton_reacts_more_strongly_to_unplanned_hard_sessions()
     assert any("비계획 고강도" in day["descriptionGuide"] for day in skeleton)
 
 
+def test_build_weekly_skeleton_reduces_quality_when_recovery_runs_are_too_hard():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=28.0,
+            recent_30d_run_distance_km=88.0,
+            recent_30d_run_count=10,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 63,
+                "fatigueScore": 46,
+                "injuryRiskScore": 22,
+                "executionInsights": {
+                    "recoveryTooHardCount": 1,
+                    "qualityWellExecutedCount": 0,
+                },
+            }
+        },
+    )
+
+    assert sum(1 for day in skeleton if day["sessionType"] == "quality") == 0
+    assert any("easy/recovery 강도 통제" in day["descriptionGuide"] for day in skeleton)
+
+
+def test_build_weekly_skeleton_keeps_structure_when_quality_is_well_executed():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=30.0,
+            recent_30d_run_distance_km=96.0,
+            recent_30d_run_count=11,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 68,
+                "fatigueScore": 44,
+                "injuryRiskScore": 24,
+                "executionInsights": {
+                    "qualityWellExecutedCount": 2,
+                    "recoveryTooHardCount": 0,
+                },
+            }
+        },
+    )
+
+    assert sum(1 for day in skeleton if day["sessionType"] == "quality") == 1
+    assert any("품질 세션의 실제 자극이 안정적" in day["descriptionGuide"] for day in skeleton)
+
+
+def test_build_weekly_skeleton_shortens_long_run_when_recent_long_run_was_too_hard():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=32.0,
+            recent_30d_run_distance_km=104.0,
+            recent_30d_run_count=12,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 61,
+                "fatigueScore": 47,
+                "injuryRiskScore": 24,
+                "executionInsights": {
+                    "longRunTooHardCount": 1,
+                },
+            }
+        },
+    )
+
+    long_run = next(day for day in skeleton if day["sessionType"] == "long_run")
+    assert long_run["targetMinutes"] < 78
+    assert "롱런 후반 강도" in long_run["descriptionGuide"]
+
+
 def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description():
     planner = TrainingPlanner(gemini_client=None)
     metrics = AdvancedMetrics(
