@@ -190,6 +190,32 @@ Each completed activity is matched to the most plausible planned workout using:
 - `coachInterpretation`
 - `executionQuality`
 
+### Execution match score
+
+`target_match_score` is a planned-vs-actual match score. It is not a fitness score, race predictor, or judgment of whether the workout was impressive.
+
+It answers:
+
+- “Did the athlete execute the planned session intent?”
+
+For example, a score of `0.98` means the completed workout was very close to the planned workout. In a long-run case, that usually means:
+
+- the planned category was `long_run`
+- the actual category was also `long_run`
+- actual duration was close to planned duration
+- the date was correct or close enough
+- lap, pace, and HR patterns did not strongly contradict the intended session
+
+Low scores do not always mean the athlete did something wrong. They can mean:
+
+- the session was intentionally moved
+- a workout was shortened because of fatigue
+- an easy run became too hard
+- a quality session became a base run
+- the athlete did an unplanned session
+
+The score is used as an input to coaching interpretation, not as a standalone grade.
+
 ### executionStatus
 
 - `completed_as_planned`
@@ -214,6 +240,93 @@ Examples:
 - an extra session with no reasonable planned match becomes `unplanned_session`
 
 These interpretations do not stay in logs only. They feed back into the next weekly plan.
+
+## Progression Model
+
+The coach does not treat current workout prescriptions as fixed. Long-run distance, interval volume, quality-session density, and easy pace can all change as the athlete adapts.
+
+The key principle is:
+
+`Progression happens only when the athlete appears to absorb the current load.`
+
+### Long-run progression
+
+Long runs can grow over time, but they are not increased mechanically.
+
+Inputs:
+
+- recent 4-8 week running volume
+- recent 7-day and 28-day load
+- current training block
+- target race distance
+- availability on long-run days
+- recent long-run execution quality
+- recovery after long runs
+- fatigue and injury-risk signals
+
+Examples:
+
+- an athlete around 20-30 km/week may receive a long run around 10-13 km
+- an athlete adapted to 40 km/week may receive 14-18 km
+- half-marathon or marathon preparation may justify 20 km+ long runs
+
+For a 10K goal, longer is not always better. A long run supports aerobic durability, but too much long-run fatigue can reduce the quality of speed or threshold work.
+
+### Quality-session progression
+
+Intervals and threshold sessions can progress through several dimensions:
+
+- more repetitions
+- longer repetitions
+- shorter recovery
+- slightly faster target pace
+- longer total quality duration
+- higher weekly quality frequency
+
+Examples:
+
+- `6 x 1 min`
+- `4 x 2 min`
+- `5 x 400 m`
+- `6 x 800 m`
+- `5 x 1 km`
+- `3 x 2 km threshold`
+
+The system should increase quality only when recent quality work was executed well and recovery remained stable. If quality work repeatedly becomes reduced stimulus, excessive stimulus, or causes poor recovery, the next plan should consolidate rather than progress.
+
+### Base-run pace progression
+
+Base-run pace should not be forced faster just because the athlete wants to improve.
+
+The intended logic is:
+
+- easy effort stays easy
+- pace improves naturally as aerobic fitness improves
+- the coach follows better pace at the same HR/RPE, rather than forcing pace first
+
+Signals that support faster base prescriptions:
+
+- similar or lower HR at faster pace
+- lower HR drift
+- stable next-day recovery
+- low subjective RPE
+- no injury or soreness increase
+
+This means a base run might gradually move from `6:30/km` to `6:00/km` or faster, but only if the same effort remains genuinely easy.
+
+### Consolidation before progression
+
+The engine should prefer consolidation over progression when it sees:
+
+- high fatigue
+- poor sleep or low body battery
+- elevated injury risk
+- recovery runs executed too hard
+- long runs finished too aggressively
+- repeated reduced-stimulus quality sessions
+- repeated unplanned hard sessions
+
+This prevents the system from increasing volume or intensity simply because time has passed.
 
 ## Lap-Based Execution Quality
 
