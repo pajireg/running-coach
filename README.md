@@ -14,6 +14,7 @@ It is designed to do more than generate workouts. The system collects athlete hi
 - Incorporate cross-training load from cycling, hiking, strength work, and other non-running sessions
 - Interpret planned vs actual execution, including schedule shifts, reduced or excessive stimulus, and unplanned sessions
 - Upload workouts to Garmin Connect and schedule them automatically
+- Keep Garmin workout titles short, such as `Recovery Run` or `Long Run`
 - Sync two Google Calendars:
   - `Running Coach` for future plans
   - `Workout` for completed activities

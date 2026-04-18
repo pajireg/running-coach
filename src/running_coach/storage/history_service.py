@@ -158,22 +158,6 @@ class CoachingHistoryService:
     def record_training_plan(self, plan: TrainingPlan) -> None:
         """7일 계획 저장."""
         athlete_id = self._athlete_id()
-        delete_query = """
-            DELETE FROM planned_workouts
-            WHERE athlete_id = %(athlete_id)s
-              AND workout_date BETWEEN %(start_date)s AND %(end_date)s
-              AND source = %(source)s
-        """
-        self._execute(
-            delete_query,
-            {
-                "athlete_id": athlete_id,
-                "start_date": plan.start_date,
-                "end_date": plan.end_date,
-                "source": WORKOUT_SOURCE,
-            },
-        )
-
         insert_query = """
             INSERT INTO planned_workouts (
                 athlete_id,
@@ -197,6 +181,14 @@ class CoachingHistoryService:
                 %(total_duration_seconds)s,
                 %(plan_payload)s::jsonb
             )
+            ON CONFLICT (athlete_id, workout_date, source)
+            DO UPDATE SET
+                workout_name = EXCLUDED.workout_name,
+                description = EXCLUDED.description,
+                sport_type = EXCLUDED.sport_type,
+                is_rest = EXCLUDED.is_rest,
+                total_duration_seconds = EXCLUDED.total_duration_seconds,
+                plan_payload = EXCLUDED.plan_payload
         """
         for day in plan.plan:
             self._execute(
@@ -213,6 +205,30 @@ class CoachingHistoryService:
                     "plan_payload": json.dumps(self._serialize_daily_plan(day), ensure_ascii=False),
                 },
             )
+
+    def list_planned_garmin_workout_ids(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """계획 범위에 저장된 기존 Garmin workout id 목록."""
+        rows = self._fetchall(
+            """
+            SELECT garmin_workout_id
+            FROM planned_workouts
+            WHERE athlete_id = %(athlete_id)s
+              AND source = %(source)s
+              AND workout_date BETWEEN %(start_date)s AND %(end_date)s
+              AND garmin_workout_id IS NOT NULL
+            """,
+            {
+                "athlete_id": self._athlete_id(),
+                "source": WORKOUT_SOURCE,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
+        return [str(row["garmin_workout_id"]) for row in rows if row.get("garmin_workout_id")]
 
     def record_subjective_feedback(self, feedback: SubjectiveFeedback) -> None:
         """주관 피드백 upsert."""
@@ -463,6 +479,26 @@ class CoachingHistoryService:
                 "garmin_workout_id": garmin_workout_id,
                 "garmin_schedule_status": garmin_schedule_status[:100],
                 "source": WORKOUT_SOURCE,
+            },
+        )
+
+    def clear_garmin_sync_results(self, start_date: date, end_date: date) -> None:
+        """새 업로드 전 계획 범위의 이전 Garmin sync 결과를 초기화."""
+        self._execute(
+            """
+            UPDATE planned_workouts
+            SET
+                garmin_workout_id = NULL,
+                garmin_schedule_status = NULL
+            WHERE athlete_id = %(athlete_id)s
+              AND source = %(source)s
+              AND workout_date BETWEEN %(start_date)s AND %(end_date)s
+            """,
+            {
+                "athlete_id": self._athlete_id(),
+                "source": WORKOUT_SOURCE,
+                "start_date": start_date,
+                "end_date": end_date,
             },
         )
 

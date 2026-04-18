@@ -326,11 +326,21 @@ Their purpose is different from the main set:
 
 Current Garmin upload behavior:
 
-- main running targets use a normal pace margin
+- main running targets use session-specific pace margins
 - warmup targets use a wider margin
-- cooldown targets use the widest margin
+- cooldown and interval-recovery targets use the widest margins
 
 This keeps Garmin guidance useful without making the watch too noisy during easy transitions.
+
+Current margin policy:
+
+- interval: narrow
+- tempo / threshold: moderately narrow
+- base run: moderate
+- long run: wider
+- recovery run: wide
+- warmup: wide
+- cooldown and recovery steps: widest
 
 ### Consolidation before progression
 

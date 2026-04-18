@@ -144,6 +144,7 @@ DB는 애플리케이션의 정본 상태 저장소입니다.
 중요한 경계:
 
 - Garmin은 센서와 실행 데이터의 원천이지, 내부 정본 상태 저장소는 아닙니다.
+- 예약 워크아웃은 가능하면 DB에 저장된 Garmin workout ID로 추적하므로, 사용자에게 보이는 워크아웃 제목에는 `Running Coach:` prefix를 붙이지 않아도 됩니다.
 
 ### Google Calendar
 

@@ -66,11 +66,15 @@ class TrainingOrchestrator:
                 return False
 
             logger.info(f"\n훈련 계획 생성 완료! ({len(plan.plan)}일)")
+            existing_workout_ids = self._existing_garmin_workout_ids(plan)
             self._persist_plan_history(metrics, plan, training_background)
 
             # 4. 기존 워크아웃 정리
             logger.info("기존 Running Coach 워크아웃 정리 중...")
-            self.container.garmin_client.cleanup_existing_workouts()
+            self.container.garmin_client.cleanup_existing_workouts(
+                workout_ids=existing_workout_ids or None
+            )
+            self._clear_garmin_sync_results(plan)
 
             # 5. Garmin에 업로드
             logger.info("Garmin에 워크아웃 업로드 중...")
@@ -222,6 +226,31 @@ class TrainingOrchestrator:
         except Exception as e:
             logger.warning(f"훈련 배경 요약 실패 (계속 진행): {e}")
             return None
+
+    def _existing_garmin_workout_ids(self, plan) -> list[str]:
+        """새 계획 범위의 기존 Garmin workout id 조회."""
+        if not self.container.settings.persist_history:
+            return []
+        try:
+            return self.container.history_service.list_planned_garmin_workout_ids(
+                start_date=plan.start_date,
+                end_date=plan.end_date,
+            )
+        except Exception as e:
+            logger.warning(f"기존 Garmin workout id 조회 실패 (prefix fallback 사용): {e}")
+            return []
+
+    def _clear_garmin_sync_results(self, plan) -> None:
+        """삭제된 이전 Garmin workout id를 계획 범위에서 초기화."""
+        if not self.container.settings.persist_history:
+            return
+        try:
+            self.container.history_service.clear_garmin_sync_results(
+                start_date=plan.start_date,
+                end_date=plan.end_date,
+            )
+        except Exception as e:
+            logger.warning(f"Garmin sync 결과 초기화 실패 (계속 진행): {e}")
 
     def _persist_garmin_sync_result(
         self,

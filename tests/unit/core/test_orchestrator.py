@@ -22,6 +22,7 @@ class _FakeWorkoutManager:
 class _FakeGarminClient:
     def __init__(self):
         self.workout_manager = _FakeWorkoutManager()
+        self.cleanup_ids = None
 
     def login(self):
         return None
@@ -42,7 +43,8 @@ class _FakeGarminClient:
     def get_recent_scheduled_workout_history(self, target_date=None):
         return []
 
-    def cleanup_existing_workouts(self):
+    def cleanup_existing_workouts(self, workout_ids=None):
+        self.cleanup_ids = workout_ids
         return 0
 
 
@@ -54,7 +56,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-17",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -71,7 +73,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-18",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -88,7 +90,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-19",
                         "workout": {
-                            "workoutName": "Running Coach: Rest Day",
+                            "workoutName": "Rest Day",
                             "description": "휴식",
                             "sportType": "RUNNING",
                             "steps": [],
@@ -97,7 +99,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-20",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -114,7 +116,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-21",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -131,7 +133,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-22",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -148,7 +150,7 @@ class _FakeGeminiClient:
                     {
                         "date": "2026-04-23",
                         "workout": {
-                            "workoutName": "Running Coach: Base Run",
+                            "workoutName": "Base Run",
                             "description": "테스트",
                             "sportType": "RUNNING",
                             "steps": [
@@ -171,6 +173,7 @@ class _FakeHistoryService:
     def __init__(self):
         self.db = SimpleNamespace(ping=lambda: None)
         self.synced = []
+        self.cleared = []
 
     def ensure_athlete(self, **_kwargs):
         return None
@@ -189,6 +192,12 @@ class _FakeHistoryService:
 
     def record_training_plan(self, _plan):
         return None
+
+    def list_planned_garmin_workout_ids(self, **_kwargs):
+        return ["old-1"]
+
+    def clear_garmin_sync_results(self, **kwargs):
+        self.cleared.append(kwargs)
 
     def record_coach_decision(self, **_kwargs):
         return None
@@ -224,6 +233,8 @@ def test_run_once_persists_garmin_sync_results():
     result = orchestrator.run_once()
 
     assert result is True
+    assert container.garmin_client.cleanup_ids == ["old-1"]
+    assert container.history_service.cleared[0]["start_date"].isoformat() == "2026-04-17"
     assert len(container.history_service.synced) == 6
     assert container.history_service.synced[0]["garmin_workout_id"] == "id-1"
     assert container.history_service.synced[0]["garmin_schedule_status"] == "scheduled"

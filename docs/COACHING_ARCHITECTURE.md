@@ -144,6 +144,7 @@ Role:
 Important boundary:
 
 - Garmin is a source of sensor and execution data, not the canonical internal state store
+- scheduled workouts are tracked by stored Garmin workout IDs when possible, so user-facing workout titles can stay short without the `Running Coach:` prefix
 
 ### Google Calendar
 

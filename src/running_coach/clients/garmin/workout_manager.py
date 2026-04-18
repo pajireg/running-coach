@@ -95,10 +95,15 @@ class WorkoutManager:
             logger.error(f"워크아웃 예약 에러: {e}")
             raise GarminWorkoutError(f"Failed to schedule workout: {e}") from e
 
-    def delete_generated_workouts(self, future_only: bool = True) -> int:
+    def delete_generated_workouts(
+        self,
+        workout_ids: Optional[list[str]] = None,
+        future_only: bool = True,
+    ) -> int:
         """현재 앱이 생성한 기존 워크아웃 삭제.
 
         Args:
+            workout_ids: DB에 저장된 Garmin workout id 목록. 있으면 이 값을 우선 사용.
             future_only: 미래 워크아웃만 삭제 (현재 미사용)
 
         Returns:
@@ -107,18 +112,22 @@ class WorkoutManager:
         logger.info("기존 %s 워크아웃 정리 중...", WORKOUT_PREFIX)
 
         try:
-            workouts = self.garmin.get_workouts() if hasattr(self.garmin, "get_workouts") else []
             deleted_count = 0
+            ids_to_delete = [str(workout_id) for workout_id in workout_ids or [] if workout_id]
 
+            if ids_to_delete:
+                for workout_id in ids_to_delete:
+                    self._delete_workout(workout_id)
+                    deleted_count += 1
+                logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
+                return deleted_count
+
+            workouts = self.garmin.get_workouts() if hasattr(self.garmin, "get_workouts") else []
             for w in workouts:
                 workout_name = str(w.get("workoutName") or "")
                 if any(prefix in workout_name for prefix in SUPPORTED_WORKOUT_PREFIXES):
                     workout_id = w["workoutId"]
-                    if hasattr(self.garmin, "delete_workout"):
-                        self.garmin.delete_workout(workout_id)
-                    else:
-                        url = f"/workout-service/workout/{workout_id}"
-                        self.garmin.garth.delete("connectapi", url, api=True)
+                    self._delete_workout(workout_id)
                     deleted_count += 1
 
             logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
@@ -127,6 +136,13 @@ class WorkoutManager:
         except Exception as e:
             logger.warning(f"워크아웃 정리 실패: {e}")
             return 0
+
+    def _delete_workout(self, workout_id: str | int) -> None:
+        if hasattr(self.garmin, "delete_workout"):
+            self.garmin.delete_workout(workout_id)
+            return
+        url = f"/workout-service/workout/{workout_id}"
+        self.garmin.garth.delete("connectapi", url, api=True)
 
     def _build_workout_payload(self, workout: Workout) -> dict[str, Any]:
         """Garmin typed workout 모델과 동일한 JSON 생성."""
@@ -143,7 +159,7 @@ class WorkoutManager:
             step_type_key = STEP_TYPE_MAP.get(step.type, "run")
             total_duration += int(duration_val)
 
-            target_dict, target_val_one, target_val_two = self._target_payload(step)
+            target_dict, target_val_one, target_val_two = self._target_payload(step, workout)
             executable_steps.append(
                 self._build_step(
                     order=order,
@@ -169,7 +185,11 @@ class WorkoutManager:
         )
         return cast(dict[str, Any], workout_payload.to_dict())
 
-    def _target_payload(self, step: Any) -> tuple[dict[str, Any], Optional[float], Optional[float]]:
+    def _target_payload(
+        self,
+        step: Any,
+        workout: Workout,
+    ) -> tuple[dict[str, Any], Optional[float], Optional[float]]:
         target_dict = {
             "workoutTargetTypeId": TargetType.NO_TARGET,
             "workoutTargetTypeKey": "no.target",
@@ -179,7 +199,7 @@ class WorkoutManager:
             return target_dict, None, None
 
         try:
-            margin = self._pace_margin_for_step(step)
+            margin = self._pace_margin_for_step(step, workout)
             pace_fast = pace_to_ms(step.target_value or "0:00", margin=-margin)
             pace_slow = pace_to_ms(step.target_value or "0:00", margin=margin)
         except ValueError:
@@ -197,11 +217,24 @@ class WorkoutManager:
         )
 
     @staticmethod
-    def _pace_margin_for_step(step: Any) -> int:
+    def _pace_margin_for_step(step: Any, workout: Workout) -> int:
         if step.type == "Warmup":
             return 45
         if step.type == "Cooldown":
             return 60
+        if step.type == "Recovery":
+            return 60
+        workout_name = workout.workout_name.lower()
+        if step.type == "Interval":
+            return 15
+        if "tempo" in workout_name or "threshold" in workout_name:
+            return 20
+        if "recovery" in workout_name:
+            return 45
+        if "long" in workout_name:
+            return 40
+        if "base" in workout_name:
+            return 30
         return DEFAULT_PACE_MARGIN
 
     @staticmethod

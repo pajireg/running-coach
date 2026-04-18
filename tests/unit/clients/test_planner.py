@@ -45,7 +45,7 @@ def test_normalize_plan_json_rewrites_dates_and_invalid_targets():
                 "date": "2026-04-17",
                 "sessionType": "base",
                 "targetMinutes": 40,
-                "workoutName": "Running Coach: Base Run",
+                "workoutName": "Base Run",
                 "descriptionGuide": "기본 러닝",
             }
         ],
@@ -200,7 +200,7 @@ def test_normalize_plan_json_preserves_skeleton_and_uses_fallback_steps():
             "date": "2026-04-17",
             "sessionType": "quality",
             "targetMinutes": 50,
-            "workoutName": "Running Coach: Intervals",
+            "workoutName": "Intervals",
             "descriptionGuide": "핵심 세션",
         }
     ]
@@ -224,7 +224,7 @@ def test_normalize_plan_json_preserves_skeleton_and_uses_fallback_steps():
 
     day = normalized["plan"][0]
     assert day["date"] == "2026-04-17"
-    assert day["workout"]["workoutName"] == "Running Coach: Intervals"
+    assert day["workout"]["workoutName"] == "Intervals"
     assert "근거: 핵심 세션" in day["workout"]["description"]
     assert day["workout"]["steps"][0]["type"] == "Warmup"
     assert any(step["type"] == "Interval" for step in day["workout"]["steps"])
@@ -586,7 +586,7 @@ def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description
                 {
                     "date": "2026-04-17",
                     "workout": {
-                        "workoutName": "Running Coach: Recovery Run",
+                        "workoutName": "Recovery Run",
                         "description": "회복 중심으로 가볍게 진행합니다.",
                         "steps": [],
                     },
@@ -599,7 +599,7 @@ def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description
                 "date": "2026-04-17",
                 "sessionType": "recovery",
                 "targetMinutes": 35,
-                "workoutName": "Running Coach: Recovery Run",
+                "workoutName": "Recovery Run",
                 "descriptionGuide": (
                     "최근 비계획 고강도 또는 장거리 세션이 있어 이번 주는 "
                     "회복 우선으로 조정했습니다."
@@ -677,7 +677,7 @@ def test_normalize_plan_json_adds_pace_targets_to_warmup_and_cooldown():
                 "date": "2026-04-17",
                 "sessionType": "base",
                 "targetMinutes": 45,
-                "workoutName": "Running Coach: Base Run",
+                "workoutName": "Base Run",
                 "descriptionGuide": "기본 러닝",
             }
         ],

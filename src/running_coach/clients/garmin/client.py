@@ -136,7 +136,7 @@ class GarminClient:
             except Exception as e:
                 logger.error(f"{daily_plan.date}: 워크아웃 업로드 실패 - {e}")
 
-    def cleanup_existing_workouts(self) -> int:
+    def cleanup_existing_workouts(self, workout_ids: Optional[list[str]] = None) -> int:
         """기존 Running Coach 워크아웃 정리
 
         Returns:
@@ -146,7 +146,7 @@ class GarminClient:
             raise GarminError("Not logged in. Call login() first.")
 
         assert self.workout_manager is not None
-        return self.workout_manager.delete_generated_workouts()
+        return self.workout_manager.delete_generated_workouts(workout_ids=workout_ids)
 
     def get_recent_activity_history(self, days: int = 42, limit: int = 200) -> list[dict[str, Any]]:
         """최근 활동 이력을 상세/랩 정보와 함께 반환."""

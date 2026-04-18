@@ -29,7 +29,7 @@ def test_create_workout_uses_json_upload_payload():
     manager = WorkoutManager(garmin)
     workout = Workout.model_validate(
         {
-            "workoutName": "Running Coach: Intervals",
+            "workoutName": "Intervals",
             "description": "테스트",
             "sportType": "RUNNING",
             "steps": [
@@ -54,7 +54,7 @@ def test_create_workout_uses_json_upload_payload():
     workout_id = manager.create_workout(workout)
 
     assert workout_id == "42"
-    assert garmin.uploaded_payload["workoutName"] == "Running Coach: Intervals"
+    assert garmin.uploaded_payload["workoutName"] == "Intervals"
     assert garmin.uploaded_payload["estimatedDurationInSecs"] == 900
     assert garmin.uploaded_payload["sportType"]["displayOrder"] == 1
     step = garmin.uploaded_payload["workoutSegments"][0]["workoutSteps"][1]
@@ -78,12 +78,22 @@ def test_schedule_and_cleanup_use_native_methods_when_available():
     assert garmin.deleted_ids == [10]
 
 
+def test_cleanup_prefers_database_workout_ids():
+    garmin = _FakeGarmin()
+    manager = WorkoutManager(garmin)
+
+    deleted_count = manager.delete_generated_workouts(workout_ids=["100", "101"])
+
+    assert deleted_count == 2
+    assert garmin.deleted_ids == ["100", "101"]
+
+
 def test_warmup_and_cooldown_use_wider_pace_margins():
     garmin = _FakeGarmin()
     manager = WorkoutManager(garmin)
     workout = Workout.model_validate(
         {
-            "workoutName": "Running Coach: Base Run",
+            "workoutName": "Base Run",
             "description": "테스트",
             "sportType": "RUNNING",
             "steps": [

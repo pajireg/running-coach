@@ -9,7 +9,7 @@ from typing import Any, Optional, cast
 from google import genai
 from google.genai import types
 
-from ...config.constants import GEMINI_MODEL, WORKOUT_PREFIX
+from ...config.constants import GEMINI_MODEL
 from ...exceptions import GeminiQuotaExceededError, GeminiResponseParseError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
@@ -223,7 +223,7 @@ class TrainingPlanner:
             "{",
             '  "date": "YYYY-MM-DD",',
             '  "workout": {',
-            f'    "workoutName": "{WORKOUT_PREFIX}: [Day Type]",',
+            '    "workoutName": "[Day Type]",',
             '    "description": "Short explanation in Korean",',
             '    "sportType": "RUNNING",',
             '    "steps": [',
@@ -291,7 +291,7 @@ class TrainingPlanner:
                     "workout": {
                         "workoutName": skeleton_day.get(
                             "workoutName",
-                            workout.get("workoutName", f"{WORKOUT_PREFIX}: Day {index + 1}"),
+                            workout.get("workoutName", f"Day {index + 1}"),
                         ),
                         "description": self._combine_description(
                             workout.get("description"),
@@ -732,7 +732,7 @@ class TrainingPlanner:
     ) -> tuple[str, str]:
         if session_type == "recovery":
             return (
-                f"{WORKOUT_PREFIX}: Recovery Run",
+                "Recovery Run",
                 (
                     f"회복 우선의 {target_minutes}분 러닝입니다. "
                     f"호흡과 자세를 편하게 유지하세요. {notes}"
@@ -741,7 +741,7 @@ class TrainingPlanner:
         if session_type == "quality":
             label = "Tempo Session" if race_config.has_goal else "Intervals"
             return (
-                f"{WORKOUT_PREFIX}: {label}",
+                label,
                 (
                     f"이번 주 핵심 품질훈련입니다. 총 {target_minutes}분 안에서 "
                     f"강도는 통제하세요. {notes}"
@@ -749,7 +749,7 @@ class TrainingPlanner:
             )
         if session_type == "long_run":
             return (
-                f"{WORKOUT_PREFIX}: Long Run",
+                "Long Run",
                 (
                     f"주말 장거리 러닝입니다. 총 {target_minutes}분을 "
                     f"안정적으로 소화하세요. {notes}"
@@ -757,11 +757,11 @@ class TrainingPlanner:
             )
         if session_type == "rest":
             return (
-                f"{WORKOUT_PREFIX}: Rest Day",
+                "Rest Day",
                 f"회복과 적응을 위해 휴식을 우선합니다. {notes}".strip(),
             )
         return (
-            f"{WORKOUT_PREFIX}: Base Run",
+            "Base Run",
             f"기본 지구력 유지 목적의 {target_minutes}분 러닝입니다. {notes}".strip(),
         )
 
@@ -876,7 +876,14 @@ class TrainingPlanner:
             steps = [self._step("Warmup", 900, target_type="speed", target_value="6:50")]
             for _ in range(repeat):
                 steps.append(self._step("Interval", interval_seconds, target_type="speed"))
-                steps.append(self._step("Recovery", interval_seconds))
+                steps.append(
+                    self._step(
+                        "Recovery",
+                        interval_seconds,
+                        target_type="speed",
+                        target_value="7:20",
+                    )
+                )
             steps.append(self._step("Cooldown", 600, target_type="speed", target_value="7:20"))
             return steps
         if session_type == "long_run":
