@@ -611,3 +611,80 @@ def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description
     description = normalized["plan"][0]["workout"]["description"]
     assert "근거:" in description
     assert "비계획 고강도 또는 장거리 세션" in description
+
+
+def test_default_steps_assign_loose_pace_targets_to_warmup_and_cooldown():
+    planner = TrainingPlanner(gemini_client=None)
+
+    steps = planner._default_steps_for_skeleton_day(
+        {"sessionType": "base", "targetMinutes": 40}
+    )
+
+    warmup = steps[0]
+    cooldown = steps[-1]
+    assert warmup["type"] == "Warmup"
+    assert warmup["targetType"] == "speed"
+    assert warmup["targetValue"] == "6:45"
+    assert cooldown["type"] == "Cooldown"
+    assert cooldown["targetType"] == "speed"
+    assert cooldown["targetValue"] == "7:10"
+
+
+def test_normalize_plan_json_adds_pace_targets_to_warmup_and_cooldown():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(),
+    )
+
+    normalized = planner._normalize_plan_json(
+        {
+            "plan": [
+                {
+                    "workout": {
+                        "steps": [
+                            {
+                                "type": "Warmup",
+                                "durationValue": 600,
+                                "durationUnit": "second",
+                                "targetType": "no_target",
+                                "targetValue": "0:00",
+                            },
+                            {
+                                "type": "Run",
+                                "durationValue": 1800,
+                                "durationUnit": "second",
+                                "targetType": "no_target",
+                                "targetValue": "0:00",
+                            },
+                            {
+                                "type": "Cooldown",
+                                "durationValue": 300,
+                                "durationUnit": "second",
+                                "targetType": "no_target",
+                                "targetValue": "0:00",
+                            },
+                        ]
+                    },
+                }
+            ]
+        },
+        metrics,
+        [
+            {
+                "date": "2026-04-17",
+                "sessionType": "base",
+                "targetMinutes": 45,
+                "workoutName": "Running Coach: Base Run",
+                "descriptionGuide": "기본 러닝",
+            }
+        ],
+    )
+
+    steps = normalized["plan"][0]["workout"]["steps"]
+    assert steps[0]["targetType"] == "speed"
+    assert steps[0]["targetValue"] == "6:50"
+    assert steps[-1]["targetType"] == "speed"
+    assert steps[-1]["targetValue"] == "7:20"

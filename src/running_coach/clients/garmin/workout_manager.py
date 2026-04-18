@@ -179,8 +179,9 @@ class WorkoutManager:
             return target_dict, None, None
 
         try:
-            pace_fast = pace_to_ms(step.target_value or "0:00", margin=-DEFAULT_PACE_MARGIN)
-            pace_slow = pace_to_ms(step.target_value or "0:00", margin=DEFAULT_PACE_MARGIN)
+            margin = self._pace_margin_for_step(step)
+            pace_fast = pace_to_ms(step.target_value or "0:00", margin=-margin)
+            pace_slow = pace_to_ms(step.target_value or "0:00", margin=margin)
         except ValueError:
             logger.warning("잘못된 페이스 형식으로 no_target 처리: %s", step.target_value)
             return target_dict, None, None
@@ -194,6 +195,14 @@ class WorkoutManager:
             pace_fast,
             pace_slow,
         )
+
+    @staticmethod
+    def _pace_margin_for_step(step: Any) -> int:
+        if step.type == "Warmup":
+            return 45
+        if step.type == "Cooldown":
+            return 60
+        return DEFAULT_PACE_MARGIN
 
     @staticmethod
     def _build_step(

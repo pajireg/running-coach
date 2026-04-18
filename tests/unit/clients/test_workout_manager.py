@@ -76,3 +76,47 @@ def test_schedule_and_cleanup_use_native_methods_when_available():
     assert garmin.scheduled == ("42", "2026-04-17")
     assert deleted_count == 1
     assert garmin.deleted_ids == [10]
+
+
+def test_warmup_and_cooldown_use_wider_pace_margins():
+    garmin = _FakeGarmin()
+    manager = WorkoutManager(garmin)
+    workout = Workout.model_validate(
+        {
+            "workoutName": "Running Coach: Base Run",
+            "description": "테스트",
+            "sportType": "RUNNING",
+            "steps": [
+                {
+                    "type": "Warmup",
+                    "durationValue": 600,
+                    "durationUnit": "second",
+                    "targetType": "speed",
+                    "targetValue": "6:45",
+                },
+                {
+                    "type": "Run",
+                    "durationValue": 1800,
+                    "durationUnit": "second",
+                    "targetType": "speed",
+                    "targetValue": "6:00",
+                },
+                {
+                    "type": "Cooldown",
+                    "durationValue": 300,
+                    "durationUnit": "second",
+                    "targetType": "speed",
+                    "targetValue": "7:10",
+                },
+            ],
+        }
+    )
+
+    manager.create_workout(workout)
+
+    steps = garmin.uploaded_payload["workoutSegments"][0]["workoutSteps"]
+    warmup_range = steps[0]["targetValueOne"] - steps[0]["targetValueTwo"]
+    run_range = steps[1]["targetValueOne"] - steps[1]["targetValueTwo"]
+    cooldown_range = steps[2]["targetValueOne"] - steps[2]["targetValueTwo"]
+    assert warmup_range > run_range
+    assert cooldown_range > warmup_range

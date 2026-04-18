@@ -279,6 +279,8 @@ class TrainingPlanner:
 
             if self._should_replace_steps(steps, skeleton_day):
                 steps = self._default_steps_for_skeleton_day(skeleton_day)
+            else:
+                steps = [self._normalize_warmup_cooldown_target(step) for step in steps]
 
             normalized_days.append(
                 {
@@ -863,31 +865,46 @@ class TrainingPlanner:
             return []
         if session_type == "recovery":
             return [
-                self._step("Warmup", 300),
+                self._step("Warmup", 300, target_type="speed", target_value="7:00"),
                 self._step("Run", max(target_seconds - 600, 900)),
-                self._step("Cooldown", 300),
+                self._step("Cooldown", 300, target_type="speed", target_value="7:20"),
             ]
         if session_type == "quality":
             quality_block = max(target_seconds - 1500, 1200)
             repeat = max(3, min(6, quality_block // 360))
             interval_seconds = max(180, quality_block // (repeat * 2))
-            steps = [self._step("Warmup", 900)]
+            steps = [self._step("Warmup", 900, target_type="speed", target_value="6:50")]
             for _ in range(repeat):
                 steps.append(self._step("Interval", interval_seconds, target_type="speed"))
                 steps.append(self._step("Recovery", interval_seconds))
-            steps.append(self._step("Cooldown", 600))
+            steps.append(self._step("Cooldown", 600, target_type="speed", target_value="7:20"))
             return steps
         if session_type == "long_run":
             return [
-                self._step("Warmup", 600),
+                self._step("Warmup", 600, target_type="speed", target_value="6:50"),
                 self._step("Run", max(target_seconds - 900, 2700)),
-                self._step("Cooldown", 300),
+                self._step("Cooldown", 300, target_type="speed", target_value="7:15"),
             ]
         return [
-            self._step("Warmup", 600),
+            self._step("Warmup", 600, target_type="speed", target_value="6:45"),
             self._step("Run", max(target_seconds - 900, 1800)),
-            self._step("Cooldown", 300),
+            self._step("Cooldown", 300, target_type="speed", target_value="7:10"),
         ]
+
+    @staticmethod
+    def _normalize_warmup_cooldown_target(step: dict[str, Any]) -> dict[str, Any]:
+        step_type = str(step.get("type") or "")
+        if step_type not in {"Warmup", "Cooldown"}:
+            return step
+        if step.get("targetType") == "speed" and re.fullmatch(
+            r"\d+:\d{2}",
+            str(step.get("targetValue") or ""),
+        ):
+            return step
+        normalized = dict(step)
+        normalized["targetType"] = "speed"
+        normalized["targetValue"] = "6:50" if step_type == "Warmup" else "7:20"
+        return normalized
 
     @staticmethod
     def _step(

@@ -314,6 +314,24 @@ Signals that support faster base prescriptions:
 
 This means a base run might gradually move from `6:30/km` to `6:00/km` or faster, but only if the same effort remains genuinely easy.
 
+### Warmup and cooldown pace zones
+
+Warmup and cooldown steps also use pace zones, but they are intentionally loose.
+
+Their purpose is different from the main set:
+
+- warmup pace zones prevent starting too fast
+- cooldown pace zones encourage an easy finish
+- they are not meant to be tight performance targets
+
+Current Garmin upload behavior:
+
+- main running targets use a normal pace margin
+- warmup targets use a wider margin
+- cooldown targets use the widest margin
+
+This keeps Garmin guidance useful without making the watch too noisy during easy transitions.
+
 ### Consolidation before progression
 
 The engine should prefer consolidation over progression when it sees:
