@@ -128,6 +128,7 @@ def test_normalize_plan_json_preserves_skeleton_and_uses_fallback_steps():
     day = normalized["plan"][0]
     assert day["date"] == "2026-04-17"
     assert day["workout"]["workoutName"] == "Running Coach: Intervals"
+    assert "근거: 핵심 세션" in day["workout"]["description"]
     assert day["workout"]["steps"][0]["type"] == "Warmup"
     assert any(step["type"] == "Interval" for step in day["workout"]["steps"])
 
@@ -187,6 +188,13 @@ def test_build_weekly_skeleton_respects_availability_and_training_block():
     assert sunday["sessionType"] == "long_run"
     assert sunday["targetMinutes"] <= 90
     assert "long run 선호 요일" in sunday["descriptionGuide"]
+    assert "2026-04-20은(는) 불가 요일" in monday["descriptionGuide"]
+    rest_days = [
+        day
+        for day in skeleton
+        if day["sessionType"] == "rest" and day["date"] != "2026-04-20"
+    ]
+    assert all("2026-04-20은(는) 불가 요일" not in day["descriptionGuide"] for day in rest_days)
 
 
 def test_build_weekly_skeleton_drops_quality_when_active_injury_exists():
@@ -256,3 +264,154 @@ def test_build_weekly_skeleton_accounts_for_cross_training_load():
         "비러닝 부하" in day["descriptionGuide"] or "자전거" in day["descriptionGuide"]
         for day in skeleton
     )
+
+
+def test_build_weekly_skeleton_reduces_quality_when_reduced_stimulus_repeats():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=28.0,
+            recent_30d_run_distance_km=92.0,
+            recent_30d_run_count=11,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 62,
+                "fatigueScore": 48,
+                "injuryRiskScore": 20,
+                "executionInsights": {
+                    "reducedStimulusCount": 2,
+                    "excessiveStimulusCount": 0,
+                    "scheduleShiftCount": 0,
+                    "unplannedSessionCount": 0,
+                },
+            }
+        },
+    )
+
+    assert sum(1 for day in skeleton if day["sessionType"] == "quality") == 0
+    assert sum(1 for day in skeleton if day["sessionType"] == "rest") >= 1
+
+
+def test_build_weekly_skeleton_adds_recovery_when_excessive_stimulus_repeats():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=30.0,
+            recent_30d_run_distance_km=100.0,
+            recent_30d_run_count=12,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 60,
+                "fatigueScore": 45,
+                "injuryRiskScore": 22,
+                "executionInsights": {
+                    "reducedStimulusCount": 0,
+                    "excessiveStimulusCount": 2,
+                    "scheduleShiftCount": 0,
+                    "unplannedSessionCount": 2,
+                },
+            }
+        },
+    )
+
+    assert sum(1 for day in skeleton if day["sessionType"] == "quality") == 0
+    assert sum(1 for day in skeleton if day["sessionType"] == "rest") >= 2
+    assert any("강한 자극" in day["descriptionGuide"] for day in skeleton)
+
+
+def test_build_weekly_skeleton_reacts_more_strongly_to_unplanned_hard_sessions():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=30.0,
+            recent_30d_run_distance_km=95.0,
+            recent_30d_run_count=11,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(),
+        training_background={
+            "coachingState": {
+                "readinessScore": 58,
+                "fatigueScore": 44,
+                "injuryRiskScore": 24,
+                "executionInsights": {
+                    "reducedStimulusCount": 0,
+                    "excessiveStimulusCount": 0,
+                    "scheduleShiftCount": 0,
+                    "unplannedSessionCount": 1,
+                    "unplannedEasyCount": 0,
+                    "unplannedHardCount": 1,
+                },
+            }
+        },
+    )
+
+    assert sum(1 for day in skeleton if day["sessionType"] == "quality") == 0
+    assert sum(1 for day in skeleton if day["sessionType"] == "rest") >= 2
+    assert any("비계획 고강도" in day["descriptionGuide"] for day in skeleton)
+
+
+def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(),
+    )
+
+    normalized = planner._normalize_plan_json(
+        {
+            "plan": [
+                {
+                    "date": "2026-04-17",
+                    "workout": {
+                        "workoutName": "Running Coach: Recovery Run",
+                        "description": "회복 중심으로 가볍게 진행합니다.",
+                        "steps": [],
+                    },
+                }
+            ]
+        },
+        metrics,
+        [
+            {
+                "date": "2026-04-17",
+                "sessionType": "recovery",
+                "targetMinutes": 35,
+                "workoutName": "Running Coach: Recovery Run",
+                "descriptionGuide": (
+                    "최근 비계획 고강도 또는 장거리 세션이 있어 이번 주는 "
+                    "회복 우선으로 조정했습니다."
+                ),
+            }
+        ],
+    )
+
+    description = normalized["plan"][0]["workout"]["description"]
+    assert "근거:" in description
+    assert "비계획 고강도 또는 장거리 세션" in description

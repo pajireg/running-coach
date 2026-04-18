@@ -85,8 +85,16 @@ def test_sync_completed_activities_creates_workout_events():
                 "avgHr": 148,
                 "maxHr": 162,
                 "elevationGainM": 22,
+                "actualCategory": "base",
                 "executionStatus": "completed_unplanned",
-                "notes": "Garmin 실제 수행 기록",
+                "notes": (
+                    "Garmin 실제 수행 기록\n"
+                    "상태: 비계획 수행\n"
+                    "실제 유형: base\n"
+                    "계획 대비: 비계획 easy/base 러닝\n"
+                    "코치 해석: 추가 easy 성격의 세션으로 보고 "
+                    "다음 주 강도 증가는 보수적으로 해석합니다."
+                ),
             }
         ],
         as_of=date(2026, 4, 18),
@@ -98,6 +106,7 @@ def test_sync_completed_activities_creates_workout_events():
     assert event["extendedProperties"]["private"]["source"] == "running_coach_activity"
     assert event["start"]["dateTime"] == "2026-04-17T06:00:00+09:00"
     assert "상태: 비계획 수행" in event["description"]
+    assert "비계획 easy/base 러닝" in event["description"]
     assert len(service._events.updated) == 0
 
 

@@ -748,6 +748,7 @@ class CoachingHistoryService:
         rationale["coachingState"] = state_snapshot
         if training_background:
             rationale["trainingBackground"] = training_background
+        decision_summary = self._build_decision_summary(summary, state_snapshot)
         query = """
             INSERT INTO coach_decisions (
                 athlete_id,
@@ -778,7 +779,7 @@ class CoachingHistoryService:
                 "readiness_score": state_snapshot["readinessScore"],
                 "fatigue_score": state_snapshot["fatigueScore"],
                 "injury_risk_score": state_snapshot["injuryRiskScore"],
-                "decision_summary": summary,
+                "decision_summary": decision_summary,
                 "rationale": json.dumps(rationale, ensure_ascii=False),
             },
         )
@@ -892,6 +893,8 @@ class CoachingHistoryService:
                 we.execution_payload->>'plannedCategory' AS planned_category,
                 we.execution_payload->>'actualCategory' AS actual_category,
                 we.execution_payload->>'executionStatus' AS execution_status,
+                we.execution_payload->>'deviationReason' AS deviation_reason,
+                we.execution_payload->>'coachInterpretation' AS coach_interpretation,
                 pw.workout_name AS planned_workout_name
             FROM activities a
             LEFT JOIN workout_executions we
@@ -930,6 +933,8 @@ class CoachingHistoryService:
                 "plannedCategory": row.get("planned_category"),
                 "actualCategory": row.get("actual_category"),
                 "executionStatus": row.get("execution_status"),
+                "deviationReason": row.get("deviation_reason"),
+                "coachInterpretation": row.get("coach_interpretation"),
                 "targetMatchScore": self._float_or_none(row.get("target_match_score")),
                 "notes": self._actual_activity_note(row),
             }
@@ -1260,6 +1265,45 @@ class CoachingHistoryService:
                 "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
             },
         ) or {}
+        execution_pattern_row = self._fetchone(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionStatus' = 'completed_as_planned'
+                ) AS as_planned_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'deviationReason' = 'reduced_stimulus'
+                ) AS reduced_stimulus_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'deviationReason' = 'excessive_stimulus'
+                ) AS excessive_stimulus_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'deviationReason' = 'schedule_shift'
+                ) AS schedule_shift_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                ) AS unplanned_session_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                      AND COALESCE(execution_payload->>'actualCategory', '') IN ('recovery', 'base')
+                ) AS unplanned_easy_count,
+                COUNT(*) FILTER (
+                    WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                      AND COALESCE(execution_payload->>'actualCategory', '') IN (
+                          'quality',
+                          'long_run'
+                      )
+                ) AS unplanned_hard_count
+            FROM workout_executions
+            WHERE athlete_id = %(athlete_id)s
+              AND execution_date BETWEEN %(from_date)s AND %(to_date)s
+            """,
+            {
+                "athlete_id": athlete_id,
+                "from_date": as_of - timedelta(days=13),
+                "to_date": as_of,
+            },
+        ) or {}
         feedback_row = self._fetchone(
             """
             SELECT
@@ -1377,6 +1421,21 @@ class CoachingHistoryService:
                 ),
                 "unplannedRunCount": int(adherence_row.get("unplanned_run_count") or 0),
             },
+            "executionInsights": {
+                "asPlannedCount": int(execution_pattern_row.get("as_planned_count") or 0),
+                "reducedStimulusCount": int(
+                    execution_pattern_row.get("reduced_stimulus_count") or 0
+                ),
+                "excessiveStimulusCount": int(
+                    execution_pattern_row.get("excessive_stimulus_count") or 0
+                ),
+                "scheduleShiftCount": int(execution_pattern_row.get("schedule_shift_count") or 0),
+                "unplannedSessionCount": int(
+                    execution_pattern_row.get("unplanned_session_count") or 0
+                ),
+                "unplannedEasyCount": int(execution_pattern_row.get("unplanned_easy_count") or 0),
+                "unplannedHardCount": int(execution_pattern_row.get("unplanned_hard_count") or 0),
+            },
             "subjectiveFeedback": self._serialize_feedback(feedback_row),
             "activeInjury": {
                 "injuryArea": injury_row.get("injury_area"),
@@ -1447,6 +1506,19 @@ class CoachingHistoryService:
             target_match_score=target_match_score,
         )
         date_offset_days = self._planned_workout_offset_days(activity_date, planned)
+        deviation_reason = self._deviation_reason(
+            planned_category=planned_category,
+            actual_category=actual_category,
+            completion_ratio=completion_ratio,
+            target_match_score=target_match_score,
+            date_offset_days=date_offset_days,
+        )
+        coach_interpretation = self._coach_interpretation(
+            planned_category=planned_category,
+            actual_category=actual_category,
+            completion_ratio=completion_ratio,
+            deviation_reason=deviation_reason,
+        )
 
         self._execute(
             """
@@ -1494,6 +1566,8 @@ class CoachingHistoryService:
                         "plannedCategory": planned_category,
                         "actualCategory": actual_category,
                         "executionStatus": execution_status,
+                        "deviationReason": deviation_reason,
+                        "coachInterpretation": coach_interpretation,
                         "matchedPlannedDate": (
                             planned["workout_date"].isoformat()
                             if planned and planned.get("workout_date") is not None
@@ -1533,8 +1607,8 @@ class CoachingHistoryService:
             """,
             {
                 "athlete_id": athlete_id,
-                "date_from": activity_date - timedelta(days=1),
-                "date_to": activity_date + timedelta(days=2),
+                "date_from": activity_date - timedelta(days=2),
+                "date_to": activity_date + timedelta(days=3),
                 "source": WORKOUT_SOURCE,
             },
         )
@@ -1558,7 +1632,16 @@ class CoachingHistoryService:
             actual_category=actual_category,
             actual_duration=actual_duration,
         )
-        return best if score >= PLANNED_MATCH_SELECTION_THRESHOLD else None
+        planned_category = self._planned_workout_category(best)
+        date_offset_days = self._planned_workout_offset_days(activity_date, best)
+        relaxed_threshold = (
+            planned_category == actual_category
+            and date_offset_days is not None
+            and abs(date_offset_days) <= 2
+            and not bool(best.get("already_matched"))
+        )
+        threshold = 0.6 if relaxed_threshold else PLANNED_MATCH_SELECTION_THRESHOLD
+        return best if score >= threshold else None
 
     @staticmethod
     def _serialize_daily_plan(day: DailyPlan) -> dict[str, Any]:
@@ -1608,6 +1691,8 @@ class CoachingHistoryService:
         planned_category = row.get("planned_category")
         actual_category = row.get("actual_category")
         execution_status = row.get("execution_status") or "completed_unplanned"
+        deviation_reason = row.get("deviation_reason")
+        coach_interpretation = row.get("coach_interpretation")
         target_match_score = CoachingHistoryService._float_or_none(row.get("target_match_score"))
         status_label = CoachingHistoryService._execution_status_label(execution_status)
         if planned_name:
@@ -1622,9 +1707,18 @@ class CoachingHistoryService:
                 f"계획: {planned_name}\n"
                 f"계획 유형: {planned_category or '-'}\n"
                 f"실제 유형: {actual_category or '-'}\n"
-                f"매칭 점수: {score_label}"
+                f"매칭 점수: {score_label}\n"
+                f"이탈 사유: {CoachingHistoryService._deviation_reason_label(deviation_reason)}\n"
+                f"코치 해석: {coach_interpretation or '-'}"
             )
-        return f"Garmin 실제 수행 기록\n상태: {status_label}\n계획 대비: 계획 없음"
+        return (
+            "Garmin 실제 수행 기록\n"
+            f"상태: {status_label}\n"
+            f"실제 유형: {actual_category or '-'}\n"
+            f"계획 대비: {CoachingHistoryService._unplanned_session_label(actual_category)}\n"
+            "코치 해석: "
+            f"{CoachingHistoryService._unplanned_session_interpretation(actual_category)}"
+        )
 
     @staticmethod
     def _execution_status(
@@ -1652,6 +1746,109 @@ class CoachingHistoryService:
             "completed_unplanned": "비계획 수행",
         }
         return labels.get(str(value or ""), "실제 수행")
+
+    @staticmethod
+    def _deviation_reason(
+        planned_category: str,
+        actual_category: str,
+        completion_ratio: Optional[float],
+        target_match_score: Optional[float],
+        date_offset_days: Optional[int],
+    ) -> str:
+        if planned_category == "unplanned":
+            return "unplanned_session"
+        if date_offset_days not in (None, 0):
+            return "schedule_shift"
+        if target_match_score is not None and target_match_score >= 0.8:
+            return "as_planned"
+        planned_intent = CoachingHistoryService._category_intensity_rank(planned_category)
+        actual_intent = CoachingHistoryService._category_intensity_rank(actual_category)
+        if completion_ratio is not None and completion_ratio < 0.75:
+            return "reduced_stimulus"
+        if actual_intent > planned_intent:
+            return "excessive_stimulus"
+        if actual_intent < planned_intent:
+            return "reduced_stimulus"
+        return "execution_variation"
+
+    @staticmethod
+    def _coach_interpretation(
+        planned_category: str,
+        actual_category: str,
+        completion_ratio: Optional[float],
+        deviation_reason: str,
+    ) -> str:
+        if deviation_reason == "as_planned":
+            return "계획 의도와 실제 자극이 대체로 잘 맞았습니다."
+        if deviation_reason == "schedule_shift":
+            return "세션 의도는 유지됐지만 날짜가 이동했습니다."
+        if deviation_reason == "unplanned_session":
+            return "계획에 없던 세션으로, 다음 주 부하 해석 시 별도로 반영해야 합니다."
+        if deviation_reason == "excessive_stimulus":
+            return (
+                f"{planned_category} 대신 {actual_category} 성격으로 수행해 "
+                "계획보다 강한 자극이 들어갔습니다."
+            )
+        if deviation_reason == "reduced_stimulus":
+            if completion_ratio is not None and completion_ratio < 0.75:
+                return "세션을 끝까지 수행하지 못해 계획보다 낮은 자극으로 마무리됐습니다."
+            return (
+                f"{planned_category} 대신 {actual_category} 성격으로 수행해 "
+                "계획보다 약한 자극이 들어갔습니다."
+            )
+        return "세션 유형은 유사하지만 계획과 실제 자극 사이에 차이가 있었습니다."
+
+    @staticmethod
+    def _deviation_reason_label(value: Any) -> str:
+        labels = {
+            "as_planned": "계획과 일치",
+            "schedule_shift": "일정 이동",
+            "reduced_stimulus": "계획보다 약한 자극",
+            "excessive_stimulus": "계획보다 강한 자극",
+            "execution_variation": "세부 수행 차이",
+            "unplanned_session": "비계획 세션",
+        }
+        return labels.get(str(value or ""), "해석 없음")
+
+    @staticmethod
+    def _category_intensity_rank(category: str) -> int:
+        ranks = {
+            "recovery": 1,
+            "base": 2,
+            "long_run": 3,
+            "quality": 4,
+            "unplanned": 0,
+            "unknown": 0,
+        }
+        return ranks.get(category, 0)
+
+    @staticmethod
+    def _unplanned_session_label(actual_category: Any) -> str:
+        category = str(actual_category or "")
+        labels = {
+            "recovery": "비계획 easy 회복 러닝",
+            "base": "비계획 easy/base 러닝",
+            "long_run": "비계획 장거리 러닝",
+            "quality": "비계획 고강도 러닝",
+        }
+        return labels.get(category, "비계획 세션")
+
+    @staticmethod
+    def _unplanned_session_interpretation(actual_category: Any) -> str:
+        category = str(actual_category or "")
+        if category in {"recovery", "base"}:
+            return "추가 easy 성격의 세션으로 보고 다음 주 강도 증가는 보수적으로 해석합니다."
+        if category == "long_run":
+            return (
+                "계획 밖 장거리 세션으로 보고 다음 주 회복과 "
+                "long run 배치를 보수적으로 조정합니다."
+            )
+        if category == "quality":
+            return (
+                "계획 밖 고강도 세션으로 보고 다음 주 품질훈련과 "
+                "회복 구조를 더 보수적으로 잡습니다."
+            )
+        return "계획에 없던 세션으로 보고 다음 주 부하 해석에 별도 반영합니다."
 
     @staticmethod
     def _is_running_sport_type(summary: dict[str, Any]) -> bool:
@@ -1840,9 +2037,20 @@ class CoachingHistoryService:
             actual_duration=actual_duration,
         ) or 0.0
         offset_days = self._planned_workout_offset_days(activity_date, candidate)
-        date_score = 1.0 if offset_days == 0 else 0.8 if offset_days in {-1, 1} else 0.5
+        if offset_days == 0:
+            date_score = 1.0
+        elif offset_days in {-1, 1}:
+            date_score = 0.85
+        elif offset_days in {-2, 2}:
+            date_score = 0.7
+        else:
+            date_score = 0.45
         duplication_penalty = 0.15 if candidate.get("already_matched") else 0.0
-        return round((target_match * 0.75) + (date_score * 0.25) - duplication_penalty, 3)
+        category_bonus = 0.08 if planned_category == actual_category else 0.0
+        return round(
+            (target_match * 0.68) + (date_score * 0.24) + category_bonus - duplication_penalty,
+            3,
+        )
 
     @staticmethod
     def _serialize_feedback(feedback_row: dict[str, Any]) -> dict[str, Any]:
@@ -1866,6 +2074,24 @@ class CoachingHistoryService:
             "painNotes": feedback_row.get("pain_notes"),
             "notes": feedback_row.get("notes"),
         }
+
+    @staticmethod
+    def _build_decision_summary(base_summary: str, state_snapshot: dict[str, Any]) -> str:
+        execution_insights = cast(dict[str, Any], state_snapshot.get("executionInsights") or {})
+        summary_parts = [base_summary]
+        if int(execution_insights.get("reducedStimulusCount") or 0) > 0:
+            summary_parts.append(
+                "최근 약한 자극으로 끝난 세션이 있어 계획 강도를 보수적으로 조정함"
+            )
+        if int(execution_insights.get("excessiveStimulusCount") or 0) > 0:
+            summary_parts.append("최근 과한 자극 세션이 있어 회복 비중을 늘림")
+        if int(execution_insights.get("scheduleShiftCount") or 0) > 0:
+            summary_parts.append("최근 일정 이동 패턴을 반영해 요일 고정성을 높임")
+        if int(execution_insights.get("unplannedSessionCount") or 0) > 0:
+            summary_parts.append("비계획 세션 누적분을 다음 주 부하 해석에 반영함")
+        if int(execution_insights.get("unplannedHardCount") or 0) > 0:
+            summary_parts.append("비계획 고강도/장거리 세션이 있어 회복 쪽으로 계획을 기울임")
+        return " | ".join(summary_parts)
 
     @staticmethod
     def _readiness_score_from_history(

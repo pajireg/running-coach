@@ -134,6 +134,10 @@ scripts/            인증/운영 스크립트
 tests/unit/         단위 테스트
 ```
 
+문서:
+- [Coaching Architecture](docs/COACHING_ARCHITECTURE.md)
+- [Coaching Algorithm](docs/COACHING_ALGORITHM.md)
+
 ## 보안 주의사항
 
 다음 파일과 디렉터리는 커밋하지 마십시오.
@@ -166,3 +170,5 @@ tests/unit/         단위 테스트
   - 계획 대비 수행률과 target match
 
 이 구조 때문에 LLM은 계획을 처음부터 창조하는 역할보다, 규칙 기반 skeleton 안에서 세션 내용과 설명을 보정하는 역할에 더 가깝습니다.
+
+알고리즘 상세 설명은 [Coaching Algorithm](docs/COACHING_ALGORITHM.md) 문서를 참고하십시오.

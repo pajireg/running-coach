@@ -147,6 +147,13 @@ class TrainingPlanner:
         context_json = json.dumps(metrics_dict["context"], ensure_ascii=False)
         background_json = json.dumps(training_background or {}, ensure_ascii=False)
         skeleton_json = json.dumps(weekly_skeleton, ensure_ascii=False)
+        coaching_state = cast(
+            dict[str, Any], (training_background or {}).get("coachingState") or {}
+        )
+        execution_insights = json.dumps(
+            cast(dict[str, Any], coaching_state.get("executionInsights") or {}),
+            ensure_ascii=False,
+        )
 
         prompt_lines = [
             "You are an elite running coach.",
@@ -161,6 +168,7 @@ class TrainingPlanner:
             ),
             f"- Context (Yesterday Actual vs Planned): {context_json}",
             f"- Long-Term Training Background: {background_json}",
+            f"- Recent Execution Insights: {execution_insights}",
             f"- Weekly Skeleton (must preserve): {skeleton_json}",
             "",
             "RACE CONTEXT:",
@@ -170,6 +178,10 @@ class TrainingPlanner:
             "1. ADAPTIVE PLANNING:",
             "   - Use 'yesterday_actual' to adapt today and the rest of the week.",
             "   - Use the long-term background to avoid overreaching beyond proven volume.",
+            (
+                "   - Use recent execution insights to understand whether planned "
+                "sessions were too hard, too easy, or shifted."
+            ),
             "   - If the athlete skipped or added work, do not blindly stack intensity.",
             "   - If load is high and HRV is low, prioritize recovery or rest.",
             (
@@ -279,9 +291,9 @@ class TrainingPlanner:
                             "workoutName",
                             workout.get("workoutName", f"{WORKOUT_PREFIX}: Day {index + 1}"),
                         ),
-                        "description": workout.get(
-                            "description",
-                            skeleton_day.get("descriptionGuide", ""),
+                        "description": self._combine_description(
+                            workout.get("description"),
+                            str(skeleton_day.get("descriptionGuide", "") or ""),
                         ),
                         "sportType": "RUNNING",
                         "steps": steps,
@@ -290,6 +302,18 @@ class TrainingPlanner:
             )
 
         return {"plan": normalized_days}
+
+    @staticmethod
+    def _combine_description(description: Any, description_guide: str) -> str:
+        base_description = str(description or "").strip()
+        guide = description_guide.strip()
+        if not base_description:
+            return guide
+        if not guide:
+            return base_description
+        if guide in base_description:
+            return base_description
+        return f"{base_description}\n근거: {guide}"
 
     def _build_weekly_skeleton(
         self,
@@ -308,6 +332,13 @@ class TrainingPlanner:
         injury = float(state.get("injuryRiskScore") or 20.0)
         active_injury = cast(dict[str, Any], state.get("activeInjury") or {})
         active_injury_severity = int(active_injury.get("severity") or 0)
+        execution_insights = cast(dict[str, Any], state.get("executionInsights") or {})
+        reduced_stimulus_count = int(execution_insights.get("reducedStimulusCount") or 0)
+        excessive_stimulus_count = int(execution_insights.get("excessiveStimulusCount") or 0)
+        schedule_shift_count = int(execution_insights.get("scheduleShiftCount") or 0)
+        unplanned_session_count = int(execution_insights.get("unplannedSessionCount") or 0)
+        unplanned_easy_count = int(execution_insights.get("unplannedEasyCount") or 0)
+        unplanned_hard_count = int(execution_insights.get("unplannedHardCount") or 0)
         recent_7d = float(metrics.context.recent_7d_run_distance_km or 0.0)
         recent_30d = float(metrics.context.recent_30d_run_distance_km or 0.0)
         recent_count = int(metrics.context.recent_30d_run_count or 0)
@@ -330,6 +361,7 @@ class TrainingPlanner:
             if item.get("preferredSessionType") == "long_run" and item.get("isAvailable", True)
         ]
         planning_notes: list[str] = []
+        execution_adjustment_notes: list[str] = []
         if block.get("weeklyVolumeTargetKm") is not None:
             baseline_weekly_km = float(block["weeklyVolumeTargetKm"])
             planning_notes.append(
@@ -340,6 +372,20 @@ class TrainingPlanner:
             planning_notes.append(
                 "최근 자전거·등산 등 비러닝 부하를 반영해 러닝 볼륨을 보수적으로 조정했습니다."
             )
+        if reduced_stimulus_count >= 2:
+            baseline_weekly_km *= 0.92
+            note = (
+                "최근 계획보다 약한 자극으로 끝난 세션이 반복되어 이번 주 강도를 낮췄습니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
+        if excessive_stimulus_count >= 2:
+            baseline_weekly_km *= 0.9
+            note = (
+                "최근 계획보다 강한 자극이 반복되어 회복 비중을 늘리고 볼륨을 감산했습니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
 
         if active_injury_severity >= 6:
             run_days = 3
@@ -367,6 +413,32 @@ class TrainingPlanner:
         if non_running_minutes >= 240:
             quality_count = max(0, quality_count - 1)
             run_days = max(4, run_days - 1)
+        if reduced_stimulus_count >= 2:
+            quality_count = max(0, quality_count - 1)
+        if excessive_stimulus_count >= 2:
+            quality_count = max(0, quality_count - 1)
+            run_days = max(4, run_days - 1)
+        if unplanned_hard_count >= 1:
+            quality_count = max(0, quality_count - 1)
+            run_days = max(4, run_days - 1)
+            note = (
+                "최근 비계획 고강도 또는 장거리 세션이 있어 이번 주는 회복 우선으로 조정했습니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
+        elif unplanned_session_count >= 2:
+            quality_count = max(0, quality_count - 1)
+            note = (
+                "최근 비계획 세션이 누적되어 이번 주는 계획 단순성과 회복을 우선합니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
+        elif unplanned_easy_count >= 2:
+            note = (
+                "최근 비계획 easy/base 세션이 있어 주간 총량은 유지하되 강도 증가는 억제합니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
 
         target_weekly_km = baseline_weekly_km * volume_factor
         phase = str(block.get("phase") or "").lower()
@@ -416,6 +488,12 @@ class TrainingPlanner:
                 if i in quality_candidates or abs(i - long_run_index) > 1
             ] or quality_candidates
             planning_notes.append("선호한 mid-week 품질훈련 요일을 우선 검토했습니다.")
+        if schedule_shift_count >= 2 and preferred_quality_indexes:
+            quality_candidates = sorted(
+                quality_candidates,
+                key=lambda i: (0 if i in preferred_quality_indexes else 1, i),
+            )
+            planning_notes.append("최근 일정 이동이 잦아 선호 요일 고정성을 더 높였습니다.")
         quality_index = quality_candidates[0] if quality_candidates and quality_count else None
 
         session_types = ["base"] * 7
@@ -480,9 +558,11 @@ class TrainingPlanner:
                 notes=self._session_notes_for_day(
                     session_type=session_type,
                     day_index=index,
+                    current_date=date_value,
                     quality_index=quality_index,
                     long_run_index=long_run_index,
                     planning_notes=planning_notes,
+                    execution_adjustment_notes=execution_adjustment_notes,
                 ),
             )
             skeleton.append(
@@ -597,29 +677,72 @@ class TrainingPlanner:
     def _session_notes_for_day(
         session_type: str,
         day_index: int,
+        current_date: str,
         quality_index: Optional[int],
         long_run_index: int,
         planning_notes: list[str],
+        execution_adjustment_notes: list[str],
     ) -> str:
         notes: list[str] = []
+        unavailability_note = next(
+            (
+                note
+                for note in planning_notes
+                if "불가 요일" in note and current_date in note
+            ),
+            "",
+        )
         if session_type == "long_run" and day_index == long_run_index:
             notes.append("이번 주 long run 선호 요일을 반영했습니다.")
         if session_type == "quality" and quality_index is not None and day_index == quality_index:
             notes.append("회복 간격을 고려해 이번 주 핵심 세션을 배치했습니다.")
         if session_type in {"rest", "recovery"}:
-            notes.extend(
-                note
-                for note in planning_notes
-                if "회복" in note or "휴식" in note or "불가 요일" in note or "비러닝" in note
-            )
+            if unavailability_note:
+                notes.append(unavailability_note)
+            else:
+                notes.extend(
+                    note
+                    for note in planning_notes
+                    if (
+                        ("회복" in note or "휴식" in note or "비러닝" in note)
+                        and "불가 요일" not in note
+                    )
+                )
+            if execution_adjustment_notes:
+                notes.append(execution_adjustment_notes[0])
         elif session_type == "long_run":
             notes.extend(
                 note for note in planning_notes if "long run" in note or "주간 목표" in note
             )
+            notes.extend(
+                note for note in execution_adjustment_notes if "장거리" in note or "회복" in note
+            )
         elif session_type == "base":
             notes.extend(note for note in planning_notes if "비러닝" in note or "주간 목표" in note)
+            adjustment_note = next(
+                (
+                    note
+                    for note in execution_adjustment_notes
+                    if "비계획" in note or "회복" in note
+                ),
+                "",
+            )
+            if adjustment_note:
+                notes.append(adjustment_note)
         elif session_type == "quality":
             notes.extend(note for note in planning_notes if "품질훈련" in note)
+            adjustment_note = next(
+                (
+                    note
+                    for note in execution_adjustment_notes
+                    if "약한 자극" in note
+                    or "강한 자극" in note
+                    or "비계획 고강도" in note
+                ),
+                "",
+            )
+            if adjustment_note:
+                notes.append(adjustment_note)
         return " ".join(dict.fromkeys(note for note in notes if note)).strip()
 
     def _should_replace_steps(

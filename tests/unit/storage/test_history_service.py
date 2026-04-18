@@ -82,6 +82,16 @@ class _SummaryHistoryService(CoachingHistoryService):
                 "avg_target_match_score": 0.91,
                 "unplanned_run_count": 1,
             }
+        if "FROM workout_executions" in query and "as_planned_count" in query:
+            return {
+                "as_planned_count": 3,
+                "reduced_stimulus_count": 1,
+                "excessive_stimulus_count": 1,
+                "schedule_shift_count": 1,
+                "unplanned_session_count": 1,
+                "unplanned_easy_count": 1,
+                "unplanned_hard_count": 0,
+            }
         if "FROM subjective_feedback" in query:
             return {
                 "feedback_date": date(2026, 4, 17),
@@ -182,6 +192,10 @@ def test_summarize_coaching_state_combines_load_feedback_and_adherence():
     assert state["subjectiveFeedback"]["motivationScore"] == 8
     assert state["adherence"]["avgTargetMatchScore"] == 0.91
     assert state["adherence"]["executionRate"] == 0.83
+    assert state["executionInsights"]["reducedStimulusCount"] == 1
+    assert state["executionInsights"]["excessiveStimulusCount"] == 1
+    assert state["executionInsights"]["unplannedEasyCount"] == 1
+    assert state["executionInsights"]["unplannedHardCount"] == 0
     assert state["readinessScore"] > 0
     assert state["fatigueScore"] > state["injuryRiskScore"]
 
@@ -257,6 +271,39 @@ def test_select_best_planned_workout_rejects_low_quality_category_mismatch():
     assert selected is None
 
 
+class _ScheduleShiftSelectionHistoryService(CoachingHistoryService):
+    def __init__(self):
+        super().__init__(_FakeDb(), "user@example.com")
+
+    def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
+        if "FROM planned_workouts pw" in query:
+            return [
+                {
+                    "planned_workout_id": "pw-1",
+                    "total_duration_seconds": 3000,
+                    "workout_name": "Running Coach: Base Run",
+                    "plan_payload": {"workout": {"steps": [{"type": "Run"}]}},
+                    "workout_date": date(2026, 4, 15),
+                    "already_matched": False,
+                }
+            ]
+        return []
+
+
+def test_select_best_planned_workout_accepts_same_category_schedule_shift():
+    service = _ScheduleShiftSelectionHistoryService()
+
+    selected = service._select_best_planned_workout(
+        athlete_id="athlete-1",
+        activity_date=date(2026, 4, 17),
+        actual_category="base",
+        actual_duration=2800,
+    )
+
+    assert selected is not None
+    assert selected["planned_workout_id"] == "pw-1"
+
+
 def test_adherence_history_confidence_scales_with_plan_count():
     assert CoachingHistoryService._adherence_history_confidence(0) == 0.0
     assert CoachingHistoryService._adherence_history_confidence(2) == 0.5
@@ -289,3 +336,45 @@ def test_execution_status_classification():
         CoachingHistoryService._execution_status("unplanned", "base", None, 0.0)
         == "completed_unplanned"
     )
+
+
+def test_deviation_reason_and_interpretation_classification():
+    assert (
+        CoachingHistoryService._deviation_reason("quality", "base", 0.9, 0.62, 0)
+        == "reduced_stimulus"
+    )
+    assert (
+        CoachingHistoryService._deviation_reason("recovery", "quality", 1.0, 0.52, 0)
+        == "excessive_stimulus"
+    )
+    assert (
+        CoachingHistoryService._deviation_reason("base", "base", 0.95, 0.84, 1)
+        == "schedule_shift"
+    )
+    assert "강한 자극" in CoachingHistoryService._coach_interpretation(
+        planned_category="recovery",
+        actual_category="quality",
+        completion_ratio=1.0,
+        deviation_reason="excessive_stimulus",
+    )
+
+
+def test_build_decision_summary_includes_execution_insights():
+    summary = CoachingHistoryService._build_decision_summary(
+        "MAINTAINING 상태에서 5개 세션 계획 생성",
+        {
+            "executionInsights": {
+                "reducedStimulusCount": 1,
+                "excessiveStimulusCount": 1,
+                "scheduleShiftCount": 1,
+                "unplannedSessionCount": 2,
+                "unplannedHardCount": 1,
+            }
+        },
+    )
+
+    assert "약한 자극" in summary
+    assert "과한 자극" in summary
+    assert "일정 이동" in summary
+    assert "비계획 세션" in summary
+    assert "비계획 고강도" in summary

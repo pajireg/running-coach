@@ -47,3 +47,47 @@ def test_list_recent_completed_activities_returns_calendar_payload():
     assert activities[0]["distanceKm"] == 5.11
     assert activities[0]["executionStatus"] == "completed_substituted"
     assert "상태: 대체 수행" in activities[0]["notes"]
+
+
+class _UnplannedCalendarHistoryService(CoachingHistoryService):
+    def _athlete_id(self) -> str:  # type: ignore[override]
+        return "athlete-1"
+
+    def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
+        if "FROM activities" in query:
+            return [
+                {
+                    "garmin_activity_id": 456,
+                    "activity_date": date(2026, 4, 16),
+                    "started_at": datetime(2026, 4, 16, 6, 0, tzinfo=timezone.utc),
+                    "name": "인터벌 러닝",
+                    "sport_type": "running",
+                    "distance_km": 8.0,
+                    "duration_seconds": 2400,
+                    "avg_pace": "5:00",
+                    "avg_hr": 170,
+                    "max_hr": 184,
+                    "elevation_gain_m": 10,
+                    "execution_status": "completed_unplanned",
+                    "planned_category": "unplanned",
+                    "actual_category": "quality",
+                    "planned_workout_name": None,
+                    "target_match_score": None,
+                    "deviation_reason": "unplanned_session",
+                    "coach_interpretation": (
+                        "계획에 없던 세션으로, 다음 주 부하 해석 시 "
+                        "별도로 반영해야 합니다."
+                    ),
+                }
+            ]
+        return []
+
+
+def test_list_recent_completed_activities_describes_unplanned_hard_session():
+    service = _UnplannedCalendarHistoryService(_FakeDb(), "user@example.com")
+
+    activities = service.list_recent_completed_activities(as_of=date(2026, 4, 18), days=30)
+
+    assert len(activities) == 1
+    assert "비계획 고강도 러닝" in activities[0]["notes"]
+    assert "계획 밖 고강도 세션" in activities[0]["notes"]
