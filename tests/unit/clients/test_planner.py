@@ -90,6 +90,103 @@ def test_build_weekly_skeleton_places_long_run_on_weekend_and_limits_quality():
     assert len(quality_runs) <= 1
 
 
+def test_build_weekly_skeleton_spaces_recent_long_run_when_recovery_is_not_strong():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 19),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=17.0,
+            recent_30d_run_distance_km=72.0,
+            recent_30d_run_count=10,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(distance="10K", goal_time="49:00"),
+        training_background={
+            "coachingState": {
+                "readinessScore": 58,
+                "fatigueScore": 55,
+                "injuryRiskScore": 25,
+                "load": {"daysSinceLongRun": 1},
+            },
+            "planningConstraints": {
+                "availability": [
+                    {
+                        "weekday": 5,
+                        "isAvailable": True,
+                        "maxDurationMinutes": 90,
+                        "preferredSessionType": "long_run",
+                    },
+                    {
+                        "weekday": 6,
+                        "isAvailable": True,
+                        "maxDurationMinutes": 90,
+                        "preferredSessionType": "long_run",
+                    },
+                ],
+            },
+        },
+    )
+
+    today = next(day for day in skeleton if day["date"] == "2026-04-19")
+    long_runs = [day for day in skeleton if day["sessionType"] == "long_run"]
+    assert today["sessionType"] != "long_run"
+    assert len(long_runs) == 1
+    assert long_runs[0]["date"] == "2026-04-25"
+    assert "회복 요구도" in long_runs[0]["descriptionGuide"]
+
+
+def test_build_weekly_skeleton_allows_close_long_run_when_state_is_strong():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 19),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(),
+        context=ActivityContext(
+            recent_7d_run_distance_km=17.0,
+            recent_30d_run_distance_km=72.0,
+            recent_30d_run_count=10,
+        ),
+    )
+
+    skeleton = planner._build_weekly_skeleton(
+        metrics=metrics,
+        race_config=RaceConfig(distance="10K", goal_time="49:00"),
+        training_background={
+            "coachingState": {
+                "readinessScore": 76,
+                "fatigueScore": 42,
+                "injuryRiskScore": 18,
+                "load": {"daysSinceLongRun": 1},
+            },
+            "planningConstraints": {
+                "availability": [
+                    {
+                        "weekday": 5,
+                        "isAvailable": True,
+                        "maxDurationMinutes": 90,
+                        "preferredSessionType": "long_run",
+                    },
+                    {
+                        "weekday": 6,
+                        "isAvailable": True,
+                        "maxDurationMinutes": 90,
+                        "preferredSessionType": "long_run",
+                    },
+                ],
+            },
+        },
+    )
+
+    today = next(day for day in skeleton if day["date"] == "2026-04-19")
+    assert today["sessionType"] == "long_run"
+    assert "회복·부하 신호가 안정적" in today["descriptionGuide"]
+
+
 def test_normalize_plan_json_preserves_skeleton_and_uses_fallback_steps():
     planner = TrainingPlanner(gemini_client=None)
     metrics = AdvancedMetrics(

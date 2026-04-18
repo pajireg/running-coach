@@ -348,6 +348,8 @@ Before the LLM is called, a rule engine decides:
 - well-executed quality sessions prevent the engine from becoming too conservative
 - recovery sessions that were too hard make the next week stricter on easy-day control
 - long runs finished too hard shorten the next long run and reduce intensity pressure
+- recent key sessions increase short-term recovery demand; close follow-up quality or long-run
+  sessions are allowed only when recovery, fatigue, injury, and execution-quality signals are stable
 - long runs prefer weekend and user-preferred long-run days
 - quality prefers mid-week and user-preferred quality days
 - unavailable weekdays are forced to rest

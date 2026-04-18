@@ -330,6 +330,15 @@ class TrainingPlanner:
         readiness = float(state.get("readinessScore") or 50.0)
         fatigue = float(state.get("fatigueScore") or 50.0)
         injury = float(state.get("injuryRiskScore") or 20.0)
+        load_state = cast(dict[str, Any], state.get("load") or {})
+        raw_days_since_long_run = load_state.get("daysSinceLongRun")
+        days_since_long_run = (
+            raw_days_since_long_run if isinstance(raw_days_since_long_run, int) else None
+        )
+        raw_days_since_quality = load_state.get("daysSinceQuality")
+        days_since_quality = (
+            raw_days_since_quality if isinstance(raw_days_since_quality, int) else None
+        )
         active_injury = cast(dict[str, Any], state.get("activeInjury") or {})
         active_injury_severity = int(active_injury.get("severity") or 0)
         execution_insights = cast(dict[str, Any], state.get("executionInsights") or {})
@@ -365,6 +374,25 @@ class TrainingPlanner:
         ]
         planning_notes: list[str] = []
         execution_adjustment_notes: list[str] = []
+        strong_recovery_state = (
+            readiness >= 70
+            and fatigue <= 50
+            and injury <= 25
+            and active_injury_severity == 0
+            and recovery_too_hard_count == 0
+            and long_run_too_hard_count == 0
+        )
+        recent_key_session = (
+            (days_since_long_run is not None and days_since_long_run <= 1)
+            or (days_since_quality is not None and days_since_quality <= 1)
+        )
+        recovery_demand_days = 0
+        if fatigue >= 80 or injury >= 60 or active_injury_severity >= 6:
+            recovery_demand_days = 3
+        elif fatigue >= 65 or injury >= 40 or readiness < 45:
+            recovery_demand_days = 2
+        elif recent_key_session and not strong_recovery_state:
+            recovery_demand_days = 1
         if block.get("weeklyVolumeTargetKm") is not None:
             baseline_weekly_km = float(block["weeklyVolumeTargetKm"])
             planning_notes.append(
@@ -375,6 +403,14 @@ class TrainingPlanner:
             planning_notes.append(
                 "최근 자전거·등산 등 비러닝 부하를 반영해 러닝 볼륨을 보수적으로 조정했습니다."
             )
+        if recovery_demand_days:
+            baseline_weekly_km *= 0.92
+            note = (
+                f"최근 핵심 세션과 현재 회복 신호를 반영해 "
+                f"초반 {recovery_demand_days}일은 회복 요구도를 우선했습니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
         if reduced_stimulus_count >= 2:
             baseline_weekly_km *= 0.92
             note = (
@@ -493,6 +529,13 @@ class TrainingPlanner:
             i for i, day in enumerate(days) if day["date"].weekday() in preferred_long_run_days
         ]
         long_run_index = weekend_indexes[-1] if weekend_indexes else 6
+        if recent_key_session and strong_recovery_state:
+            note = (
+                "최근 핵심 세션 이력이 있지만 회복·부하 신호가 안정적이라 "
+                "주말 핵심 세션 배치를 허용했습니다."
+            )
+            planning_notes.append(note)
+            execution_adjustment_notes.append(note)
         if preferred_long_run_indexes:
             long_run_index = preferred_long_run_indexes[0]
             planning_notes.append("주말 long run 선호를 반영했습니다.")
@@ -556,6 +599,29 @@ class TrainingPlanner:
 
         if session_types[0] == "quality":
             session_types[1] = "recovery"
+
+        for index in range(min(recovery_demand_days, len(session_types))):
+            if session_types[index] in {"quality", "long_run"}:
+                session_types[index] = "recovery" if recovery_demand_days == 1 else "rest"
+            elif recovery_demand_days >= 2 and session_types[index] == "base":
+                session_types[index] = "recovery"
+
+        if recovery_demand_days and "long_run" not in session_types:
+            later_long_run_candidates = [
+                index
+                for index in preferred_long_run_indexes + weekend_indexes
+                if index >= recovery_demand_days
+                and availability_map.get(days[index]["date"].weekday(), {}).get(
+                    "isAvailable",
+                    True,
+                )
+            ]
+            if later_long_run_candidates:
+                replacement_index = sorted(set(later_long_run_candidates))[0]
+                session_types[replacement_index] = "long_run"
+                planning_notes.append(
+                    "초반 회복 요구도를 우선한 뒤 가능한 주말에 long run을 다시 배치했습니다."
+                )
 
         skeleton = []
         for index, day in enumerate(days):

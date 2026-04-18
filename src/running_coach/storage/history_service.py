@@ -1035,7 +1035,26 @@ class CoachingHistoryService:
                 END), 0)::numeric, 2) AS last_28d_distance_km,
                 COUNT(*) FILTER (WHERE activity_date >= %(d7)s) AS last_7d_run_count,
                 MAX(activity_date) FILTER (
-                    WHERE activity_date >= %(d21)s AND distance_km >= 15
+                    WHERE activity_date >= %(d21)s
+                      AND (
+                        distance_km >= 15
+                        OR UPPER(COALESCE(name, '')) LIKE '%%LONG RUN%%'
+                        OR EXISTS (
+                            SELECT 1
+                            FROM workout_executions we
+                            WHERE we.activity_id = activities.activity_id
+                              AND (
+                                COALESCE(
+                                    we.execution_payload->>'actualCategory',
+                                    ''
+                                ) = 'long_run'
+                                OR COALESCE(
+                                    we.execution_payload->>'plannedCategory',
+                                    ''
+                                ) = 'long_run'
+                              )
+                        )
+                      )
                 ) AS last_long_run_date,
                 MAX(activity_date) FILTER (
                     WHERE activity_date >= %(d14)s
