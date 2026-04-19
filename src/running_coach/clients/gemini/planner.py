@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 
 from ...config.constants import GEMINI_MODEL
+from ...core.pace_zones import PaceZoneEngine
 from ...exceptions import GeminiQuotaExceededError, GeminiResponseParseError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
@@ -147,6 +148,10 @@ class TrainingPlanner:
         context_json = json.dumps(metrics_dict["context"], ensure_ascii=False)
         background_json = json.dumps(training_background or {}, ensure_ascii=False)
         skeleton_json = json.dumps(weekly_skeleton, ensure_ascii=False)
+        pace_zones_json = json.dumps(
+            weekly_skeleton[0].get("paceTargets", {}) if weekly_skeleton else {},
+            ensure_ascii=False,
+        )
         coaching_state = cast(
             dict[str, Any], (training_background or {}).get("coachingState") or {}
         )
@@ -170,6 +175,7 @@ class TrainingPlanner:
             f"- Long-Term Training Background: {background_json}",
             f"- Recent Execution Insights: {execution_insights}",
             f"- Weekly Skeleton (must preserve): {skeleton_json}",
+            f"- Personalized Pace Targets: {pace_zones_json}",
             "",
             "RACE CONTEXT:",
             race_info.strip(),
@@ -197,6 +203,7 @@ class TrainingPlanner:
             "4. PACE & TARGETS:",
             f"   {pace_rule}".rstrip(),
             "   - Calculate training zones from PRs and Lactate Threshold.",
+            "   - Prefer the provided Personalized Pace Targets for targetValue.",
             "   - Use 'speed' only when a concrete pace is appropriate.",
             "   - targetValue must be plain MM:SS only.",
             "5. Weekend: exactly one Long Run on Saturday or Sunday.",
@@ -280,7 +287,7 @@ class TrainingPlanner:
             if self._should_replace_steps(steps, skeleton_day):
                 steps = self._default_steps_for_skeleton_day(skeleton_day)
             else:
-                steps = [self._normalize_warmup_cooldown_target(step) for step in steps]
+                steps = [self._normalize_step_target(step, skeleton_day) for step in steps]
 
             normalized_days.append(
                 {
@@ -376,6 +383,7 @@ class TrainingPlanner:
         ]
         planning_notes: list[str] = []
         execution_adjustment_notes: list[str] = []
+        pace_zones = PaceZoneEngine.calculate(metrics, race_config)
         strong_recovery_state = (
             readiness >= 70
             and fatigue <= 50
@@ -664,6 +672,7 @@ class TrainingPlanner:
                     "targetMinutes": target_minutes,
                     "workoutName": workout_name,
                     "descriptionGuide": description_guide,
+                    "paceTargets": pace_zones.to_dict(),
                 }
             )
 
@@ -861,47 +870,118 @@ class TrainingPlanner:
     def _default_steps_for_skeleton_day(self, skeleton_day: dict[str, Any]) -> list[dict[str, Any]]:
         session_type = str(skeleton_day.get("sessionType") or "base")
         target_seconds = int(skeleton_day.get("targetMinutes") or 0) * 60
+        pace_zones = cast(dict[str, str], skeleton_day.get("paceTargets") or {})
+        pace_for = self._pace_for_step
         if session_type == "rest":
             return []
         if session_type == "recovery":
             return [
-                self._step("Warmup", 300, target_type="speed", target_value="7:00"),
-                self._step("Run", max(target_seconds - 600, 900)),
-                self._step("Cooldown", 300, target_type="speed", target_value="7:20"),
+                self._step(
+                    "Warmup",
+                    300,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Warmup", session_type),
+                ),
+                self._step(
+                    "Run",
+                    max(target_seconds - 600, 900),
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Run", session_type),
+                ),
+                self._step(
+                    "Cooldown",
+                    300,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Cooldown", session_type),
+                ),
             ]
         if session_type == "quality":
             quality_block = max(target_seconds - 1500, 1200)
             repeat = max(3, min(6, quality_block // 360))
             interval_seconds = max(180, quality_block // (repeat * 2))
-            steps = [self._step("Warmup", 900, target_type="speed", target_value="6:50")]
+            steps = [
+                self._step(
+                    "Warmup",
+                    900,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Warmup", session_type),
+                )
+            ]
             for _ in range(repeat):
-                steps.append(self._step("Interval", interval_seconds, target_type="speed"))
+                steps.append(
+                    self._step(
+                        "Interval",
+                        interval_seconds,
+                        target_type="speed",
+                        target_value=pace_for(pace_zones, "Interval", session_type),
+                    )
+                )
                 steps.append(
                     self._step(
                         "Recovery",
                         interval_seconds,
                         target_type="speed",
-                        target_value="7:20",
+                        target_value=pace_for(pace_zones, "Recovery", session_type),
                     )
                 )
-            steps.append(self._step("Cooldown", 600, target_type="speed", target_value="7:20"))
+            steps.append(
+                self._step(
+                    "Cooldown",
+                    600,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Cooldown", session_type),
+                )
+            )
             return steps
         if session_type == "long_run":
             return [
-                self._step("Warmup", 600, target_type="speed", target_value="6:50"),
-                self._step("Run", max(target_seconds - 900, 2700)),
-                self._step("Cooldown", 300, target_type="speed", target_value="7:15"),
+                self._step(
+                    "Warmup",
+                    600,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Warmup", session_type),
+                ),
+                self._step(
+                    "Run",
+                    max(target_seconds - 900, 2700),
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Run", session_type),
+                ),
+                self._step(
+                    "Cooldown",
+                    300,
+                    target_type="speed",
+                    target_value=pace_for(pace_zones, "Cooldown", session_type),
+                ),
             ]
         return [
-            self._step("Warmup", 600, target_type="speed", target_value="6:45"),
-            self._step("Run", max(target_seconds - 900, 1800)),
-            self._step("Cooldown", 300, target_type="speed", target_value="7:10"),
+            self._step(
+                "Warmup",
+                600,
+                target_type="speed",
+                target_value=pace_for(pace_zones, "Warmup", session_type),
+            ),
+            self._step(
+                "Run",
+                max(target_seconds - 900, 1800),
+                target_type="speed",
+                target_value=pace_for(pace_zones, "Run", session_type),
+            ),
+            self._step(
+                "Cooldown",
+                300,
+                target_type="speed",
+                target_value=pace_for(pace_zones, "Cooldown", session_type),
+            ),
         ]
 
     @staticmethod
-    def _normalize_warmup_cooldown_target(step: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_step_target(
+        step: dict[str, Any],
+        skeleton_day: dict[str, Any],
+    ) -> dict[str, Any]:
         step_type = str(step.get("type") or "")
-        if step_type not in {"Warmup", "Cooldown"}:
+        if step_type not in {"Warmup", "Cooldown", "Run", "Recovery", "Interval"}:
             return step
         if step.get("targetType") == "speed" and re.fullmatch(
             r"\d+:\d{2}",
@@ -910,8 +990,34 @@ class TrainingPlanner:
             return step
         normalized = dict(step)
         normalized["targetType"] = "speed"
-        normalized["targetValue"] = "6:50" if step_type == "Warmup" else "7:20"
+        normalized["targetValue"] = TrainingPlanner._pace_for_step(
+            cast(dict[str, str], skeleton_day.get("paceTargets") or {}),
+            step_type,
+            str(skeleton_day.get("sessionType") or "base"),
+        )
         return normalized
+
+    @staticmethod
+    def _pace_for_step(
+        pace_zones: dict[str, str],
+        step_type: str,
+        session_type: str,
+    ) -> str:
+        if step_type == "Warmup":
+            return pace_zones.get("warmup", "6:45")
+        if step_type == "Cooldown":
+            return pace_zones.get("cooldown", "7:10")
+        if step_type == "Recovery":
+            return pace_zones.get("recovery", "7:20")
+        if step_type == "Interval":
+            return pace_zones.get("interval", "4:30")
+        if session_type == "recovery":
+            return pace_zones.get("recovery", "7:20")
+        if session_type == "long_run":
+            return pace_zones.get("longRun", "6:40")
+        if session_type == "quality":
+            return pace_zones.get("tempo", "5:15")
+        return pace_zones.get("base", "6:45")
 
     @staticmethod
     def _step(

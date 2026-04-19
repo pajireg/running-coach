@@ -316,6 +316,27 @@ Signals that support faster base prescriptions:
 
 This means a base run might gradually move from `6:30/km` to `6:00/km` or faster, but only if the same effort remains genuinely easy.
 
+### Personalized pace-zone engine
+
+Workout pace targets are no longer fixed constants. The planner builds a `PaceZoneEngine` output for each weekly skeleton and passes those targets to both the LLM prompt and fallback workout steps.
+
+Priority order:
+
+- Garmin lactate-threshold pace
+- configured race target pace
+- inferred threshold pace from PRs such as 5K, 10K, half marathon, or marathon
+- conservative default threshold pace when no pace data exists
+
+The engine calculates center paces for:
+
+- interval
+- threshold / tempo
+- base / long run
+- recovery
+- warmup / cooldown
+
+Garmin still receives these as pace zones, not exact single-speed mandates. The target pace is the center of the zone, and `WorkoutManager` applies session-specific margins.
+
 ### Warmup and cooldown pace zones
 
 Warmup and cooldown steps also use pace zones, but they are intentionally loose.

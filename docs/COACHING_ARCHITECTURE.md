@@ -235,6 +235,7 @@ The system is designed to degrade gracefully.
 - planned-vs-actual interpretation feeds back into next-week planning
 - Google Calendar clearly separates future plans and completed activities
 - cross-training load and Garmin-native load are both incorporated
+- workout pace targets are personalized through `PaceZoneEngine` before Garmin upload
 
 ## Current Limits
 

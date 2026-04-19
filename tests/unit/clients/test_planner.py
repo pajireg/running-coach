@@ -1,11 +1,12 @@
 from datetime import date
 
 from running_coach.clients.gemini.planner import TrainingPlanner
+from running_coach.core.pace_zones import PaceZoneEngine
 from running_coach.models.config import RaceConfig
 from running_coach.models.context import ActivityContext
 from running_coach.models.health import HealthMetrics
 from running_coach.models.metrics import AdvancedMetrics
-from running_coach.models.performance import PerformanceMetrics
+from running_coach.models.performance import LactateThreshold, PerformanceMetrics
 
 
 def test_normalize_plan_json_rewrites_dates_and_invalid_targets():
@@ -54,8 +55,8 @@ def test_normalize_plan_json_rewrites_dates_and_invalid_targets():
     assert normalized["plan"][0]["date"] == "2026-04-17"
     step = normalized["plan"][0]["workout"]["steps"][0]
     assert step["durationValue"] == 2400
-    assert step["targetType"] == "no_target"
-    assert step["targetValue"] == "0:00"
+    assert step["targetType"] == "speed"
+    assert step["targetValue"] == "4:30"
 
 
 def test_build_weekly_skeleton_places_long_run_on_weekend_and_limits_quality():
@@ -628,6 +629,31 @@ def test_default_steps_assign_loose_pace_targets_to_warmup_and_cooldown():
     assert cooldown["type"] == "Cooldown"
     assert cooldown["targetType"] == "speed"
     assert cooldown["targetValue"] == "7:10"
+    assert steps[1]["targetType"] == "speed"
+    assert steps[1]["targetValue"] == "6:45"
+
+
+def test_default_steps_use_personalized_pace_targets_from_skeleton():
+    planner = TrainingPlanner(gemini_client=None)
+    metrics = AdvancedMetrics(
+        date=date(2026, 4, 17),
+        health=HealthMetrics(),
+        performance=PerformanceMetrics(
+            lactate_threshold=LactateThreshold(pace="4:30/km", heart_rate=174)
+        ),
+        context=ActivityContext(),
+    )
+    base_day = {
+        "sessionType": "base",
+        "targetMinutes": 40,
+        "paceTargets": PaceZoneEngine.calculate(metrics, RaceConfig()).to_dict(),
+    }
+
+    steps = planner._default_steps_for_skeleton_day(base_day)
+
+    assert steps[0]["targetValue"] == "6:20"
+    assert steps[1]["targetValue"] == "6:20"
+    assert steps[-1]["targetValue"] == "6:45"
 
 
 def test_normalize_plan_json_adds_pace_targets_to_warmup_and_cooldown():
@@ -685,6 +711,8 @@ def test_normalize_plan_json_adds_pace_targets_to_warmup_and_cooldown():
 
     steps = normalized["plan"][0]["workout"]["steps"]
     assert steps[0]["targetType"] == "speed"
-    assert steps[0]["targetValue"] == "6:50"
+    assert steps[0]["targetValue"] == "6:45"
+    assert steps[1]["targetType"] == "speed"
+    assert steps[1]["targetValue"] == "6:45"
     assert steps[-1]["targetType"] == "speed"
-    assert steps[-1]["targetValue"] == "7:20"
+    assert steps[-1]["targetValue"] == "7:10"
