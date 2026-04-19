@@ -1,6 +1,7 @@
 # Credentials & Tokens
 .env
 .garmin_tokens/
+.google/*.json
 credentials.json
 token_google.json
 
