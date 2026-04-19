@@ -44,6 +44,8 @@ services:
       - COACH_SCHEDULE_TIMES=${COACH_SCHEDULE_TIMES:-05:00,17:00}
       # auto=새 활동/계획 공백이 있을 때만 재계획, plan=매 실행마다 계획 생성
       - COACH_SERVICE_RUN_MODE=${COACH_SERVICE_RUN_MODE:-auto}
+      # Planner: legacy(기존 skeleton) | llm_driven(새 LLM 주도 + SafetyValidator)
+      - COACH_PLANNER_MODE=${COACH_PLANNER_MODE:-legacy}
       # 대회 정보 (선택 사항)
       - RACE_DATE=${RACE_DATE:-}
       - RACE_DISTANCE=${RACE_DISTANCE:-}
