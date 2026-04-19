@@ -166,6 +166,15 @@ class _FreshnessHistoryService(CoachingHistoryService):
             return {
                 "last_plan_created_at": self.rows.get("last_plan_created_at"),
                 "last_plan_decision_date": self.rows.get("last_plan_decision_date"),
+                "rationale": self.rows.get("rationale"),
+            }
+        if "metric_date" in query and "FROM daily_metrics" in query:
+            return {
+                "metric_date": self.rows.get("metric_date"),
+                "sleep_score": self.rows.get("sleep_score"),
+                "resting_hr": self.rows.get("resting_hr"),
+                "body_battery": self.rows.get("body_battery"),
+                "hrv": self.rows.get("hrv"),
             }
         if "MAX(created_at) AS latest_activity_created_at" in query:
             return {"latest_activity_created_at": self.rows.get("latest_activity_created_at")}
@@ -206,6 +215,7 @@ def test_summarize_plan_freshness_reuses_active_plan_without_new_activity():
     assert freshness["hasActivePlan"] is True
     assert freshness["hasNewActivitySinceLastPlan"] is False
     assert freshness["hasMissedPlannedWorkout"] is False
+    assert freshness["hasSignificantRecoveryChange"] is False
     assert freshness["shouldGeneratePlan"] is False
 
 
@@ -246,6 +256,71 @@ def test_summarize_plan_freshness_replans_after_missed_planned_workout():
     assert freshness["missedKeyWorkoutCount"] == 1
     assert freshness["shouldGeneratePlan"] is True
     assert freshness["reasons"] == ["missed_planned_workout"]
+
+
+def test_summarize_plan_freshness_replans_after_recovery_metrics_drop():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+            "metric_date": date(2026, 4, 19),
+            "sleep_score": 58,
+            "body_battery": 38,
+            "hrv": 46,
+            "resting_hr": 62,
+            "rationale": {
+                "health": {
+                    "sleepScore": 80,
+                    "bodyBattery": 72,
+                    "hrv": 64,
+                    "restingHR": 53,
+                }
+            },
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasSignificantRecoveryChange"] is True
+    assert freshness["recoveryShiftReasons"] == [
+        "sleep_score_drop",
+        "body_battery_drop",
+        "hrv_drop",
+        "resting_hr_spike",
+    ]
+    assert freshness["shouldGeneratePlan"] is True
+    assert freshness["reasons"] == ["significant_recovery_change"]
+
+
+def test_summarize_plan_freshness_ignores_same_day_stable_recovery_metrics():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 19, 5, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 19),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+            "metric_date": date(2026, 4, 19),
+            "sleep_score": 60,
+            "body_battery": 40,
+            "hrv": 45,
+            "resting_hr": 63,
+            "rationale": {
+                "health": {
+                    "sleepScore": 80,
+                    "bodyBattery": 72,
+                    "hrv": 64,
+                    "restingHR": 53,
+                }
+            },
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasSignificantRecoveryChange"] is False
+    assert freshness["shouldGeneratePlan"] is False
 
 
 def test_planned_workout_category_and_target_match_score():

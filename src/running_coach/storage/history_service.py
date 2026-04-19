@@ -252,7 +252,8 @@ class CoachingHistoryService:
         decision_row = self._fetchone(
             """
             SELECT created_at AS last_plan_created_at,
-                   decision_date AS last_plan_decision_date
+                   decision_date AS last_plan_decision_date,
+                   rationale
             FROM coach_decisions
             WHERE athlete_id = %(athlete_id)s
               AND decision_type = 'daily_plan'
@@ -260,6 +261,22 @@ class CoachingHistoryService:
             LIMIT 1
             """,
             {"athlete_id": athlete_id},
+        ) or {}
+        metric_row = self._fetchone(
+            """
+            SELECT
+                metric_date,
+                sleep_score,
+                resting_hr,
+                body_battery,
+                hrv
+            FROM daily_metrics
+            WHERE athlete_id = %(athlete_id)s
+              AND metric_date <= %(as_of)s
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """,
+            {"athlete_id": athlete_id, "as_of": as_of},
         ) or {}
         activity_row = self._fetchone(
             """
@@ -274,12 +291,18 @@ class CoachingHistoryService:
         last_plan_created_at = decision_row.get("last_plan_created_at")
         last_plan_decision_date = decision_row.get("last_plan_decision_date")
         latest_activity_created_at = activity_row.get("latest_activity_created_at")
+        latest_metric_date = metric_row.get("metric_date")
+        recovery_shift_reasons = self._recovery_shift_reasons(
+            decision_row=decision_row,
+            metric_row=metric_row,
+        )
         has_active_plan = active_plan_days >= horizon_days
         has_new_activity = (
             last_plan_created_at is not None
             and latest_activity_created_at is not None
             and latest_activity_created_at > last_plan_created_at
         )
+        has_significant_recovery_change = bool(recovery_shift_reasons)
         missed_start_date = as_of - timedelta(days=3)
         if last_plan_decision_date is not None:
             missed_start_date = max(missed_start_date, last_plan_decision_date)
@@ -323,6 +346,7 @@ class CoachingHistoryService:
             not has_active_plan
             or last_plan_created_at is None
             or has_new_activity
+            or has_significant_recovery_change
             or has_missed_planned_workout
         )
         reasons = []
@@ -332,6 +356,8 @@ class CoachingHistoryService:
             reasons.append("no_previous_plan_decision")
         if has_new_activity:
             reasons.append("new_activity_since_last_plan")
+        if has_significant_recovery_change:
+            reasons.append("significant_recovery_change")
         if has_missed_planned_workout:
             reasons.append("missed_planned_workout")
 
@@ -349,13 +375,65 @@ class CoachingHistoryService:
             "latestActivityCreatedAt": (
                 latest_activity_created_at.isoformat() if latest_activity_created_at else None
             ),
+            "latestMetricDate": latest_metric_date.isoformat() if latest_metric_date else None,
             "hasNewActivitySinceLastPlan": has_new_activity,
+            "hasSignificantRecoveryChange": has_significant_recovery_change,
+            "recoveryShiftReasons": recovery_shift_reasons,
             "missedWorkoutCount": missed_workout_count,
             "missedKeyWorkoutCount": missed_key_workout_count,
             "hasMissedPlannedWorkout": has_missed_planned_workout,
             "shouldGeneratePlan": should_generate_plan,
             "reasons": reasons,
         }
+
+    @staticmethod
+    def _recovery_shift_reasons(
+        decision_row: dict[str, Any],
+        metric_row: dict[str, Any],
+    ) -> list[str]:
+        """마지막 계획 시점 대비 재계획이 필요한 회복 지표 변화."""
+        if not decision_row or not metric_row:
+            return []
+
+        last_plan_decision_date = decision_row.get("last_plan_decision_date")
+        latest_metric_date = metric_row.get("metric_date")
+        if (
+            last_plan_decision_date is not None
+            and latest_metric_date is not None
+            and latest_metric_date <= last_plan_decision_date
+        ):
+            return []
+
+        rationale = cast(dict[str, Any], decision_row.get("rationale") or {})
+        baseline_health = cast(dict[str, Any], rationale.get("health") or {})
+        reasons: list[str] = []
+        comparisons = [
+            ("sleepScore", "sleep_score", -15, "sleep_score_drop"),
+            ("bodyBattery", "body_battery", -20, "body_battery_drop"),
+            ("hrv", "hrv", -12, "hrv_drop"),
+        ]
+        for baseline_key, current_key, drop_threshold, reason in comparisons:
+            baseline = CoachingHistoryService._float_or_none(baseline_health.get(baseline_key))
+            current = CoachingHistoryService._float_or_none(metric_row.get(current_key))
+            if (
+                baseline is not None
+                and current is not None
+                and current - baseline <= drop_threshold
+            ):
+                reasons.append(reason)
+
+        baseline_resting_hr = CoachingHistoryService._float_or_none(
+            baseline_health.get("restingHR")
+        )
+        current_resting_hr = CoachingHistoryService._float_or_none(metric_row.get("resting_hr"))
+        if (
+            baseline_resting_hr is not None
+            and current_resting_hr is not None
+            and current_resting_hr - baseline_resting_hr >= 7
+        ):
+            reasons.append("resting_hr_spike")
+
+        return reasons
 
     def record_subjective_feedback(self, feedback: SubjectiveFeedback) -> None:
         """주관 피드백 upsert."""
