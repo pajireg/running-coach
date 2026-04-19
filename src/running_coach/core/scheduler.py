@@ -26,14 +26,16 @@ class SchedulerService:
 
     def run(self) -> None:
         """서비스 모드 실행"""
-        target_time = f"{self.settings.schedule_hour:02d}:00"
+        target_times = self.settings.parsed_schedule_times()
 
         logger.info("--- %s: Advanced Adaptive Trainer ---", APP_NAME)
-        logger.info(f"서비스 모드 실행 중. 매일 {target_time}에 예약됨.")
+        logger.info(f"서비스 모드 실행 중. 매일 {', '.join(target_times)}에 예약됨.")
+        logger.info(f"실행 모드: {self.settings.service_run_mode}")
         logger.info(f"근력운동 포함: {self.settings.include_strength}")
 
         # 스케줄 등록
-        schedule.every().day.at(target_time).do(self._run_job)
+        for target_time in target_times:
+            schedule.every().day.at(target_time).do(self._run_job)
 
         logger.info(f"스케줄러 시작됨. 다음 실행: {schedule.next_run()}")
 
@@ -45,6 +47,6 @@ class SchedulerService:
     def _run_job(self) -> None:
         """스케줄된 작업 실행"""
         try:
-            self.orchestrator.run_once()
+            self.orchestrator.run_once(run_mode=self.settings.service_run_mode)
         except Exception as e:
             logger.error(f"스케줄된 작업 실패: {e}", exc_info=True)

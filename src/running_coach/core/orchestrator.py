@@ -1,7 +1,7 @@
 """훈련 계획 오케스트레이터"""
 
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 from ..utils.logger import get_logger
 from .container import ServiceContainer
@@ -19,13 +19,14 @@ class TrainingOrchestrator:
         """
         self.container = container
 
-    def run_once(self) -> bool:
+    def run_once(self, run_mode: str = "plan") -> bool:
         """전체 파이프라인 1회 실행
 
         Returns:
             성공 여부
         """
         logger.info(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 업데이트 시작...")
+        logger.info(f"실행 모드: {run_mode}")
 
         try:
             # 대회 정보 로깅
@@ -51,6 +52,12 @@ class TrainingOrchestrator:
             self._persist_activity_history()
             self._rebuild_recent_executions(metrics.date)
             training_background = self._training_background(metrics.date)
+
+            if run_mode == "auto" and not self._should_generate_plan(metrics.date):
+                logger.info("새 재계획 조건이 없어 기존 훈련 계획을 유지합니다.")
+                self._sync_completed_activity_calendar(metrics.date)
+                logger.info("\n업데이트 완료")
+                return True
 
             # 3. 훈련 계획 생성
             logger.info("Gemini AI로 훈련 계획 생성 중...")
@@ -113,30 +120,7 @@ class TrainingOrchestrator:
                     )
                     logger.error(f"워크아웃 업로드 실패: {e}")
 
-            # 6. Google Calendar 동기화
-            logger.info("Google Calendar 동기화 중...")
-            try:
-                service = self.container.calendar_client.authenticate()
-                if service is None:
-                    logger.info("Google Calendar 인증 정보가 없어 동기화를 건너뜁니다.")
-                    logger.info("\n업데이트 완료")
-                    return True
-                sync_service = self.container.calendar_client.sync_service
-                assert sync_service is not None
-                sync_service.sync(plan)
-                completed_activities = (
-                    self.container.history_service.list_recent_completed_activities(
-                        as_of=metrics.date,
-                        days=2,
-                    )
-                )
-                sync_service.sync_completed_activities(
-                    activities=completed_activities,
-                    as_of=metrics.date,
-                    days_back=2,
-                )
-            except Exception as e:
-                logger.warning(f"Google Calendar 동기화 실패 (계속 진행): {e}")
+            self._sync_google_calendar(plan, metrics.date)
 
             logger.info("\n업데이트 완료")
             return True
@@ -270,3 +254,67 @@ class TrainingOrchestrator:
             )
         except Exception as e:
             logger.warning(f"Garmin 동기화 결과 저장 실패 (계속 진행): {e}")
+
+    def _should_generate_plan(self, as_of) -> bool:
+        """auto 모드에서 LLM 계획 생성이 필요한지 판단."""
+        if not self.container.settings.persist_history:
+            logger.info("히스토리 저장이 꺼져 있어 auto 모드에서도 계획을 생성합니다.")
+            return True
+
+        try:
+            freshness = self.container.history_service.summarize_plan_freshness(
+                as_of=self._coerce_date(as_of),
+            )
+        except Exception as e:
+            logger.warning(f"계획 freshness 판단 실패로 재계획을 진행합니다: {e}")
+            return True
+
+        logger.info(
+            "계획 freshness: active=%s, new_activity=%s, last_plan=%s, latest_activity=%s",
+            freshness["hasActivePlan"],
+            freshness["hasNewActivitySinceLastPlan"],
+            freshness["lastPlanCreatedAt"],
+            freshness["latestActivityCreatedAt"],
+        )
+        return bool(freshness["shouldGeneratePlan"])
+
+    def _sync_google_calendar(self, plan, as_of) -> None:
+        """계획과 실제 운동 기록을 Google Calendar에 동기화."""
+        logger.info("Google Calendar 동기화 중...")
+        try:
+            service = self.container.calendar_client.authenticate()
+            if service is None:
+                logger.info("Google Calendar 인증 정보가 없어 동기화를 건너뜁니다.")
+                return
+            sync_service = self.container.calendar_client.sync_service
+            assert sync_service is not None
+            sync_service.sync(plan)
+            self._sync_completed_activity_calendar(as_of)
+        except Exception as e:
+            logger.warning(f"Google Calendar 동기화 실패 (계속 진행): {e}")
+
+    def _sync_completed_activity_calendar(self, as_of) -> None:
+        """실제 운동 기록 캘린더를 증분 동기화."""
+        try:
+            service = self.container.calendar_client.authenticate()
+            if service is None:
+                return
+            sync_service = self.container.calendar_client.sync_service
+            assert sync_service is not None
+            completed_activities = self.container.history_service.list_recent_completed_activities(
+                as_of=self._coerce_date(as_of),
+                days=2,
+            )
+            sync_service.sync_completed_activities(
+                activities=completed_activities,
+                as_of=self._coerce_date(as_of),
+                days_back=2,
+            )
+        except Exception as e:
+            logger.warning(f"실제 운동 기록 캘린더 동기화 실패 (계속 진행): {e}")
+
+    @staticmethod
+    def _coerce_date(value) -> date:
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value))

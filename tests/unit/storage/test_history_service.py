@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.storage.history_service import CoachingHistoryService
@@ -151,6 +151,24 @@ class _RecordingHistoryService(CoachingHistoryService):
         self.executed.append((query, params))
 
 
+class _FreshnessHistoryService(CoachingHistoryService):
+    def __init__(self, rows):
+        super().__init__(_FakeDb(), "user@example.com")
+        self.rows = rows
+
+    def _athlete_id(self) -> str:  # type: ignore[override]
+        return "athlete-1"
+
+    def _fetchone(self, query: str, params: dict[str, object]):  # type: ignore[override]
+        if "COUNT(*) AS active_plan_days" in query:
+            return {"active_plan_days": self.rows.get("active_plan_days", 0)}
+        if "MAX(created_at) AS last_plan_created_at" in query:
+            return {"last_plan_created_at": self.rows.get("last_plan_created_at")}
+        if "MAX(created_at) AS latest_activity_created_at" in query:
+            return {"latest_activity_created_at": self.rows.get("latest_activity_created_at")}
+        return None
+
+
 def test_summarize_training_background_returns_recent_and_lifetime_sections():
     service = _SummaryHistoryService(_FakeDb(), "user@example.com")
 
@@ -163,6 +181,38 @@ def test_summarize_training_background_returns_recent_and_lifetime_sections():
     assert summary["coachingState"]["adherence"]["matchedWorkoutCount"] == 5
     assert summary["planningConstraints"]["raceGoal"]["distance"] == "10K"
     assert summary["planningConstraints"]["trainingBlock"]["phase"] == "build"
+
+
+def test_summarize_plan_freshness_reuses_active_plan_without_new_activity():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasActivePlan"] is True
+    assert freshness["hasNewActivitySinceLastPlan"] is False
+    assert freshness["shouldGeneratePlan"] is False
+
+
+def test_summarize_plan_freshness_replans_after_new_activity():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "latest_activity_created_at": datetime(2026, 4, 18, 12, tzinfo=timezone.utc),
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasNewActivitySinceLastPlan"] is True
+    assert freshness["shouldGeneratePlan"] is True
+    assert freshness["reasons"] == ["new_activity_since_last_plan"]
 
 
 def test_planned_workout_category_and_target_match_score():

@@ -29,7 +29,16 @@ def main():
         "--hour",
         type=int,
         default=DEFAULT_SCHEDULE_HOUR,
-        help=f"매일 실행될 시간 (0-23, 기본: {DEFAULT_SCHEDULE_HOUR})",
+        help=f"매일 실행될 시간 (0-23, 기본: {DEFAULT_SCHEDULE_HOUR}, --times 미지정 시 사용)",
+    )
+    run_parser.add_argument(
+        "--times",
+        help="서비스 모드 실행 시각 목록. 예: 05:00,17:00",
+    )
+    run_parser.add_argument(
+        "--mode",
+        choices=["plan", "auto"],
+        help="plan=항상 계획 생성, auto=새 정보가 있을 때만 재계획",
     )
     run_parser.add_argument(
         "--include-strength", action="store_true", help="계획에 근력 운동 포함 여부"
@@ -87,6 +96,8 @@ def main():
         args.command = "run"
         args.service = False
         args.hour = DEFAULT_SCHEDULE_HOUR
+        args.times = None
+        args.mode = "plan"
         args.include_strength = False
 
     # 시스템 시작 메시지
@@ -206,6 +217,12 @@ def main():
 
     settings.service_mode = args.service
     settings.schedule_hour = args.hour
+    if args.times:
+        settings.schedule_times = args.times
+    elif args.hour != DEFAULT_SCHEDULE_HOUR:
+        settings.schedule_times = f"{args.hour:02d}:00"
+    if args.mode:
+        settings.service_run_mode = args.mode
     settings.include_strength = args.include_strength
     orchestrator = TrainingOrchestrator(container)
 
@@ -216,7 +233,7 @@ def main():
         scheduler.run()
     else:
         # 1회 실행 모드
-        orchestrator.run_once()
+        orchestrator.run_once(run_mode=args.mode or "plan")
 
 
 if __name__ == "__main__":

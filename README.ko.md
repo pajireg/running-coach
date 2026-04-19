@@ -101,15 +101,17 @@ running-coach
 서비스 모드:
 
 ```bash
-python -m running_coach run --service --hour 5
+python -m running_coach run --service --times 05:00,17:00 --mode auto
 ```
 
-기본 스케줄 시각은 `05:00`이며, 이른 아침 운동 전에 당일 계획이 준비되도록 설계되어 있습니다.
+서비스 실행 시각은 사용자별로 조정할 수 있습니다. `--times`는 하나 이상의 `HH:MM` 값을 받고, `--mode auto`는 먼저 Garmin/DB/Calendar 상태를 대조한 뒤 활성 계획이 없거나 마지막 계획 이후 새 활동이 생긴 경우에만 LLM을 호출합니다.
 
 ## CLI 명령
 
 - `python -m running_coach`
   - 데이터 수집, 계획 생성, Garmin 동기화, 캘린더 동기화 수행
+- `python -m running_coach run --service --times 05:00,17:00 --mode auto`
+  - 설정 가능한 점검 시각으로 상시 실행하며 필요한 경우에만 재계획
 - `python -m running_coach feedback ...`
   - 피로도, 근육통, 스트레스, 의욕, 수면 질 등 주관 피드백 저장
 - `python -m running_coach availability ...`

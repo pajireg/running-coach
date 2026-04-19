@@ -230,6 +230,81 @@ class CoachingHistoryService:
         )
         return [str(row["garmin_workout_id"]) for row in rows if row.get("garmin_workout_id")]
 
+    def summarize_plan_freshness(self, as_of: date, horizon_days: int = 7) -> dict[str, Any]:
+        """현재 계획이 최신 데이터 기준으로 재사용 가능한지 요약."""
+        athlete_id = self._athlete_id()
+        end_date = as_of + timedelta(days=horizon_days - 1)
+        plan_row = self._fetchone(
+            """
+            SELECT COUNT(*) AS active_plan_days
+            FROM planned_workouts
+            WHERE athlete_id = %(athlete_id)s
+              AND source = %(source)s
+              AND workout_date BETWEEN %(as_of)s AND %(end_date)s
+            """,
+            {
+                "athlete_id": athlete_id,
+                "source": WORKOUT_SOURCE,
+                "as_of": as_of,
+                "end_date": end_date,
+            },
+        ) or {}
+        decision_row = self._fetchone(
+            """
+            SELECT MAX(created_at) AS last_plan_created_at
+            FROM coach_decisions
+            WHERE athlete_id = %(athlete_id)s
+              AND decision_type = 'daily_plan'
+            """,
+            {"athlete_id": athlete_id},
+        ) or {}
+        activity_row = self._fetchone(
+            """
+            SELECT MAX(created_at) AS latest_activity_created_at
+            FROM activities
+            WHERE athlete_id = %(athlete_id)s
+            """,
+            {"athlete_id": athlete_id},
+        ) or {}
+
+        active_plan_days = int(plan_row.get("active_plan_days") or 0)
+        last_plan_created_at = decision_row.get("last_plan_created_at")
+        latest_activity_created_at = activity_row.get("latest_activity_created_at")
+        has_active_plan = active_plan_days >= horizon_days
+        has_new_activity = (
+            last_plan_created_at is not None
+            and latest_activity_created_at is not None
+            and latest_activity_created_at > last_plan_created_at
+        )
+        should_generate_plan = (
+            not has_active_plan
+            or last_plan_created_at is None
+            or has_new_activity
+        )
+        reasons = []
+        if not has_active_plan:
+            reasons.append("missing_active_plan")
+        if last_plan_created_at is None:
+            reasons.append("no_previous_plan_decision")
+        if has_new_activity:
+            reasons.append("new_activity_since_last_plan")
+
+        return {
+            "asOf": as_of.isoformat(),
+            "horizonDays": horizon_days,
+            "activePlanDays": active_plan_days,
+            "hasActivePlan": has_active_plan,
+            "lastPlanCreatedAt": (
+                last_plan_created_at.isoformat() if last_plan_created_at else None
+            ),
+            "latestActivityCreatedAt": (
+                latest_activity_created_at.isoformat() if latest_activity_created_at else None
+            ),
+            "hasNewActivitySinceLastPlan": has_new_activity,
+            "shouldGeneratePlan": should_generate_plan,
+            "reasons": reasons,
+        }
+
     def record_subjective_feedback(self, feedback: SubjectiveFeedback) -> None:
         """주관 피드백 upsert."""
         query = """

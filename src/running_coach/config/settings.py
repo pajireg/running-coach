@@ -6,7 +6,12 @@ from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..models.config import RaceConfig
-from .constants import DEFAULT_DB_NAME, DEFAULT_SCHEDULE_HOUR
+from .constants import (
+    DEFAULT_DB_NAME,
+    DEFAULT_SCHEDULE_HOUR,
+    DEFAULT_SCHEDULE_TIMES,
+    DEFAULT_SERVICE_RUN_MODE,
+)
 
 
 class Settings(BaseSettings):
@@ -32,6 +37,8 @@ class Settings(BaseSettings):
     include_strength: bool = False
     service_mode: bool = False
     schedule_hour: int = DEFAULT_SCHEDULE_HOUR
+    schedule_times: str = DEFAULT_SCHEDULE_TIMES
+    service_run_mode: str = DEFAULT_SERVICE_RUN_MODE
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -70,6 +77,25 @@ class Settings(BaseSettings):
 
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+
+    def parsed_schedule_times(self) -> list[str]:
+        """서비스 모드 실행 시각 목록을 HH:MM 형식으로 반환."""
+        raw_times = [item.strip() for item in self.schedule_times.split(",") if item.strip()]
+        if not raw_times:
+            raw_times = [f"{self.schedule_hour:02d}:00"]
+
+        normalized: list[str] = []
+        for raw_time in raw_times:
+            if ":" in raw_time:
+                hour_text, minute_text = raw_time.split(":", 1)
+            else:
+                hour_text, minute_text = raw_time, "00"
+            hour = int(hour_text)
+            minute = int(minute_text)
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError(f"Invalid schedule time: {raw_time}")
+            normalized.append(f"{hour:02d}:{minute:02d}")
+        return normalized
 
 
 def get_settings() -> Settings:

@@ -40,6 +40,10 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://coach:coach@postgres:5432/running_coach}
       # 근력 운동 포함 여부 (true/false)
       - INCLUDE_STRENGTH=${INCLUDE_STRENGTH:-false}
+      # 서비스 실행 시각 목록. 예: 05:00,17:00
+      - COACH_SCHEDULE_TIMES=${COACH_SCHEDULE_TIMES:-05:00,17:00}
+      # auto=새 활동/계획 공백이 있을 때만 재계획, plan=매 실행마다 계획 생성
+      - COACH_SERVICE_RUN_MODE=${COACH_SERVICE_RUN_MODE:-auto}
       # 대회 정보 (선택 사항)
       - RACE_DATE=${RACE_DATE:-}
       - RACE_DISTANCE=${RACE_DISTANCE:-}

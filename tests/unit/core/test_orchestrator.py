@@ -49,7 +49,11 @@ class _FakeGarminClient:
 
 
 class _FakeGeminiClient:
+    def __init__(self):
+        self.call_count = 0
+
     def create_training_plan(self, **_kwargs):
+        self.call_count += 1
         return TrainingPlan.model_validate(
             {
                 "plan": [
@@ -174,6 +178,14 @@ class _FakeHistoryService:
         self.db = SimpleNamespace(ping=lambda: None)
         self.synced = []
         self.cleared = []
+        self.freshness = {
+            "hasActivePlan": False,
+            "hasNewActivitySinceLastPlan": False,
+            "lastPlanCreatedAt": None,
+            "latestActivityCreatedAt": None,
+            "shouldGeneratePlan": True,
+            "reasons": ["missing_active_plan"],
+        }
 
     def ensure_athlete(self, **_kwargs):
         return None
@@ -204,6 +216,9 @@ class _FakeHistoryService:
 
     def record_garmin_sync_result(self, **kwargs):
         self.synced.append(kwargs)
+
+    def summarize_plan_freshness(self, **_kwargs):
+        return self.freshness
 
 
 class _FakeCalendarClient:
@@ -238,3 +253,37 @@ def test_run_once_persists_garmin_sync_results():
     assert len(container.history_service.synced) == 6
     assert container.history_service.synced[0]["garmin_workout_id"] == "id-1"
     assert container.history_service.synced[0]["garmin_schedule_status"] == "scheduled"
+
+
+def test_auto_mode_skips_llm_when_plan_is_fresh():
+    history_service = _FakeHistoryService()
+    history_service.freshness = {
+        "hasActivePlan": True,
+        "hasNewActivitySinceLastPlan": False,
+        "lastPlanCreatedAt": "2026-04-18T17:00:00+09:00",
+        "latestActivityCreatedAt": "2026-04-18T08:00:00+09:00",
+        "shouldGeneratePlan": False,
+        "reasons": [],
+    }
+    gemini_client = _FakeGeminiClient()
+    garmin_client = _FakeGarminClient()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(
+            race=SimpleNamespace(has_goal=False),
+            persist_history=True,
+            include_strength=False,
+            garmin_email="user@example.com",
+            max_heart_rate=None,
+        ),
+        garmin_client=garmin_client,
+        gemini_client=gemini_client,
+        calendar_client=_FakeCalendarClient(),
+        history_service=history_service,
+    )
+
+    result = TrainingOrchestrator(container).run_once(run_mode="auto")
+
+    assert result is True
+    assert gemini_client.call_count == 0
+    assert garmin_client.cleanup_ids is None
+    assert garmin_client.workout_manager.created == []

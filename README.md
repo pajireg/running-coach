@@ -97,15 +97,17 @@ running-coach
 Service mode:
 
 ```bash
-python -m running_coach run --service --hour 5
+python -m running_coach run --service --times 05:00,17:00 --mode auto
 ```
 
-The default scheduler time is `05:00`, which is intended to create or refresh the daily plan before early-morning training.
+Service schedules are configurable per user. `--times` accepts one or more `HH:MM` values, and `--mode auto` reconciles Garmin/DB/Calendar state first, then calls the LLM only when the active plan is missing or a new activity appeared after the last plan.
 
 ## CLI Commands
 
 - `python -m running_coach`
   - Collect data, generate a plan, sync Garmin, sync calendars
+- `python -m running_coach run --service --times 05:00,17:00 --mode auto`
+  - Run continuously with configurable check-in times and conditional replanning
 - `python -m running_coach feedback ...`
   - Store subjective fatigue, soreness, stress, motivation, and sleep-quality input
 - `python -m running_coach availability ...`

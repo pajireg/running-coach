@@ -198,17 +198,20 @@ This separation keeps the system explainable and reduces unsafe plan drift.
 
 ## Scheduler and Operational Timing
 
-The default service schedule is `05:00`.
+Service schedules are configurable. A user can run one or more daily check-ins, for example `05:00,17:00`, through `--times` or `COACH_SCHEDULE_TIMES` in Docker.
 
 Reasoning:
 
 - plans should be ready before early-morning training
 - completed activities from the previous day can be incorporated at that time
 - future workouts can be refreshed before the athlete checks Garmin
+- real-world users may train before work, after work, or irregularly, so the scheduler must not assume a single fixed routine
 
 Operational policy:
 
-- future plans are refreshed daily
+- service mode normally runs in `auto` mode
+- each run first reconciles Garmin, database, and calendar state
+- the LLM is called only when an active plan is missing or a new activity appeared after the last plan
 - completed-activity calendar sync is incremental
 - large historical backfills are manual, not part of the daily loop
 
