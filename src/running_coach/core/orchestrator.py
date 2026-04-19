@@ -270,9 +270,13 @@ class TrainingOrchestrator:
             return True
 
         logger.info(
-            "계획 freshness: active=%s, new_activity=%s, last_plan=%s, latest_activity=%s",
+            (
+                "계획 freshness: active=%s, new_activity=%s, missed=%s, "
+                "last_plan=%s, latest_activity=%s"
+            ),
             freshness["hasActivePlan"],
             freshness["hasNewActivitySinceLastPlan"],
+            freshness.get("missedWorkoutCount", 0),
             freshness["lastPlanCreatedAt"],
             freshness["latestActivityCreatedAt"],
         )

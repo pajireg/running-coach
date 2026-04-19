@@ -211,7 +211,8 @@ Operational policy:
 
 - service mode normally runs in `auto` mode
 - each run first reconciles Garmin, database, and calendar state
-- the LLM is called only when an active plan is missing or a new activity appeared after the last plan
+- the LLM is called only when an active plan is missing, a new activity appeared after the last plan, or a prior planned workout became overdue without a meaningful execution match
+- overdue planned-workout checks only consider dates before the current `as_of` date, so an afternoon check-in does not mark a same-day evening workout as missed
 - completed-activity calendar sync is incremental
 - large historical backfills are manual, not part of the daily loop
 

@@ -251,10 +251,13 @@ class CoachingHistoryService:
         ) or {}
         decision_row = self._fetchone(
             """
-            SELECT MAX(created_at) AS last_plan_created_at
+            SELECT created_at AS last_plan_created_at,
+                   decision_date AS last_plan_decision_date
             FROM coach_decisions
             WHERE athlete_id = %(athlete_id)s
               AND decision_type = 'daily_plan'
+            ORDER BY created_at DESC
+            LIMIT 1
             """,
             {"athlete_id": athlete_id},
         ) or {}
@@ -269,6 +272,7 @@ class CoachingHistoryService:
 
         active_plan_days = int(plan_row.get("active_plan_days") or 0)
         last_plan_created_at = decision_row.get("last_plan_created_at")
+        last_plan_decision_date = decision_row.get("last_plan_decision_date")
         latest_activity_created_at = activity_row.get("latest_activity_created_at")
         has_active_plan = active_plan_days >= horizon_days
         has_new_activity = (
@@ -276,10 +280,50 @@ class CoachingHistoryService:
             and latest_activity_created_at is not None
             and latest_activity_created_at > last_plan_created_at
         )
+        missed_start_date = as_of - timedelta(days=3)
+        if last_plan_decision_date is not None:
+            missed_start_date = max(missed_start_date, last_plan_decision_date)
+        missed_end_date = as_of - timedelta(days=1)
+        missed_row: dict[str, Any] = {}
+        if missed_start_date <= missed_end_date:
+            missed_row = self._fetchone(
+                """
+                SELECT
+                    COUNT(*) AS missed_workout_count,
+                    COUNT(*) FILTER (
+                        WHERE
+                            LOWER(pw.workout_name) LIKE '%%long%%'
+                            OR LOWER(pw.workout_name) LIKE '%%tempo%%'
+                            OR LOWER(pw.workout_name) LIKE '%%threshold%%'
+                            OR LOWER(pw.workout_name) LIKE '%%interval%%'
+                            OR pw.plan_payload::text ILIKE '%%Interval%%'
+                    ) AS missed_key_workout_count
+                FROM planned_workouts pw
+                LEFT JOIN workout_executions we
+                  ON we.planned_workout_id = pw.planned_workout_id
+                 AND we.target_match_score >= %(meaningful_match_threshold)s
+                WHERE pw.athlete_id = %(athlete_id)s
+                  AND pw.source = %(source)s
+                  AND pw.workout_date BETWEEN %(missed_start_date)s AND %(missed_end_date)s
+                  AND NOT pw.is_rest
+                  AND we.workout_execution_id IS NULL
+                """,
+                {
+                    "athlete_id": athlete_id,
+                    "source": WORKOUT_SOURCE,
+                    "missed_start_date": missed_start_date,
+                    "missed_end_date": missed_end_date,
+                    "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
+                },
+            ) or {}
+        missed_workout_count = int(missed_row.get("missed_workout_count") or 0)
+        missed_key_workout_count = int(missed_row.get("missed_key_workout_count") or 0)
+        has_missed_planned_workout = missed_workout_count > 0
         should_generate_plan = (
             not has_active_plan
             or last_plan_created_at is None
             or has_new_activity
+            or has_missed_planned_workout
         )
         reasons = []
         if not has_active_plan:
@@ -288,6 +332,8 @@ class CoachingHistoryService:
             reasons.append("no_previous_plan_decision")
         if has_new_activity:
             reasons.append("new_activity_since_last_plan")
+        if has_missed_planned_workout:
+            reasons.append("missed_planned_workout")
 
         return {
             "asOf": as_of.isoformat(),
@@ -297,10 +343,16 @@ class CoachingHistoryService:
             "lastPlanCreatedAt": (
                 last_plan_created_at.isoformat() if last_plan_created_at else None
             ),
+            "lastPlanDecisionDate": (
+                last_plan_decision_date.isoformat() if last_plan_decision_date else None
+            ),
             "latestActivityCreatedAt": (
                 latest_activity_created_at.isoformat() if latest_activity_created_at else None
             ),
             "hasNewActivitySinceLastPlan": has_new_activity,
+            "missedWorkoutCount": missed_workout_count,
+            "missedKeyWorkoutCount": missed_key_workout_count,
+            "hasMissedPlannedWorkout": has_missed_planned_workout,
             "shouldGeneratePlan": should_generate_plan,
             "reasons": reasons,
         }
