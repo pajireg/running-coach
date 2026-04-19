@@ -1,7 +1,7 @@
 """설정 모델 정의"""
 
+import datetime as _dt
 import re
-from datetime import date
 from typing import Optional
 
 from pydantic import BaseModel, field_validator
@@ -10,7 +10,7 @@ from pydantic import BaseModel, field_validator
 class RaceConfig(BaseModel):
     """대회 목표 설정"""
 
-    date: Optional[date] = None
+    date: Optional[_dt.date] = None
     distance: Optional[str] = None  # "Full", "Half", "10K", "5K" 등
     goal_time: Optional[str] = None  # "3:59:59" or "59:59"
     target_pace: Optional[str] = None  # "5:40"
