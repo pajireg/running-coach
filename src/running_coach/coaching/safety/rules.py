@@ -1,0 +1,912 @@
+"""안전 룰 카탈로그 + 14개 구체 룰.
+
+각 Rule 은 check(plan, ctx) → list[Violation] 와
+correct(plan, ctx, violations) → TrainingPlan 을 제공한다.
+Violation 은 day_index 포함 stable identity 를 가지며 validator 의
+루프 감지에 사용된다.
+
+DEFAULT_SAFETY_RULES 순서 = 실행·보정 순서.
+구조적(session_type 변경) 룰 → 볼륨/가용성 → step-level → pace 정합성.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Optional, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from ...core.pace_zones import PaceZones
+    from ...models.training import DailyPlan, SessionType, TrainingPlan
+    from ..context import CoachingContext
+
+
+Severity = Literal["warn", "block"]
+
+_PACE_RE = re.compile(r"(\d+):(\d{2})")
+
+
+# ---------------------------------------------------------------------------
+# Violation & Rule protocol
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Violation:
+    """룰 위반 1건.
+
+    (rule_id, day_index) 조합은 validator 의 루프 감지 키.
+    """
+
+    rule_id: str
+    severity: Severity
+    message: str
+    day_index: Optional[int] = None
+
+    @property
+    def identity(self) -> tuple[str, Optional[int]]:
+        return (self.rule_id, self.day_index)
+
+
+@runtime_checkable
+class SafetyRule(Protocol):
+    rule_id: str
+    severity: Severity
+
+    def check(self, plan: "TrainingPlan", ctx: "CoachingContext") -> list[Violation]: ...
+    def correct(
+        self,
+        plan: "TrainingPlan",
+        ctx: "CoachingContext",
+        violations: list[Violation],
+    ) -> "TrainingPlan": ...
+    def describe(self, ctx: "CoachingContext") -> str: ...
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+_WORKOUT_NAMES: dict[str, str] = {
+    "rest": "Rest Day",
+    "recovery": "Recovery Run",
+    "base": "Base Run",
+    "quality": "Quality Session",
+    "long_run": "Long Run",
+}
+
+
+def _pace_seconds(pace: str) -> Optional[int]:
+    m = _PACE_RE.fullmatch(pace.strip())
+    if not m:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def _pace_for_step(
+    pace_zones: "PaceZones",
+    step_type: str,
+    session_type: str,
+) -> str:
+    zones = pace_zones.to_dict()
+    if step_type == "Warmup":
+        return zones.get("warmup", "6:45")
+    if step_type == "Cooldown":
+        return zones.get("cooldown", "7:10")
+    if step_type == "Recovery":
+        return zones.get("recovery", "7:20")
+    if step_type == "Interval":
+        return zones.get("interval", "4:30")
+    if session_type == "recovery":
+        return zones.get("recovery", "7:20")
+    if session_type == "long_run":
+        return zones.get("longRun", "6:40")
+    if session_type == "quality":
+        return zones.get("tempo", "5:15")
+    return zones.get("base", "6:45")
+
+
+def _step_dict(
+    step_type: str,
+    duration_seconds: int,
+    target_value: str,
+    target_type: str = "speed",
+) -> dict:
+    duration_seconds = max(60, int(duration_seconds))
+    return {
+        "type": step_type,
+        "durationValue": duration_seconds,
+        "durationUnit": "second",
+        "targetType": target_type,
+        "targetValue": target_value,
+    }
+
+
+def _build_step(
+    step_type: str,
+    duration_seconds: int,
+    target_value: str,
+    target_type: str = "speed",
+):
+    from ...models.training import WorkoutStep
+
+    return WorkoutStep.model_validate(
+        _step_dict(step_type, duration_seconds, target_value, target_type)
+    )
+
+
+def _default_steps_for(
+    session_type: str,
+    target_seconds: int,
+    pace_zones: "PaceZones",
+) -> list[dict]:
+    """session_type 별 기본 step 구성 (legacy _default_steps_for_skeleton_day 포팅).
+
+    target_seconds 는 총 duration 의 대략 목표. 세션에 따라 step 들이 합산.
+    """
+    if session_type == "rest":
+        return []
+    if session_type == "recovery":
+        return [
+            _step_dict("Warmup", 300, _pace_for_step(pace_zones, "Warmup", session_type)),
+            _step_dict(
+                "Run",
+                max(target_seconds - 600, 900),
+                _pace_for_step(pace_zones, "Run", session_type),
+            ),
+            _step_dict("Cooldown", 300, _pace_for_step(pace_zones, "Cooldown", session_type)),
+        ]
+    if session_type == "quality":
+        quality_block = max(target_seconds - 1500, 1200)
+        repeat = max(3, min(6, quality_block // 360))
+        interval_seconds = max(180, quality_block // (repeat * 2))
+        steps = [_step_dict("Warmup", 900, _pace_for_step(pace_zones, "Warmup", session_type))]
+        for _ in range(repeat):
+            steps.append(
+                _step_dict(
+                    "Interval",
+                    interval_seconds,
+                    _pace_for_step(pace_zones, "Interval", session_type),
+                )
+            )
+            steps.append(
+                _step_dict(
+                    "Recovery",
+                    interval_seconds,
+                    _pace_for_step(pace_zones, "Recovery", session_type),
+                )
+            )
+        steps.append(
+            _step_dict("Cooldown", 600, _pace_for_step(pace_zones, "Cooldown", session_type))
+        )
+        return steps
+    if session_type == "long_run":
+        return [
+            _step_dict("Warmup", 600, _pace_for_step(pace_zones, "Warmup", session_type)),
+            _step_dict(
+                "Run",
+                max(target_seconds - 900, 2700),
+                _pace_for_step(pace_zones, "Run", session_type),
+            ),
+            _step_dict("Cooldown", 300, _pace_for_step(pace_zones, "Cooldown", session_type)),
+        ]
+    # base
+    return [
+        _step_dict("Warmup", 600, _pace_for_step(pace_zones, "Warmup", session_type)),
+        _step_dict(
+            "Run",
+            max(target_seconds - 900, 1800),
+            _pace_for_step(pace_zones, "Run", session_type),
+        ),
+        _step_dict("Cooldown", 300, _pace_for_step(pace_zones, "Cooldown", session_type)),
+    ]
+
+
+def _rebuild_day(
+    day: "DailyPlan",
+    new_session_type: "SessionType",
+    pace_zones: "PaceZones",
+    planned_minutes: Optional[int] = None,
+) -> "DailyPlan":
+    """세션 타입 변경 + steps/workout_name/planned_minutes 재구성."""
+    from ...models.training import DailyPlan
+
+    if new_session_type == "rest":
+        return DailyPlan.model_validate(
+            {
+                "date": day.date,
+                "sessionType": "rest",
+                "plannedMinutes": 0,
+                "workout": {
+                    "workoutName": _WORKOUT_NAMES["rest"],
+                    "description": day.workout.description,
+                    "sportType": "RUNNING",
+                    "steps": [],
+                },
+            }
+        )
+
+    if planned_minutes is None:
+        planned_minutes = day.planned_minutes or day.workout.total_duration_minutes
+    planned_minutes = max(20, int(planned_minutes))
+    steps_raw = _default_steps_for(new_session_type, planned_minutes * 60, pace_zones)
+    return DailyPlan.model_validate(
+        {
+            "date": day.date,
+            "sessionType": new_session_type,
+            "plannedMinutes": planned_minutes,
+            "workout": {
+                "workoutName": _WORKOUT_NAMES[new_session_type],
+                "description": day.workout.description,
+                "sportType": "RUNNING",
+                "steps": steps_raw,
+            },
+        }
+    )
+
+
+def _replace_day(plan: "TrainingPlan", index: int, new_day: "DailyPlan") -> "TrainingPlan":
+    """plan 의 index 번째 day 교체."""
+    new_days = list(plan.plan)
+    new_days[index] = new_day
+    return plan.model_copy(update={"plan": new_days})
+
+
+def _is_hard(day: "DailyPlan") -> bool:
+    return day.session_type in ("quality", "long_run")
+
+
+def _total_planned_km(plan: "TrainingPlan", pace_zones: "PaceZones") -> float:
+    """step duration × base pace 로 7일 러닝 km 추정."""
+    base_pace_sec = _pace_seconds(pace_zones.to_dict().get("base", "6:45")) or 405
+    total_seconds = 0
+    for day in plan.plan:
+        if day.session_type == "rest":
+            continue
+        total_seconds += day.workout.total_duration
+    if base_pace_sec <= 0:
+        return 0.0
+    return total_seconds / base_pace_sec
+
+
+# ---------------------------------------------------------------------------
+# Rules
+# ---------------------------------------------------------------------------
+
+
+class InjuryBlockQuality:
+    """활성 부상 severity ≥ 6 → quality 제거, 주간 볼륨 × 0.65."""
+
+    rule_id = "injury_block_quality"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        if ctx.scores.active_injury_severity < 6:
+            return []
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            if day.session_type == "quality":
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=(
+                            f"active injury severity {ctx.scores.active_injury_severity}"
+                            f" → quality on day {i} removed"
+                        ),
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            # quality → recovery, duration × 0.65
+            new_minutes = max(20, int((day.planned_minutes or 40) * 0.65))
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones, planned_minutes=new_minutes)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        if ctx.scores.active_injury_severity >= 6:
+            return "활성 부상 severity 가 높아 이번 주는 quality 세션을 배치하지 않습니다."
+        return "활성 부상 severity ≥ 6 일 때 quality 세션을 배치하지 않습니다."
+
+
+class InjuryReduceVolume:
+    """활성 부상 severity 3-5 → Interval step 을 Run(base)로 전환."""
+
+    rule_id = "injury_reduce_volume"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        sev = ctx.scores.active_injury_severity
+        if not (3 <= sev < 6):
+            return []
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            has_interval = any(s.type == "Interval" for s in day.workout.steps)
+            if has_interval:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"injury severity {sev} → intervals removed from day {i}",
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+
+        base_pace = ctx.pace_zones.to_dict().get("base", "6:45")
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_steps = []
+            for s in day.workout.steps:
+                if s.type == "Interval":
+                    new_steps.append(_build_step("Run", s.duration_value, base_pace))
+                else:
+                    new_steps.append(s)
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_day = day.model_copy(update={"workout": new_workout})
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        sev = ctx.scores.active_injury_severity
+        if 3 <= sev < 6:
+            return "활성 부상이 있어 인터벌 대신 base 강도 러닝으로 대체합니다."
+        return "활성 부상 severity 3-5 시 인터벌 대신 base 러닝으로 교체합니다."
+
+
+class MaxOneLongRun:
+    """주간 long_run ≤ 1."""
+
+    rule_id = "max_one_long_run"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        long_indexes = [i for i, d in enumerate(plan.plan) if d.session_type == "long_run"]
+        if len(long_indexes) <= 1:
+            return []
+        # 첫 번째는 유지, 나머지 violation
+        out: list[Violation] = []
+        for i in long_indexes[1:]:
+            out.append(
+                Violation(
+                    rule_id=self.rule_id,
+                    severity=self.severity,
+                    message=f"extra long_run on day {i} demoted to base",
+                    day_index=i,
+                )
+            )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "base", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "주간 장거리는 정확히 1회입니다."
+
+
+class NoBackToBackQuality:
+    """연속된 두 날 모두 quality/long_run 이면 뒷날을 recovery 로."""
+
+    rule_id = "no_back_to_back_quality"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i in range(1, len(plan.plan)):
+            if _is_hard(plan.plan[i]) and _is_hard(plan.plan[i - 1]):
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"back-to-back hard sessions day {i-1}→{i}; demoting day {i}",
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "quality/long_run 세션 사이 최소 1일 간격을 둡니다."
+
+
+class NoQualityAfterLongRun:
+    """long_run 다음 날 quality 금지."""
+
+    rule_id = "no_quality_after_long_run"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i in range(1, len(plan.plan)):
+            prev_long = plan.plan[i - 1].session_type == "long_run"
+            curr_quality = plan.plan[i].session_type == "quality"
+            if prev_long and curr_quality:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"quality on day {i} follows long_run; demoting to recovery",
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "장거리 세션 다음 날은 quality 를 배치하지 않습니다."
+
+
+class Quality48hSpacing:
+    """모든 quality/long_run 쌍이 최소 48h (=2일) 간격.
+
+    연속일(i, i+1)은 NoBackToBackQuality 가 처리.
+    여기선 (i, i+2) 등 비연속 근접 케이스 중 48h 미만을 잡는다.
+    (날 단위 계산으로는 i+1 이 NoBackToBackQuality 와 중복이므로
+     i+1 케이스는 NoBackToBackQuality 가 이미 처리했다고 가정.
+     이 룰은 동일 패스에서 혹시 놓친 쌍을 catch 한다.)
+    """
+
+    rule_id = "quality_48h_spacing"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        hard_idx = [i for i, d in enumerate(plan.plan) if _is_hard(d)]
+        out: list[Violation] = []
+        for a, b in zip(hard_idx, hard_idx[1:]):
+            if b - a < 2:
+                # NoBackToBackQuality 가 i=b 인 경우 처리하므로 여기선 추가만
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"hard sessions {a} and {b} within 48h; demoting {b}",
+                        day_index=b,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "quality/long_run 세션 사이 최소 48시간 간격을 보장합니다."
+
+
+class WeeklyHardCap:
+    """주간 hard (quality + long_run) ≤ 2."""
+
+    rule_id = "weekly_hard_cap"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        hard_idx = [i for i, d in enumerate(plan.plan) if _is_hard(d)]
+        if len(hard_idx) <= 2:
+            return []
+        # 3번째 이후만 violation; 2번째까지는 유지
+        out: list[Violation] = []
+        for i in hard_idx[2:]:
+            out.append(
+                Violation(
+                    rule_id=self.rule_id,
+                    severity=self.severity,
+                    message=f"hard session count > 2; demoting day {i}",
+                    day_index=i,
+                )
+            )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "base", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "주간 hard(quality+long_run) 세션은 최대 2회입니다."
+
+
+class RespectUnavailability:
+    """availability.is_available == False 인 요일은 rest."""
+
+    rule_id = "respect_unavailability"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            slot = ctx.availability_for(day.date.weekday())
+            if not slot.is_available and day.session_type != "rest":
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"day {i} ({day.date}) marked unavailable; forcing rest",
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, "rest", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "불가 요일에는 rest 를 배치합니다."
+
+
+class MinOneRestPerWeek:
+    """주간 rest ≥ 1."""
+
+    rule_id = "min_one_rest_per_week"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        rest_count = sum(1 for d in plan.plan if d.session_type == "rest")
+        if rest_count >= 1:
+            return []
+        return [
+            Violation(
+                rule_id=self.rule_id,
+                severity=self.severity,
+                message="zero rest days in 7; inserting rest",
+                day_index=None,
+            )
+        ]
+
+    def correct(self, plan, ctx, violations):
+        # 가장 쉬운 non-hard 날을 rest 로. base 우선, 그 다음 recovery.
+        candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "base"]
+        if not candidates:
+            candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "recovery"]
+        if not candidates:
+            # 전부 hard 거나 rest 인데 rest 가 0인 경우 — 중간 hard 하나 변환
+            candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "quality"]
+        if not candidates:
+            return plan
+        # long_run 에서 가장 먼 index 선택
+        long_idx = next((i for i, d in enumerate(plan.plan) if d.session_type == "long_run"), 0)
+        target = max(candidates, key=lambda i: abs(i - long_idx))
+        new_day = _rebuild_day(plan.plan[target], "rest", ctx.pace_zones)
+        return _replace_day(plan, target, new_day)
+
+    def describe(self, ctx):
+        return "주간 최소 1일 휴식을 보장합니다."
+
+
+class AcwrCap:
+    """주간 계획 러닝 km / chronic_ewma_load > 1.5 → duration 균등 축소."""
+
+    rule_id = "acwr_cap"
+    severity: Severity = "block"
+    TARGET_RATIO = 1.4
+    CAP_RATIO = 1.5
+
+    def check(self, plan, ctx):
+        chronic = ctx.scores.chronic_ewma_load
+        if chronic <= 0.1:
+            return []
+        planned_km = _total_planned_km(plan, ctx.pace_zones)
+        ratio = planned_km / chronic
+        if ratio <= self.CAP_RATIO:
+            return []
+        return [
+            Violation(
+                rule_id=self.rule_id,
+                severity=self.severity,
+                message=f"ACWR {ratio:.2f} > {self.CAP_RATIO}; scaling durations",
+                day_index=None,
+            )
+        ]
+
+    def correct(self, plan, ctx, violations):
+        chronic = ctx.scores.chronic_ewma_load
+        if chronic <= 0.1:
+            return plan
+        planned_km = _total_planned_km(plan, ctx.pace_zones)
+        if planned_km <= 0:
+            return plan
+        current_ratio = planned_km / chronic
+        if current_ratio <= self.TARGET_RATIO:
+            return plan
+        scale = self.TARGET_RATIO / current_ratio  # < 1
+        new_days = []
+
+        for day in plan.plan:
+            if day.session_type == "rest":
+                new_days.append(day)
+                continue
+            new_steps = []
+            for s in day.workout.steps:
+                new_dur = max(60, int(s.duration_value * scale))
+                new_steps.append(
+                    _build_step(
+                        s.type,
+                        new_dur,
+                        s.target_value or "0:00",
+                        target_type=s.target_type,
+                    )
+                )
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_minutes = sum(s.duration_value for s in new_steps) // 60
+            new_days.append(
+                day.model_copy(update={"workout": new_workout, "planned_minutes": new_minutes})
+            )
+        return plan.model_copy(update={"plan": new_days})
+
+    def describe(self, ctx):
+        return "주간 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
+
+
+class MaxDurationPerDay:
+    """day duration > availability.max_duration_minutes → step 비례 축소."""
+
+    rule_id = "max_duration_per_day"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            slot = ctx.availability_for(day.date.weekday())
+            cap = slot.max_duration_minutes
+            if cap is None or cap <= 0:
+                continue
+            if day.workout.total_duration_minutes > cap:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=(
+                            f"day {i} duration {day.workout.total_duration_minutes}m"
+                            f" > cap {cap}m"
+                        ),
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            slot = ctx.availability_for(day.date.weekday())
+            cap = slot.max_duration_minutes or day.workout.total_duration_minutes
+            current = day.workout.total_duration_minutes
+            if current <= cap:
+                continue
+            scale = cap / current
+            new_steps = []
+            for s in day.workout.steps:
+                new_dur = max(60, int(s.duration_value * scale))
+                new_steps.append(
+                    _build_step(
+                        s.type,
+                        new_dur,
+                        s.target_value or "0:00",
+                        target_type=s.target_type,
+                    )
+                )
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_minutes = sum(s.duration_value for s in new_steps) // 60
+            new_day = day.model_copy(
+                update={"workout": new_workout, "planned_minutes": new_minutes}
+            )
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "요일별 max 시간 캡을 초과하지 않도록 steps 를 축소합니다."
+
+
+class NonRestHasSteps:
+    """non-rest 인데 steps 가 비었거나 총 duration 이 0 → 기본 steps 주입."""
+
+    rule_id = "non_rest_has_steps"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            if day.session_type == "rest":
+                continue
+            if not day.workout.steps or day.workout.total_duration <= 0:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"non-rest day {i} has no valid steps; injecting defaults",
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_day = _rebuild_day(day, day.session_type or "base", ctx.pace_zones)
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "rest 가 아닌 날은 반드시 실행 가능한 steps 를 포함합니다."
+
+
+class MinStepDuration:
+    """step.duration_value ≤ 0 → 60 초."""
+
+    rule_id = "min_step_duration"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            for j, s in enumerate(day.workout.steps):
+                if s.duration_value <= 0:
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=f"day {i} step {j} zero duration; setting 60s",
+                            day_index=i,
+                        )
+                    )
+                    break  # day 단위 identity 로 dedupe
+        return out
+
+    def correct(self, plan, ctx, violations):
+
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_steps = [
+                _build_step(
+                    s.type,
+                    max(60, s.duration_value),
+                    s.target_value or "0:00",
+                    target_type=s.target_type,
+                )
+                for s in day.workout.steps
+            ]
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_day = day.model_copy(update={"workout": new_workout})
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "각 step duration 은 최소 60초입니다."
+
+
+class PaceZoneIntegrity:
+    """targetType=speed 인데 pace 가 PaceZones 값과 ±5초 넘게 다름 → zone pace 로 덮어쓰기."""
+
+    rule_id = "pace_zone_integrity"
+    severity: Severity = "warn"  # soft — 계획 구조엔 영향 없음
+    TOLERANCE_SECONDS = 5
+
+    def check(self, plan, ctx):
+        zones_dict = ctx.pace_zones.to_dict()
+        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            for j, s in enumerate(day.workout.steps):
+                if s.target_type != "speed":
+                    continue
+                parsed = _pace_seconds(s.target_value or "")
+                if parsed is None:
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=f"day {i} step {j} unparseable pace '{s.target_value}'",
+                            day_index=i,
+                        )
+                    )
+                    break
+                if not any(abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a):
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=f"day {i} step {j} pace {s.target_value} outside zones",
+                            day_index=i,
+                        )
+                    )
+                    break
+        return out
+
+    def correct(self, plan, ctx, violations):
+
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_steps = []
+            for s in day.workout.steps:
+                if s.target_type != "speed":
+                    new_steps.append(s)
+                    continue
+                zone_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
+                new_steps.append(_build_step(s.type, s.duration_value, zone_pace))
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_day = day.model_copy(update={"workout": new_workout})
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return "모든 step pace 는 제공된 PaceZones 값만 사용합니다."
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT list — 실행 순서 = 보정 순서
+# 구조적(session_type 변경) 룰을 먼저, 볼륨/가용성, step-level 마지막.
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_SAFETY_RULES: list[SafetyRule] = [
+    InjuryBlockQuality(),
+    MaxOneLongRun(),
+    NoBackToBackQuality(),
+    NoQualityAfterLongRun(),
+    Quality48hSpacing(),
+    WeeklyHardCap(),
+    RespectUnavailability(),
+    MinOneRestPerWeek(),
+    AcwrCap(),
+    MaxDurationPerDay(),
+    NonRestHasSteps(),
+    InjuryReduceVolume(),
+    MinStepDuration(),
+    PaceZoneIntegrity(),
+]

@@ -6,6 +6,9 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+SessionType = Literal["rest", "recovery", "base", "quality", "long_run"]
+PhaseType = Literal["base", "build", "peak", "taper", "maintenance"]
+
 
 class WorkoutStep(BaseModel):
     """워크아웃 단계"""
@@ -74,17 +77,62 @@ class Workout(BaseModel):
         return self
 
 
+def infer_session_type_from_name(workout_name: str) -> SessionType:
+    """Legacy workoutName → session_type 추론 (하위 호환용)."""
+    lowered = workout_name.lower()
+    if "rest" in lowered:
+        return "rest"
+    if "long" in lowered:
+        return "long_run"
+    if "interval" in lowered or "tempo" in lowered or "threshold" in lowered:
+        return "quality"
+    if "recovery" in lowered:
+        return "recovery"
+    return "base"
+
+
 class DailyPlan(BaseModel):
     """일일 계획"""
 
     date: date
+    session_type: Optional[SessionType] = Field(default=None, alias="sessionType")
+    planned_minutes: Optional[int] = Field(default=None, ge=0, alias="plannedMinutes")
     workout: Workout
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def backfill_defaults(self) -> "DailyPlan":
+        """session_type / planned_minutes 미지정 시 workout 에서 추론."""
+        if self.session_type is None:
+            self.session_type = infer_session_type_from_name(self.workout.workout_name)
+        if self.planned_minutes is None:
+            self.planned_minutes = self.workout.total_duration_minutes
+        return self
+
+    @property
+    def is_hard_session(self) -> bool:
+        """품질 세션 또는 장거리 세션 여부."""
+        return self.session_type in ("quality", "long_run")
+
+
+class WeeklyRationale(BaseModel):
+    """주간 계획 근거 (LLM 출력용)."""
+
+    summary_ko: str = Field(alias="summaryKo")
+    phase: PhaseType
+    phase_reason_ko: str = Field(alias="phaseReasonKo")
+    weekly_volume_target_km: float = Field(gt=0, alias="weeklyVolumeTargetKm")
+    risk_acknowledgements: List[str] = Field(default_factory=list, alias="riskAcknowledgements")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class TrainingPlan(BaseModel):
     """7일 훈련 계획"""
 
     plan: List[DailyPlan] = Field(min_length=7, max_length=7)
+    weekly: Optional[WeeklyRationale] = None
     created_at: date = Field(default_factory=date.today)
 
     @property
