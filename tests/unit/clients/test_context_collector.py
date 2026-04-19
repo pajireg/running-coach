@@ -68,7 +68,7 @@ def test_collect_converts_distances_and_preserves_schedule_details():
                     "distance": 30000,
                     "duration": 5400,
                     "calories": 700,
-                }
+                },
             ],
         )
     )

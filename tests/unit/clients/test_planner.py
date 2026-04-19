@@ -288,9 +288,7 @@ def test_build_weekly_skeleton_respects_availability_and_training_block():
     assert "long run 선호 요일" in sunday["descriptionGuide"]
     assert "2026-04-20은(는) 불가 요일" in monday["descriptionGuide"]
     rest_days = [
-        day
-        for day in skeleton
-        if day["sessionType"] == "rest" and day["date"] != "2026-04-20"
+        day for day in skeleton if day["sessionType"] == "rest" and day["date"] != "2026-04-20"
     ]
     assert all("2026-04-20은(는) 불가 요일" not in day["descriptionGuide"] for day in rest_days)
 
@@ -617,9 +615,7 @@ def test_normalize_plan_json_keeps_execution_adjustment_rationale_in_description
 def test_default_steps_assign_loose_pace_targets_to_warmup_and_cooldown():
     planner = TrainingPlanner(gemini_client=None)
 
-    steps = planner._default_steps_for_skeleton_day(
-        {"sessionType": "base", "targetMinutes": 40}
-    )
+    steps = planner._default_steps_for_skeleton_day({"sessionType": "base", "targetMinutes": 40})
 
     warmup = steps[0]
     cooldown = steps[-1]

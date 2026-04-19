@@ -53,19 +53,25 @@ class TrainingOrchestrator:
             self._rebuild_recent_executions(metrics.date)
             training_background = self._training_background(metrics.date)
 
-            if run_mode == "auto" and not self._should_generate_plan(metrics.date):
-                logger.info("새 재계획 조건이 없어 기존 훈련 계획을 유지합니다.")
-                self._sync_completed_activity_calendar(metrics.date)
-                logger.info("\n업데이트 완료")
-                return True
+            replan_reasons: list[str] = []
+            if run_mode == "auto":
+                should_generate, replan_reasons = self._should_generate_plan(metrics.date)
+                if not should_generate:
+                    logger.info("새 재계획 조건이 없어 기존 훈련 계획을 유지합니다.")
+                    self._sync_completed_activity_calendar(metrics.date)
+                    logger.info("\n업데이트 완료")
+                    return True
 
             # 3. 훈련 계획 생성
+            if replan_reasons:
+                logger.info("재계획 트리거 사유: %s", ", ".join(replan_reasons))
             logger.info("Gemini AI로 훈련 계획 생성 중...")
             plan = self.container.gemini_client.create_training_plan(
                 metrics=metrics,
                 race_config=self.container.settings.race,
                 include_strength=self.container.settings.include_strength,
                 training_background=training_background,
+                replan_reasons=replan_reasons,
             )
 
             if not plan:
@@ -255,11 +261,11 @@ class TrainingOrchestrator:
         except Exception as e:
             logger.warning(f"Garmin 동기화 결과 저장 실패 (계속 진행): {e}")
 
-    def _should_generate_plan(self, as_of) -> bool:
-        """auto 모드에서 LLM 계획 생성이 필요한지 판단."""
+    def _should_generate_plan(self, as_of) -> tuple[bool, list[str]]:
+        """auto 모드에서 LLM 계획 생성이 필요한지 판단. (should_generate, reasons) 반환."""
         if not self.container.settings.persist_history:
             logger.info("히스토리 저장이 꺼져 있어 auto 모드에서도 계획을 생성합니다.")
-            return True
+            return True, ["history_disabled"]
 
         try:
             freshness = self.container.history_service.summarize_plan_freshness(
@@ -267,13 +273,14 @@ class TrainingOrchestrator:
             )
         except Exception as e:
             logger.warning(f"계획 freshness 판단 실패로 재계획을 진행합니다: {e}")
-            return True
+            return True, ["freshness_check_failed"]
 
+        reasons = list(freshness.get("reasons") or [])
         logger.info(
             (
                 "계획 freshness: active=%s, new_activity=%s, recovery_change=%s, "
                 "missed=%s(key=%s, base=%s, recovery=%s), "
-                "last_plan=%s, latest_activity=%s"
+                "last_plan=%s, latest_activity=%s, reasons=%s"
             ),
             freshness["hasActivePlan"],
             freshness["hasNewActivitySinceLastPlan"],
@@ -284,8 +291,9 @@ class TrainingOrchestrator:
             freshness.get("missedRecoveryCount", 0),
             freshness["lastPlanCreatedAt"],
             freshness["latestActivityCreatedAt"],
+            reasons,
         )
-        return bool(freshness["shouldGeneratePlan"])
+        return bool(freshness["shouldGeneratePlan"]), reasons
 
     def _sync_google_calendar(self, plan, as_of) -> None:
         """계획과 실제 운동 기록을 Google Calendar에 동기화."""

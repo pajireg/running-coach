@@ -24,9 +24,7 @@ def _metrics(performance: PerformanceMetrics) -> AdvancedMetrics:
 def test_pace_zone_engine_prefers_lactate_threshold_pace():
     zones = PaceZoneEngine.calculate(
         _metrics(
-            PerformanceMetrics(
-                lactate_threshold=LactateThreshold(pace="4:55/km", heart_rate=176)
-            )
+            PerformanceMetrics(lactate_threshold=LactateThreshold(pace="4:55/km", heart_rate=176))
         ),
         RaceConfig(),
     )

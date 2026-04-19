@@ -14,6 +14,7 @@ from ...models.metrics import AdvancedMetrics
 from ...models.training import TrainingPlan
 from ...utils.logger import get_logger
 from ..prompt import LLMPromptTemplate
+from ..safety.metrics import emit_plan_generated
 from ..safety.validator import SafetyValidator
 
 if TYPE_CHECKING:
@@ -76,6 +77,11 @@ class LLMDrivenPlanner:
             return self._legacy_fallback(metrics, race_config, training_background)
 
         result = self._safety.validate(plan, ctx)
+        emit_plan_generated(
+            mode="llm_driven",
+            violation_count=len(result.violations),
+            unresolvable=result.unresolvable,
+        )
         if result.unresolvable:
             logger.warning(
                 "SafetyValidator 수렴 실패 (%d violations); legacy fallback",

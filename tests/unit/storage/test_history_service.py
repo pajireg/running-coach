@@ -586,10 +586,7 @@ def test_execution_status_classification():
         CoachingHistoryService._execution_status("recovery", "base", 0.92, 0.72)
         == "completed_substituted"
     )
-    assert (
-        CoachingHistoryService._execution_status("base", "base", 0.5, 0.6)
-        == "completed_partial"
-    )
+    assert CoachingHistoryService._execution_status("base", "base", 0.5, 0.6) == "completed_partial"
     assert (
         CoachingHistoryService._execution_status("unplanned", "base", None, 0.0)
         == "completed_unplanned"
@@ -606,8 +603,7 @@ def test_deviation_reason_and_interpretation_classification():
         == "excessive_stimulus"
     )
     assert (
-        CoachingHistoryService._deviation_reason("base", "base", 0.95, 0.84, 1)
-        == "schedule_shift"
+        CoachingHistoryService._deviation_reason("base", "base", 0.95, 0.84, 1) == "schedule_shift"
     )
     assert "강한 자극" in CoachingHistoryService._coach_interpretation(
         planned_category="recovery",

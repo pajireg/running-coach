@@ -78,8 +78,7 @@ class _UnplannedCalendarHistoryService(CoachingHistoryService):
                     "execution_quality": "의도한 강도 자극이 잘 들어간 품질 세션",
                     "deviation_reason": "unplanned_session",
                     "coach_interpretation": (
-                        "계획에 없던 세션으로, 다음 주 부하 해석 시 "
-                        "별도로 반영해야 합니다."
+                        "계획에 없던 세션으로, 다음 주 부하 해석 시 " "별도로 반영해야 합니다."
                     ),
                 }
             ]
