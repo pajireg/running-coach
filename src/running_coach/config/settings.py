@@ -1,7 +1,7 @@
 """설정 관리"""
 
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     schedule_hour: int = DEFAULT_SCHEDULE_HOUR
     schedule_times: str = DEFAULT_SCHEDULE_TIMES
     service_run_mode: str = DEFAULT_SERVICE_RUN_MODE
+
+    # Planner mode: 'legacy'(기존 skeleton) | 'llm_driven'(새 LLM 주도)
+    coach_planner_mode: Literal["legacy", "llm_driven"] = "legacy"
 
     model_config = SettingsConfigDict(
         env_file=".env",
