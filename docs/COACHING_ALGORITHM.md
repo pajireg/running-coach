@@ -81,7 +81,7 @@ The system works in four layers:
 8. Save plan rows and explainable decision rationale
 9. Sync Garmin workouts and Google Calendar
 
-In `auto` service mode, steps 6-9 are skipped when the active plan is still fresh. A replan is triggered when the plan horizon is missing, a new Garmin activity appeared after the last plan, recovery metrics materially worsened after the last plan, or a prior planned workout is overdue without a meaningful execution match.
+In `auto` service mode, steps 6-9 are skipped when the active plan is still fresh. A replan is triggered when the plan horizon is missing, a new Garmin activity appeared after the last plan, recovery metrics materially worsened after the last plan, a key workout was missed, or base-volume misses accumulated. A single missed recovery run is treated as extra rest and does not replan by itself.
 
 Main implementation:
 

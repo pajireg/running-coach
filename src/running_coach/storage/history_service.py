@@ -316,6 +316,30 @@ class CoachingHistoryService:
                     COUNT(*) FILTER (
                         WHERE
                             LOWER(pw.workout_name) LIKE '%%long%%'
+                    ) AS missed_long_run_count,
+                    COUNT(*) FILTER (
+                        WHERE
+                            LOWER(pw.workout_name) LIKE '%%tempo%%'
+                            OR LOWER(pw.workout_name) LIKE '%%threshold%%'
+                            OR LOWER(pw.workout_name) LIKE '%%interval%%'
+                            OR pw.plan_payload::text ILIKE '%%Interval%%'
+                    ) AS missed_quality_count,
+                    COUNT(*) FILTER (
+                        WHERE
+                            LOWER(pw.workout_name) LIKE '%%recovery%%'
+                    ) AS missed_recovery_count,
+                    COUNT(*) FILTER (
+                        WHERE
+                            LOWER(pw.workout_name) NOT LIKE '%%long%%'
+                            AND LOWER(pw.workout_name) NOT LIKE '%%tempo%%'
+                            AND LOWER(pw.workout_name) NOT LIKE '%%threshold%%'
+                            AND LOWER(pw.workout_name) NOT LIKE '%%interval%%'
+                            AND LOWER(pw.workout_name) NOT LIKE '%%recovery%%'
+                            AND pw.plan_payload::text NOT ILIKE '%%Interval%%'
+                    ) AS missed_base_count,
+                    COUNT(*) FILTER (
+                        WHERE
+                            LOWER(pw.workout_name) LIKE '%%long%%'
                             OR LOWER(pw.workout_name) LIKE '%%tempo%%'
                             OR LOWER(pw.workout_name) LIKE '%%threshold%%'
                             OR LOWER(pw.workout_name) LIKE '%%interval%%'
@@ -340,14 +364,21 @@ class CoachingHistoryService:
                 },
             ) or {}
         missed_workout_count = int(missed_row.get("missed_workout_count") or 0)
+        missed_long_run_count = int(missed_row.get("missed_long_run_count") or 0)
+        missed_quality_count = int(missed_row.get("missed_quality_count") or 0)
+        missed_recovery_count = int(missed_row.get("missed_recovery_count") or 0)
+        missed_base_count = int(missed_row.get("missed_base_count") or 0)
         missed_key_workout_count = int(missed_row.get("missed_key_workout_count") or 0)
         has_missed_planned_workout = missed_workout_count > 0
+        has_missed_key_workout = missed_key_workout_count > 0
+        has_missed_base_volume = missed_base_count >= 2
+        should_replan_for_missed_workout = has_missed_key_workout or has_missed_base_volume
         should_generate_plan = (
             not has_active_plan
             or last_plan_created_at is None
             or has_new_activity
             or has_significant_recovery_change
-            or has_missed_planned_workout
+            or should_replan_for_missed_workout
         )
         reasons = []
         if not has_active_plan:
@@ -358,8 +389,10 @@ class CoachingHistoryService:
             reasons.append("new_activity_since_last_plan")
         if has_significant_recovery_change:
             reasons.append("significant_recovery_change")
-        if has_missed_planned_workout:
-            reasons.append("missed_planned_workout")
+        if has_missed_key_workout:
+            reasons.append("missed_key_workout")
+        elif has_missed_base_volume:
+            reasons.append("missed_base_volume")
 
         return {
             "asOf": as_of.isoformat(),
@@ -380,8 +413,14 @@ class CoachingHistoryService:
             "hasSignificantRecoveryChange": has_significant_recovery_change,
             "recoveryShiftReasons": recovery_shift_reasons,
             "missedWorkoutCount": missed_workout_count,
+            "missedRecoveryCount": missed_recovery_count,
+            "missedBaseCount": missed_base_count,
+            "missedQualityCount": missed_quality_count,
+            "missedLongRunCount": missed_long_run_count,
             "missedKeyWorkoutCount": missed_key_workout_count,
             "hasMissedPlannedWorkout": has_missed_planned_workout,
+            "hasMissedKeyWorkout": has_missed_key_workout,
+            "shouldReplanForMissedWorkout": should_replan_for_missed_workout,
             "shouldGeneratePlan": should_generate_plan,
             "reasons": reasons,
         }

@@ -181,6 +181,10 @@ class _FreshnessHistoryService(CoachingHistoryService):
         if "COUNT(*) AS missed_workout_count" in query:
             return {
                 "missed_workout_count": self.rows.get("missed_workout_count", 0),
+                "missed_long_run_count": self.rows.get("missed_long_run_count", 0),
+                "missed_quality_count": self.rows.get("missed_quality_count", 0),
+                "missed_recovery_count": self.rows.get("missed_recovery_count", 0),
+                "missed_base_count": self.rows.get("missed_base_count", 0),
                 "missed_key_workout_count": self.rows.get("missed_key_workout_count", 0),
             }
         return None
@@ -244,6 +248,7 @@ def test_summarize_plan_freshness_replans_after_missed_planned_workout():
             "last_plan_decision_date": date(2026, 4, 18),
             "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
             "missed_workout_count": 1,
+            "missed_long_run_count": 1,
             "missed_key_workout_count": 1,
         }
     )
@@ -252,10 +257,56 @@ def test_summarize_plan_freshness_replans_after_missed_planned_workout():
 
     assert freshness["hasNewActivitySinceLastPlan"] is False
     assert freshness["hasMissedPlannedWorkout"] is True
+    assert freshness["hasMissedKeyWorkout"] is True
     assert freshness["missedWorkoutCount"] == 1
+    assert freshness["missedLongRunCount"] == 1
     assert freshness["missedKeyWorkoutCount"] == 1
+    assert freshness["shouldReplanForMissedWorkout"] is True
     assert freshness["shouldGeneratePlan"] is True
-    assert freshness["reasons"] == ["missed_planned_workout"]
+    assert freshness["reasons"] == ["missed_key_workout"]
+
+
+def test_summarize_plan_freshness_does_not_replan_after_single_missed_recovery():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+            "missed_workout_count": 1,
+            "missed_recovery_count": 1,
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasMissedPlannedWorkout"] is True
+    assert freshness["hasMissedKeyWorkout"] is False
+    assert freshness["missedRecoveryCount"] == 1
+    assert freshness["shouldReplanForMissedWorkout"] is False
+    assert freshness["shouldGeneratePlan"] is False
+    assert freshness["reasons"] == []
+
+
+def test_summarize_plan_freshness_replans_after_repeated_missed_base_runs():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+            "missed_workout_count": 2,
+            "missed_base_count": 2,
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 21))
+
+    assert freshness["missedBaseCount"] == 2
+    assert freshness["missedKeyWorkoutCount"] == 0
+    assert freshness["shouldReplanForMissedWorkout"] is True
+    assert freshness["shouldGeneratePlan"] is True
+    assert freshness["reasons"] == ["missed_base_volume"]
 
 
 def test_summarize_plan_freshness_replans_after_recovery_metrics_drop():

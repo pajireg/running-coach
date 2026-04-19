@@ -271,13 +271,17 @@ class TrainingOrchestrator:
 
         logger.info(
             (
-                "계획 freshness: active=%s, new_activity=%s, recovery_change=%s, missed=%s, "
+                "계획 freshness: active=%s, new_activity=%s, recovery_change=%s, "
+                "missed=%s(key=%s, base=%s, recovery=%s), "
                 "last_plan=%s, latest_activity=%s"
             ),
             freshness["hasActivePlan"],
             freshness["hasNewActivitySinceLastPlan"],
             freshness.get("recoveryShiftReasons", []),
             freshness.get("missedWorkoutCount", 0),
+            freshness.get("missedKeyWorkoutCount", 0),
+            freshness.get("missedBaseCount", 0),
+            freshness.get("missedRecoveryCount", 0),
             freshness["lastPlanCreatedAt"],
             freshness["latestActivityCreatedAt"],
         )
