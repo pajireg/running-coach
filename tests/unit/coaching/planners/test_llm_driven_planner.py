@@ -162,7 +162,7 @@ def _plan_json(session_types: list[str]) -> dict:
         "rest": "Rest Day",
         "recovery": "Recovery Run",
         "base": "Base Run",
-        "quality": "Quality Session",
+        "quality": "Interval",
         "long_run": "Long Run",
     }
     days = []

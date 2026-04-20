@@ -96,7 +96,7 @@ class TrainingOrchestrator:
             for daily_plan in plan.plan:
                 workout = daily_plan.workout
 
-                if workout.is_rest:
+                if daily_plan.session_type == "rest" or workout.is_rest:
                     logger.info(f"[{daily_plan.date}] 휴식")
                     continue
 

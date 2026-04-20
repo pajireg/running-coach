@@ -128,9 +128,7 @@ class CalendarSyncService:
                 hour=23, minute=59, second=59, microsecond=0
             )
         else:
-            start_cleanup = datetime.combine(
-                start_date, datetime.min.time(), tzinfo=timezone.utc
-            )
+            start_cleanup = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
             end_cleanup = datetime.combine(
                 end_date, datetime.max.time().replace(microsecond=0), tzinfo=timezone.utc
             )
@@ -186,8 +184,8 @@ class CalendarSyncService:
         for daily_plan in plan.plan:
             workout = daily_plan.workout
 
-            # 휴식 워크아웃은 건너뛰기
-            if workout.is_rest:
+            # 휴식일은 캘린더에도 등록하지 않음
+            if daily_plan.session_type == "rest" or workout.is_rest:
                 logger.debug(f"{daily_plan.date}: 휴식 - 건너뜀")
                 continue
 

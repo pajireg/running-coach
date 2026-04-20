@@ -67,7 +67,7 @@ def make_day(
         "rest": "Rest Day",
         "recovery": "Recovery Run",
         "base": "Base Run",
-        "quality": "Quality Session",
+        "quality": "Interval",  # StandardizeWorkoutName 기대값
         "long_run": "Long Run",
     }
     name = workout_name or default_names[session_type]

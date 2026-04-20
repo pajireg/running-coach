@@ -230,6 +230,25 @@ class LLMPromptTemplate:
         rules_block = "\n".join(f"- {line}" for line in safety_rules)
         sections.append("[반드시 지켜야 할 안전 원칙]\n" + rules_block)
 
+        sections.append(
+            "[훈련 카탈로그 — 선수 수준/회복 상태에 맞춰 선택]\n"
+            "- Interval: VO2max/무산소 자극. 반복 구간 동일 duration. (e.g. 400m/800m/1km 반복)\n"
+            "- Threshold: 젖산 역치 페이스로 10~30분 continuous. lactate threshold 능력 강화.\n"
+            "- Tempo Run: tempo 페이스(LT+15~30초)로 20~40분 continuous. 지속력 강화.\n"
+            "- Fartlek: Interval duration 을 불규칙하게 (1.5배 이상 편차). 변속 적응.\n"
+            "- Long Run: long_run 페이스로 장시간 지속. 지구력/fatigue resistance.\n"
+            "- Base Run: base 페이스 aerobic 주행. 주간 볼륨의 척추.\n"
+            "- Recovery Run: recovery 페이스 매우 편안한 회복 주.\n"
+            "- Rest Day: 완전 휴식.\n"
+            "세션 선택 가이드:\n"
+            "- readiness 가 높고 chronic load 충분: Interval 또는 Threshold 로 능력 자극.\n"
+            "- 피로/부상 지표 경계선: Tempo Run 또는 Fartlek 으로 완충.\n"
+            "- 최근 quality 수행력이 약했다면 이번 주는 Threshold 나 Tempo 로 base building.\n"
+            "- 대회까지 남은 기간 / phase 에 맞춰 특이성(race pace 근접) 조절.\n"
+            "각 quality 세션은 step 구조와 pace 가 위 분류 기준에 맞아야 "
+            "safety validator 가 workoutName 을 올바르게 붙일 수 있습니다."
+        )
+
         if include_strength:
             sections.append(
                 "[근력 훈련 참고]\n"

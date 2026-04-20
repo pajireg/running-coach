@@ -72,7 +72,7 @@ _WORKOUT_NAMES: dict[str, str] = {
     "rest": "Rest Day",
     "recovery": "Recovery Run",
     "base": "Base Run",
-    "quality": "Quality Session",
+    "quality": "Interval",
     "long_run": "Long Run",
 }
 
@@ -622,47 +622,57 @@ class MinOneRestPerWeek:
 
 
 class AcwrCap:
-    """주간 계획 러닝 km / chronic_ewma_load > 1.5 → duration 균등 축소."""
+    """주간 계획 러닝 km / chronic_weekly > 1.5 → duration 균등 축소.
+
+    chronic_ewma_load 는 일일 평균(km/day)이므로 주간 비교를 위해 ×7 한다.
+    """
 
     rule_id = "acwr_cap"
     severity: Severity = "block"
     TARGET_RATIO = 1.4
     CAP_RATIO = 1.5
 
+    @staticmethod
+    def _chronic_weekly(ctx: "CoachingContext") -> float:
+        return float(ctx.scores.chronic_ewma_load) * 7.0
+
     def check(self, plan, ctx):
-        chronic = ctx.scores.chronic_ewma_load
-        if chronic <= 0.1:
+        chronic_weekly = self._chronic_weekly(ctx)
+        if chronic_weekly <= 0.1:
             return []
         planned_km = _total_planned_km(plan, ctx.pace_zones)
-        ratio = planned_km / chronic
+        ratio = planned_km / chronic_weekly
         if ratio <= self.CAP_RATIO:
             return []
         return [
             Violation(
                 rule_id=self.rule_id,
                 severity=self.severity,
-                message=f"ACWR {ratio:.2f} > {self.CAP_RATIO}; scaling durations",
+                message=(
+                    f"ACWR {ratio:.2f} (planned {planned_km:.1f}km vs chronic "
+                    f"{chronic_weekly:.1f}km/wk) > {self.CAP_RATIO}"
+                ),
                 day_index=None,
             )
         ]
 
     def correct(self, plan, ctx, violations):
-        chronic = ctx.scores.chronic_ewma_load
-        if chronic <= 0.1:
+        chronic_weekly = self._chronic_weekly(ctx)
+        if chronic_weekly <= 0.1:
             return plan
         planned_km = _total_planned_km(plan, ctx.pace_zones)
         if planned_km <= 0:
             return plan
-        current_ratio = planned_km / chronic
+        current_ratio = planned_km / chronic_weekly
         if current_ratio <= self.TARGET_RATIO:
             return plan
 
-        # 1단계: 필요시 구조적 축소를 반복 — 가장 긴 non-rest non-long_run 을 rest 로 전환.
+        # 1단계: 필요시 구조적 축소를 반복 — 가장 긴 base/recovery 를 rest 로 전환.
         # step 의 60s 하한 때문에 scale-only 로는 수렴 불가한 경우가 있어,
         # CAP_RATIO 안으로 들어오거나 변환 대상이 떨어질 때까지 반복.
         structural_plan = plan
         current_km = planned_km
-        while current_km / chronic > self.CAP_RATIO:
+        while current_km / chronic_weekly > self.CAP_RATIO:
             reduced = self._convert_longest_to_rest(structural_plan, ctx)
             if reduced is structural_plan:
                 break  # 더 줄일 대상 없음
@@ -670,7 +680,7 @@ class AcwrCap:
             current_km = _total_planned_km(structural_plan, ctx.pace_zones)
 
         # 2단계: 남은 날들에 대해 duration 스케일링으로 미세 조정.
-        current_ratio = current_km / chronic
+        current_ratio = current_km / chronic_weekly
         if current_ratio <= self.TARGET_RATIO:
             return structural_plan
         scale = self.TARGET_RATIO / current_ratio  # < 1
@@ -716,6 +726,13 @@ class AcwrCap:
         return _replace_day(plan, target_idx, new_day)
 
     def describe(self, ctx):
+        chronic_weekly = self._chronic_weekly(ctx)
+        if chronic_weekly > 0:
+            cap_km = chronic_weekly * self.CAP_RATIO
+            return (
+                f"주간 총 러닝량은 {cap_km:.0f}km 이하여야 합니다 "
+                f"(chronic {chronic_weekly:.1f}km/wk 기준 ACWR ≤ {self.CAP_RATIO})."
+            )
         return "주간 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
 
 
@@ -922,6 +939,96 @@ class PaceZoneIntegrity:
         return "모든 step pace 는 제공된 PaceZones 값만 사용합니다."
 
 
+class StandardizeWorkoutName:
+    """workout.workout_name 을 session_type 기반 영문 표준 이름으로 강제.
+
+    Garmin 앱과 기존 워크아웃 제목 convention 일치를 위해 LLM 이 자유 작명한
+    "휴식 및 회복", "전략적 휴식" 같은 것을 덮어쓴다. quality 세션은 step 구성
+    (Interval 포함)에 따라 'Interval' 로 네이밍.
+    """
+
+    rule_id = "standardize_workout_name"
+    severity: Severity = "warn"
+
+    _STANDARD = {
+        "rest": "Rest Day",
+        "recovery": "Recovery Run",
+        "base": "Base Run",
+        "long_run": "Long Run",
+    }
+
+    @classmethod
+    def _expected_name(cls, day, ctx=None) -> str:
+        if day.session_type != "quality":
+            return cls._STANDARD.get(day.session_type or "base", "Base Run")
+        return cls._classify_quality(day, ctx)
+
+    @staticmethod
+    def _classify_quality(day, ctx=None) -> str:
+        """quality 세션의 step 구성·페이스로 구체 훈련 종류를 판별."""
+        steps = day.workout.steps
+        interval_steps = [s for s in steps if s.type == "Interval"]
+        if interval_steps:
+            # Fartlek: Interval duration 이 서로 다르게 섞였으면 (1.5배 이상 차이)
+            if len(interval_steps) >= 2:
+                durations = [s.duration_value for s in interval_steps]
+                if max(durations) > min(durations) * 1.5:
+                    return "Fartlek"
+            return "Interval"
+
+        # Interval 없는 continuous quality: pace 로 Threshold vs Tempo 구분
+        run_steps = [s for s in steps if s.type == "Run"]
+        if not run_steps or ctx is None:
+            return "Tempo Run"
+        zones = ctx.pace_zones.to_dict()
+        threshold_sec = _pace_seconds(zones.get("threshold", "5:00"))
+        if threshold_sec is None:
+            return "Tempo Run"
+        longest = max(run_steps, key=lambda s: s.duration_value)
+        longest_pace = _pace_seconds(longest.target_value or "")
+        if longest_pace is None:
+            return "Tempo Run"
+        # threshold ± 5s 면 Threshold 세션
+        if abs(longest_pace - threshold_sec) <= 5:
+            return "Threshold"
+        return "Tempo Run"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            expected = self._expected_name(day, ctx)
+            if day.workout.workout_name != expected:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=(
+                            f"day {i} workout name '{day.workout.workout_name}' " f"→ '{expected}'"
+                        ),
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            expected = self._expected_name(day, ctx)
+            new_workout = day.workout.model_copy(update={"workout_name": expected})
+            new_day = day.model_copy(update={"workout": new_workout})
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return (
+            "workoutName 은 session_type 에 맞춰 'Rest Day', 'Recovery Run', "
+            "'Base Run', 'Interval', 'Threshold', 'Tempo Run', 'Fartlek', "
+            "'Long Run' 중 하나만 사용하세요 (step 구조와 페이스로 자동 분류)."
+        )
+
+
 class PlanStartsToday:
     """plan[0].date == ctx.today 보장; 벗어나면 전체 날짜를 오늘 기준으로 rebase.
 
@@ -982,4 +1089,5 @@ DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     InjuryReduceVolume(),
     MinStepDuration(),
     PaceZoneIntegrity(),
+    StandardizeWorkoutName(),  # 마지막: 구조 변경 다 끝난 후 이름 정규화
 ]
