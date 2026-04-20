@@ -2,6 +2,12 @@
 
 [English](COACHING_ALGORITHM.md) | 한국어
 
+> **참고:** Planner 모드가 두 개 공존합니다 (`COACH_PLANNER_MODE`).
+> - `legacy` (default, 안정) — 알고리즘이 주간 skeleton 을 만들고 LLM 이 step 세부를 채움.
+> - `llm_driven` (burn-in 중) — LLM 이 세션 배치·볼륨·duration 을 결정, 알고리즘은 `SafetyValidator` 로 안전만 강제.
+>
+> 이 문서는 `legacy` 경로 중심입니다. `llm_driven` 분담은 [Coaching Architecture](COACHING_ARCHITECTURE.ko.md) §계획 생성 경계 참고.
+
 ## 목적
 
 Running Coach는 LLM이 처음부터 끝까지 계획을 만들어내는 시스템이 아닙니다. 현재 코치 엔진은 선수 히스토리 저장, 규칙 기반 안전 제어, 제한된 범위의 LLM 보정을 결합한 하이브리드 구조입니다.

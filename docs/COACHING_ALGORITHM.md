@@ -2,13 +2,21 @@
 
 English | [한국어](COACHING_ALGORITHM.ko.md)
 
+> **Note:** Two planner modes coexist, selected by `COACH_PLANNER_MODE`.
+> - `legacy` (default, stable) — algorithm builds a weekly skeleton, LLM fills step detail.
+> - `llm_driven` (in burn-in) — LLM decides session placement/volume/duration, algorithm enforces safety via `SafetyValidator`.
+>
+> This document describes the `legacy` path. For the `llm_driven` split, see [Coaching Architecture](COACHING_ARCHITECTURE.md) §Planning Boundary.
+
 ## Purpose
 
-Running Coach is not designed as an LLM-only workout generator. The current coaching engine is a hybrid system that combines persistent athlete history, rule-based safety logic, and bounded LLM refinement.
+Running Coach is not designed as an LLM-only workout generator. The coaching engine is a hybrid system that combines persistent athlete history, rule-based safety logic, and bounded LLM refinement.
 
 The design principle is:
 
 `Code owns safety and structure. The LLM owns bounded interpretation and explanation.`
+
+Under `llm_driven` mode, the split shifts: code owns only hard safety bounds (scoring, pace zones, 15 safety rules), and the LLM owns coaching judgment (session placement, weekly volume, phase interpretation).
 
 This document explains what the engine looks at, how it turns raw data into planning signals, and why the current architecture was chosen.
 
@@ -20,10 +28,12 @@ The system works in four layers:
    Garmin and user inputs provide health, performance, activity, and constraint data.
 2. **State storage and normalization**
    Postgres stores normalized history, not only raw payloads.
-3. **Rule-based planning**
-   A weekly skeleton is generated from recovery, load, execution history, and constraints.
+3. **Rule-based planning** (`legacy`) or **context assembly + safety validation** (`llm_driven`)
+   Legacy: a weekly skeleton is generated from recovery, load, execution history, and constraints.
+   LLM-driven: a `CoachingContext` is assembled and the LLM produces the plan; `SafetyValidator` auto-corrects violations.
 4. **LLM refinement**
-   The LLM fills in workout descriptions and workout-step detail inside fixed safety boundaries.
+   Legacy: LLM fills workout descriptions and step detail inside fixed boundaries.
+   LLM-driven: LLM output is parsed, validated, and corrected against the 15 safety rules.
 
 ## Data Inputs
 

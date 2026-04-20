@@ -26,11 +26,12 @@ The default deployment model is Docker-based and intended to run continuously.
 3. Collect health, performance, activity, calendar, and constraint context
 4. Normalize and persist state into Postgres
 5. Rebuild planned-vs-actual execution links
-6. Summarize coaching state
-7. Generate a rule-based weekly skeleton
-8. Ask the LLM to refine descriptions and workout detail inside hard constraints
-9. Save plans and coach-decision rationale
-10. Upload workouts to Garmin and sync Google Calendar
+6. Summarize coaching state and build CoachingContext
+7. Dispatch to the active planner (`legacy` or `llm_driven` per `COACH_PLANNER_MODE`)
+8. For `llm_driven`: render prompt, call Gemini, parse JSON, run SafetyValidator auto-correction
+9. For `legacy`: build a rule-based skeleton and ask Gemini to fill step detail inside it
+10. Save plans and coach-decision rationale
+11. Upload workouts to Garmin (skip Rest Days) and sync Google Calendar
 
 ## Architectural Layers
 
@@ -75,17 +76,21 @@ Responsibilities:
 
 Responsible for translating stored state into a safe, explainable weekly plan.
 
-Main module:
+Main modules:
 
-- `src/running_coach/clients/gemini/planner.py`
+- `src/running_coach/coaching/context.py` — `CoachingContextBuilder` assembles scores, pace zones, execution history, injuries, feedback, availability, training background into a `CoachingContext` dataclass
+- `src/running_coach/coaching/prompt.py` — `LLMPromptTemplate` renders the context as a deterministic Korean prompt (prompt-cache friendly, no threshold leakage)
+- `src/running_coach/coaching/safety/` — 15 safety rules + `SafetyValidator` with multi-pass auto-correction
+- `src/running_coach/coaching/planners/` — `Planner` protocol, `LegacySkeletonPlanner`, `LLMDrivenPlanner`
+- `src/running_coach/clients/gemini/planner.py` — legacy skeleton-based planner (preserved for fallback)
 
-Responsibilities:
+Responsibilities (by path):
 
-- build the rule-based weekly skeleton
-- prepare planning context
-- construct prompts for bounded LLM refinement
-- normalize and validate generated output
-- protect safety-critical structure
+- `context.py`: turn raw history_service output into a typed context (chronic load, raw 14-day execution rows, staleness-tagged feedback, etc.)
+- `prompt.py`: emit a structured prompt including a training catalog (Interval, Threshold, Tempo Run, Fartlek, Long Run, Base Run, Recovery Run, Rest Day)
+- `safety/`: enforce hard constraints (date starts today, max one long run, no back-to-back quality, injury blocks, ACWR cap, minimum one rest, pace zone integrity, workout name standardization, etc.) with auto-correction
+- `planners/llm_driven.py`: pipeline `CoachingContext → prompt → Gemini → Pydantic → SafetyValidator`; falls back to legacy on parse/quota/unresolvable errors
+- `clients/gemini/planner.py`: original skeleton-building path, still active when `COACH_PLANNER_MODE=legacy`
 
 ### 4. Orchestration layer
 
@@ -175,24 +180,45 @@ Role:
 
 ## Planning Boundary: Rules vs LLM
 
-One of the most important architectural decisions is that the LLM does not own weekly-structure safety.
+The boundary depends on `COACH_PLANNER_MODE`.
 
-### Code owns
+### `llm_driven` mode (new default target)
 
-- run-day count
-- quality-session count
-- long-run placement
-- rest and recovery placement
-- availability constraints
-- injury-based restrictions
-- conservative adjustments from execution history
+**Algorithm owns (hard bounds)**:
 
-### LLM owns
+- readiness / fatigue / injury scoring (`history_service`)
+- PaceZone calculation from LT / PR / race target
+- replan-trigger detection (`summarize_plan_freshness`)
+- safety rules enforced via `SafetyValidator`:
+  - plan starts today
+  - active injury severity ≥ 6 → no quality, volume × 0.65
+  - active injury severity 3–5 → no intervals, volume × 0.85
+  - max one long_run per week
+  - no back-to-back hard sessions
+  - no quality the day after long run
+  - quality sessions ≥ 48h apart
+  - weekly hard cap ≤ 2 sessions
+  - respect availability / max duration / min 1 rest
+  - weekly km / chronic-weekly ≤ 1.5 (ACWR cap) with structural + duration scaling
+  - step pace must match a PaceZone value
+  - non-rest days must have valid steps with ≥ 60s per step
+  - workout name standardization by session type + step structure
 
-- session descriptions
-- workout-step detail
-- bounded explanation
-- coaching-language refinement
+**LLM owns (judgment)**:
+
+- session type placement across 7 days
+- weekly volume target
+- planned minutes per day
+- step structure (warmup/run/interval/recovery/cooldown layout)
+- phase interpretation (base / build / peak / taper)
+- Korean rationale and risk acknowledgements
+- training variety selection (Interval vs Threshold vs Tempo vs Fartlek based on athlete state)
+
+When the LLM output violates a safety rule, the validator auto-corrects and logs the violation. Unresolvable plans fall back to `legacy`.
+
+### `legacy` mode (fallback, default until `llm_driven` burn-in completes)
+
+The legacy path builds a rule-based skeleton in `planner._build_weekly_skeleton` and asks the LLM to fill in step detail only.
 
 This separation keeps the system explainable and reduces unsafe plan drift.
 
