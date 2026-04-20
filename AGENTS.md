@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Application code lives in `src/running_coach/`. Keep orchestration and scheduling in `core/`, external integrations in `clients/`, Pydantic contracts in `models/`, settings/constants in `config/`, persistence in `storage/`, and shared helpers in `utils/`. Database bootstrap SQL lives in `db/init/`, operational docs in `docs/`, and auth/bootstrap scripts in `scripts/`. Tests are under `tests/unit/`, grouped by area such as `clients/`, `core/`, and `storage/`.
+Application code lives in `src/running_coach/`. Keep orchestration and scheduling in `core/`, external integrations in `clients/`, Pydantic contracts in `models/`, settings/constants in `config/`, persistence in `storage/`, coaching logic (context builder, prompt renderer, safety validator, planner dispatcher) in `coaching/`, and shared helpers in `utils/`. Database bootstrap SQL lives in `db/init/`, operational docs in `docs/`, and auth/bootstrap scripts in `scripts/`. Tests are under `tests/unit/`, grouped by area such as `coaching/`, `coaching/safety/`, `coaching/planners/`, `clients/`, `core/`, and `storage/`.
 
 ## Build, Test, and Development Commands
 Install runtime deps with `pip install -e .`; use `pip install -e ".[dev]"` for linting and tests. Run the app once with `python -m running_coach` or `running-coach`. First-time Garmin auth uses `python scripts/setup_garmin.py`. Start the service stack with `docker-compose up -d`. Main checks:
@@ -47,3 +47,37 @@ Do not make hard-coded coaching assumptions such as “no long runs on consecuti
 When changing coaching logic, update `docs/COACHING_ALGORITHM.md`, `docs/COACHING_ALGORITHM.ko.md`, and any README sections that describe user-visible behavior. Keep code and technical docs primarily in English; keep runtime logs and CLI-facing messages in Korean.
 
 Never commit real credentials, OAuth tokens, Garmin tokens, personal activity exports, or local runtime state. Leave `.env`, `.garmin_tokens/`, `.google/*.json`, and generated local data untracked.
+
+## Coaching Architecture Rules
+
+Two planner modes coexist and are selected by `COACH_PLANNER_MODE`:
+
+- `legacy` (default) — `clients/gemini/planner.py::_build_weekly_skeleton` produces a rule-based 7-day skeleton and the LLM fills step detail inside fixed boundaries.
+- `llm_driven` — `coaching/planners/llm_driven.py` pipes `CoachingContext → prompt → LLM → Pydantic → SafetyValidator`. The LLM decides session placement, weekly volume, duration, and phase; the algorithm only enforces hard safety bounds and auto-corrects violations.
+
+When touching coaching logic, respect the following:
+
+- **Algorithm owns**: `readiness/fatigue/injury` scoring (`storage/history_service.py`), `PaceZoneEngine`, replan-trigger detection (`summarize_plan_freshness`), and the 15 rules in `coaching/safety/rules.py` (plan_starts_today, injury blocks, max_one_long_run, no_back_to_back_quality, no_quality_after_long_run, quality_48h_spacing, weekly_hard_cap, respect_unavailability, min_one_rest_per_week, acwr_cap, max_duration_per_day, non_rest_has_steps, injury_reduce_volume, min_step_duration, pace_zone_integrity, standardize_workout_name).
+- **LLM owns (in `llm_driven`)**: session type per day, weekly volume target, planned minutes, step structure, phase interpretation (base/build/peak/taper), Korean rationale.
+- **Safety rules are hard bounds, not style preferences.** If you add a new rule, expose a `describe(ctx)` string so the LLM sees it in the prompt proactively, and ensure `correct()` converges within `SafetyValidator.max_passes`.
+- **ACWR math uses weekly units.** `chronic_ewma_load` is km/day; multiply by 7 before comparing with planned weekly km.
+- **Workout naming is enforced post-hoc.** Do not rely on LLM output for workout titles. Use the 8 canonical names: `Rest Day`, `Recovery Run`, `Base Run`, `Interval`, `Threshold`, `Tempo Run`, `Fartlek`, `Long Run`.
+- **Rest days skip both Garmin upload and Google Calendar sync.** Use `session_type == "rest"` (not workout-name match alone) to decide skipping.
+- **Do not leak algorithm thresholds into the LLM prompt.** Pass raw facts (scores, execution rows, injuries) only. Interpretation hints are fine; threshold bands are not.
+- **LLM output is never trusted for dates, session types, or paces.** `PlanStartsToday` rebases dates to today; `PaceZoneIntegrity` snaps pace to the canonical `PaceZones`; `StandardizeWorkoutName` reassigns titles from step structure.
+
+Safety metrics (`coaching/safety/metrics.py`) expose in-process counters: `violation_counter{rule_id,severity}`, `unresolvable_counter`, `plan_generated_counter{mode}`. Tests reset these via `reset_counters_for_test()`.
+
+## Long-Term Direction (Design Constraints)
+
+The codebase is intended to evolve into a multi-user, multi-LLM, multi-client product. Preserve these invariants when adding new code:
+
+- **Multi-tenant first.** `athletes.external_key` already identifies each user. Any new query, service, or background job MUST accept an athlete/user id rather than a singleton. Do not introduce new singleton state keyed on `Settings.garmin_email`.
+- **LLM provider abstraction.** `google.genai` is currently imported directly in `clients/gemini/client.py` and `coaching/planners/llm_driven.py`. New LLM features should route through a planned `LLMProvider` protocol. Do not add more direct `genai` calls outside the existing files; if you need another Gemini-only feature, place it behind a clearly named method so it is easy to swap later. Prompts must avoid provider-specific quirks (e.g., Gemini's `response_mime_type`) leaking into coaching modules — keep that concern in the client layer.
+- **Per-user configuration belongs in the database, not env vars.** `Settings` is process-global. Any new knob that a user should customize (schedule times, include_strength, coach_planner_mode, preferred LLM, max weekly km, notification preferences) should read from an `athlete_preferences`-style table, falling back to `Settings` defaults. Do not add new `COACH_*` env vars for behavior that should eventually be per-user.
+- **Secrets are per-user and encrypted at rest.** The current `.garmin_tokens/` file works only for the single-tenant deployment. New integrations must store credentials/tokens in DB columns with encryption (KMS or app-level), keyed by athlete id. Never design a feature that assumes one shared `.env`.
+- **Scheduler must not assume a fixed routine.** Do not hardcode `05:00,17:00` or `Asia/Seoul`. Respect per-user schedule and timezone values from the preferences layer once it lands.
+- **API-first.** The CLI is a thin wrapper; treat orchestrator entry points as callable functions that a future HTTP/ASGI layer (FastAPI) can invoke. Do not put business logic in `__main__.py` or CLI parsers.
+- **Data portability & deletion.** Any new table must be listed in the export flow and deletable by athlete id. Design schemas with `ON DELETE CASCADE` from `athletes`.
+- **LLM cost awareness.** Gate expensive LLM paths behind explicit triggers (replan reasons, user action). Avoid per-minute or per-page LLM calls. Prefer deterministic context ordering so provider-side prompt caching helps.
+- **Observability.** Keep metric labels bounded (`rule_id`, `severity`, `mode`). Do not add unbounded labels like `athlete_id`, `date`, `activity_id` to counters; use structured logs or a per-athlete dashboard query instead.
