@@ -44,7 +44,7 @@ class LLMDrivenPlanner:
         self,
         metrics: AdvancedMetrics,
         race_config: RaceConfig,
-        include_strength: bool = False,  # noqa: ARG002 — strength 는 LLM prompt 에서 자연어로 처리
+        include_strength: bool = False,
         training_background: Optional[dict[str, Any]] = None,  # noqa: ARG002 — PR2 builder 사용
         replan_reasons: Optional[list[str]] = None,
     ) -> Optional[TrainingPlan]:
@@ -56,25 +56,37 @@ class LLMDrivenPlanner:
             )
         except Exception as exc:
             logger.exception("CoachingContext 조립 실패; legacy fallback (%s)", exc)
-            return self._legacy_fallback(metrics, race_config, training_background)
+            return self._legacy_fallback(
+                metrics, race_config, training_background, include_strength
+            )
 
         safety_descriptions = self._safety.describe_rules(ctx)
-        prompt = LLMPromptTemplate.render(ctx, safety_rules=safety_descriptions)
+        prompt = LLMPromptTemplate.render(
+            ctx,
+            safety_rules=safety_descriptions,
+            include_strength=include_strength,
+        )
 
         try:
             raw_json = self._invoke_gemini(prompt)
         except GeminiQuotaExceededError:
             logger.warning("Gemini quota 초과; legacy fallback")
-            return self._legacy_fallback(metrics, race_config, training_background)
+            return self._legacy_fallback(
+                metrics, race_config, training_background, include_strength
+            )
         except Exception as exc:
             logger.exception("Gemini 호출 실패; legacy fallback (%s)", exc)
-            return self._legacy_fallback(metrics, race_config, training_background)
+            return self._legacy_fallback(
+                metrics, race_config, training_background, include_strength
+            )
 
         try:
             plan = TrainingPlan.model_validate(raw_json)
         except Exception as exc:
             logger.exception("LLM 출력 Pydantic 검증 실패; legacy fallback (%s)", exc)
-            return self._legacy_fallback(metrics, race_config, training_background)
+            return self._legacy_fallback(
+                metrics, race_config, training_background, include_strength
+            )
 
         result = self._safety.validate(plan, ctx)
         emit_plan_generated(
@@ -87,7 +99,9 @@ class LLMDrivenPlanner:
                 "SafetyValidator 수렴 실패 (%d violations); legacy fallback",
                 len(result.violations),
             )
-            return self._legacy_fallback(metrics, race_config, training_background)
+            return self._legacy_fallback(
+                metrics, race_config, training_background, include_strength
+            )
 
         logger.info(
             "LLMDrivenPlanner 완료: %d 위반 auto-correct",
@@ -118,13 +132,14 @@ class LLMDrivenPlanner:
         metrics: AdvancedMetrics,
         race_config: RaceConfig,
         training_background: Optional[dict[str, Any]],
+        include_strength: bool = False,
     ) -> Optional[TrainingPlan]:
         return cast(
             Optional[TrainingPlan],
             self._fallback.generate_plan(
                 metrics,
                 race_config,
-                include_strength=False,
+                include_strength=include_strength,
                 training_background=training_background,
             ),
         )

@@ -60,11 +60,27 @@ class TestAcwrCap:
         # 수정 후 ratio ≤ 1.5
         assert rule.check(fixed, ctx) == []
 
-    def test_corrector_preserves_session_types(self):
+    def test_corrector_preserves_long_run_and_quality(self):
+        """극단적 ACWR 이면 structural 축소(한 날을 rest 로)도 허용되지만
+        long_run / quality 는 유지한다."""
         rule = AcwrCap()
         ctx = _ctx_with_chronic(10.0)
         plan = make_plan(["base", "quality", "base", "base", "base", "long_run", "rest"])
-        original_types = [d.session_type for d in plan.plan]
         violations = rule.check(plan, ctx)
         fixed = rule.correct(plan, ctx, violations)
-        assert [d.session_type for d in fixed.plan] == original_types
+        types = [d.session_type for d in fixed.plan]
+        assert types.count("long_run") == 1
+        assert types.count("quality") == 1
+
+    def test_corrector_structurally_reduces_for_extreme_ratio(self):
+        """chronic 이 매우 작을 때 base/recovery 를 rest 로 구조적 축소."""
+        rule = AcwrCap()
+        ctx = _ctx_with_chronic(3.0)  # ratio > 10배
+        plan = make_plan(["base", "quality", "base", "base", "base", "long_run", "rest"])
+        original_rest = sum(1 for d in plan.plan if d.session_type == "rest")
+        violations = rule.check(plan, ctx)
+        fixed = rule.correct(plan, ctx, violations)
+        new_rest = sum(1 for d in fixed.plan if d.session_type == "rest")
+        assert new_rest > original_rest
+        # 최종 위반도 해결
+        assert rule.check(fixed, ctx) == []

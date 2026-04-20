@@ -187,6 +187,7 @@ class LLMPromptTemplate:
         cls,
         ctx: CoachingContext,
         safety_rules: list[str],
+        include_strength: bool = False,
     ) -> str:
         end_date = ctx.today + timedelta(days=6)
         sections: list[str] = []
@@ -228,6 +229,15 @@ class LLMPromptTemplate:
 
         rules_block = "\n".join(f"- {line}" for line in safety_rules)
         sections.append("[반드시 지켜야 할 안전 원칙]\n" + rules_block)
+
+        if include_strength:
+            sections.append(
+                "[근력 훈련 참고]\n"
+                "러닝 세션의 workout.description 필드에 한국어로 보조 근력 조언을 덧붙이세요.\n"
+                "(steps 에는 러닝 step 만 포함; sportType 은 반드시 RUNNING.)"
+            )
+        else:
+            sections.append("[근력 훈련]\n러닝만 계획하고 steps 에 근력 세션을 넣지 마세요.")
 
         sections.append(
             "[결정 과제]\n"

@@ -35,3 +35,4 @@ logs/
 .idea
 .vscode
 .claude
+conversation-*.txt

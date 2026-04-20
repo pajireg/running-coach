@@ -656,10 +656,26 @@ class AcwrCap:
         current_ratio = planned_km / chronic
         if current_ratio <= self.TARGET_RATIO:
             return plan
+
+        # 1단계: 필요시 구조적 축소를 반복 — 가장 긴 non-rest non-long_run 을 rest 로 전환.
+        # step 의 60s 하한 때문에 scale-only 로는 수렴 불가한 경우가 있어,
+        # CAP_RATIO 안으로 들어오거나 변환 대상이 떨어질 때까지 반복.
+        structural_plan = plan
+        current_km = planned_km
+        while current_km / chronic > self.CAP_RATIO:
+            reduced = self._convert_longest_to_rest(structural_plan, ctx)
+            if reduced is structural_plan:
+                break  # 더 줄일 대상 없음
+            structural_plan = reduced
+            current_km = _total_planned_km(structural_plan, ctx.pace_zones)
+
+        # 2단계: 남은 날들에 대해 duration 스케일링으로 미세 조정.
+        current_ratio = current_km / chronic
+        if current_ratio <= self.TARGET_RATIO:
+            return structural_plan
         scale = self.TARGET_RATIO / current_ratio  # < 1
         new_days = []
-
-        for day in plan.plan:
+        for day in structural_plan.plan:
             if day.session_type == "rest":
                 new_days.append(day)
                 continue
@@ -679,7 +695,25 @@ class AcwrCap:
             new_days.append(
                 day.model_copy(update={"workout": new_workout, "planned_minutes": new_minutes})
             )
-        return plan.model_copy(update={"plan": new_days})
+        return structural_plan.model_copy(update={"plan": new_days})
+
+    @staticmethod
+    def _convert_longest_to_rest(plan, ctx):
+        """base/recovery 중 가장 긴 하루를 rest 로 (long_run / quality 는 보존).
+
+        base/recovery 가 모두 소진됐으면 원본 그대로 반환 — quality 나 long_run 을
+        희생해서 ACWR 를 맞추진 않는다 (상위 룰이 다른 방식으로 보정).
+        """
+        candidates = [
+            (i, d.workout.total_duration)
+            for i, d in enumerate(plan.plan)
+            if d.session_type in ("base", "recovery")
+        ]
+        if not candidates:
+            return plan
+        target_idx = max(candidates, key=lambda t: t[1])[0]
+        new_day = _rebuild_day(plan.plan[target_idx], "rest", ctx.pace_zones)
+        return _replace_day(plan, target_idx, new_day)
 
     def describe(self, ctx):
         return "주간 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
@@ -888,6 +922,44 @@ class PaceZoneIntegrity:
         return "모든 step pace 는 제공된 PaceZones 값만 사용합니다."
 
 
+class PlanStartsToday:
+    """plan[0].date == ctx.today 보장; 벗어나면 전체 날짜를 오늘 기준으로 rebase.
+
+    LLM 이 엉뚱한 시작일을 내놓아도 Garmin 에 잘못 업로드되지 않도록 방어.
+    """
+
+    rule_id = "plan_starts_today"
+    severity: Severity = "block"
+
+    def check(self, plan, ctx):
+        if not plan.plan:
+            return []
+        if plan.plan[0].date == ctx.today:
+            return []
+        return [
+            Violation(
+                rule_id=self.rule_id,
+                severity=self.severity,
+                message=(
+                    f"plan starts {plan.plan[0].date.isoformat()} but today is "
+                    f"{ctx.today.isoformat()}; rebasing"
+                ),
+                day_index=None,
+            )
+        ]
+
+    def correct(self, plan, ctx, violations):
+        from datetime import timedelta
+
+        new_days = []
+        for i, day in enumerate(plan.plan):
+            new_days.append(day.model_copy(update={"date": ctx.today + timedelta(days=i)}))
+        return plan.model_copy(update={"plan": new_days})
+
+    def describe(self, ctx):
+        return f"계획 시작일은 반드시 오늘({ctx.today.isoformat()})이어야 합니다."
+
+
 # ---------------------------------------------------------------------------
 # DEFAULT list — 실행 순서 = 보정 순서
 # 구조적(session_type 변경) 룰을 먼저, 볼륨/가용성, step-level 마지막.
@@ -895,6 +967,7 @@ class PaceZoneIntegrity:
 
 
 DEFAULT_SAFETY_RULES: list[SafetyRule] = [
+    PlanStartsToday(),  # 날짜 정합성 먼저
     InjuryBlockQuality(),
     MaxOneLongRun(),
     NoBackToBackQuality(),

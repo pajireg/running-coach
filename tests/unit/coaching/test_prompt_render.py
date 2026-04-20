@@ -220,6 +220,19 @@ class TestContextAsDict:
         assert d["replanReasons"] == ["missed_key_workout"]
 
 
+class TestStrengthToggle:
+    def test_include_strength_adds_section(self):
+        ctx = _full_ctx()
+        out = LLMPromptTemplate.render(ctx, safety_rules=["룰"], include_strength=True)
+        assert "근력 훈련 참고" in out
+        assert "근력 조언" in out
+
+    def test_default_is_running_only(self):
+        ctx = _full_ctx()
+        out = LLMPromptTemplate.render(ctx, safety_rules=["룰"])
+        assert "근력 세션을 넣지 마세요" in out
+
+
 class TestMinimalContext:
     def test_renders_without_optional_fields(self):
         ctx = CoachingContext(
