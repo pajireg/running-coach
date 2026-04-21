@@ -865,13 +865,19 @@ class MinStepDuration:
 
 
 class PaceZoneIntegrity:
-    """targetType=speed 인데 pace 가 PaceZones 값과 ±5초 넘게 다름 → zone pace 로 덮어쓰기."""
+    """step pace 가 선수의 PaceZones 값 중 어느 것과도 ±5초 이상 다름 → 해당 스텝만 교체.
+
+    어느 zone 값을 쓸지는 LLM(코치)이 결정한다. 이 룰은 zone 시스템 밖의
+    임의 페이스만 차단하는 hard bound 역할을 한다.
+    """
 
     rule_id = "pace_zone_integrity"
-    severity: Severity = "warn"  # soft — 계획 구조엔 영향 없음
+    severity: Severity = "warn"
     TOLERANCE_SECONDS = 5
 
     def check(self, plan, ctx):
+        zones_dict = ctx.pace_zones.to_dict()
+        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
         out: list[Violation] = []
         for i, day in enumerate(plan.plan):
             for j, s in enumerate(day.workout.steps):
@@ -879,46 +885,26 @@ class PaceZoneIntegrity:
                     continue
                 parsed = _pace_seconds(s.target_value or "")
                 if parsed is None:
-                    out.append(
-                        Violation(
-                            rule_id=self.rule_id,
-                            severity=self.severity,
-                            message=f"day {i} step {j} unparseable pace '{s.target_value}'",
-                            day_index=i,
-                        )
-                    )
+                    out.append(Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"day {i} step {j} unparseable pace '{s.target_value}'",
+                        day_index=i,
+                    ))
                     break
-                # quality Run 스텝은 threshold와 tempo 모두 유효 (LLM이 선택)
-                if day.session_type == "quality" and s.type == "Run":
-                    threshold_s = _pace_seconds(ctx.pace_zones.threshold)
-                    tempo_s = _pace_seconds(ctx.pace_zones.tempo)
-                    valid = any(
-                        a is not None and abs(parsed - a) <= self.TOLERANCE_SECONDS
-                        for a in (threshold_s, tempo_s)
-                    )
-                    if not valid:
-                        out.append(Violation(
-                            rule_id=self.rule_id,
-                            severity=self.severity,
-                            message=f"day {i} step {j} (Run/quality) pace {s.target_value} outside threshold/tempo",
-                            day_index=i,
-                        ))
-                    break
-                expected_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
-                expected_secs = _pace_seconds(expected_pace)
-                if expected_secs is not None and abs(parsed - expected_secs) > self.TOLERANCE_SECONDS:
-                    out.append(
-                        Violation(
-                            rule_id=self.rule_id,
-                            severity=self.severity,
-                            message=f"day {i} step {j} ({s.type}) pace {s.target_value} != expected {expected_pace}",
-                            day_index=i,
-                        )
-                    )
+                if not any(abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a):
+                    out.append(Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=f"day {i} step {j} ({s.type}) pace {s.target_value} outside zone system",
+                        day_index=i,
+                    ))
                     break
         return out
 
     def correct(self, plan, ctx, violations):
+        zones_dict = ctx.pace_zones.to_dict()
+        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
 
         for v in violations:
             if v.day_index is None:
@@ -932,32 +918,19 @@ class PaceZoneIntegrity:
                 if s.target_type != "speed":
                     new_steps.append(s)
                     continue
-                expected_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
-                # quality/Run은 threshold·tempo 모두 유효 — 범위 내면 LLM 선택 유지
-                if day.session_type == "quality" and s.type == "Run":
-                    threshold_s = _pace_seconds(ctx.pace_zones.threshold)
-                    tempo_s = _pace_seconds(ctx.pace_zones.tempo)
-                    parsed = _pace_seconds(s.target_value or "")
-                    if parsed is not None and any(
-                        a is not None and abs(parsed - a) <= self.TOLERANCE_SECONDS
-                        for a in (threshold_s, tempo_s)
-                    ):
-                        new_steps.append(s)  # 유효 — LLM 페이스 유지
-                        continue
-                # 위반 스텝만 교체
                 parsed = _pace_seconds(s.target_value or "")
-                expected_secs = _pace_seconds(expected_pace)
-                if parsed is None or (
-                    expected_secs is not None and abs(parsed - expected_secs) > self.TOLERANCE_SECONDS
+                # 존 시스템 안에 있으면 LLM 선택 유지
+                if parsed is not None and any(
+                    abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a
                 ):
-                    old_pace = s.target_value or ""
-                    new_step = _build_step(s.type, s.duration_value, expected_pace)
-                    # description의 해당 페이스 수치도 동기화
-                    if old_pace and old_pace != expected_pace and _PACE_RE.fullmatch(old_pace.strip()):
-                        description = description.replace(old_pace, expected_pace)
-                    new_steps.append(new_step)
-                else:
                     new_steps.append(s)
+                    continue
+                # 존 밖: 해당 스텝 타입·세션에 맞는 존 값으로 교체
+                fallback_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
+                old_pace = s.target_value or ""
+                if old_pace and old_pace != fallback_pace and _PACE_RE.fullmatch(old_pace.strip()):
+                    description = description.replace(old_pace, fallback_pace)
+                new_steps.append(_build_step(s.type, s.duration_value, fallback_pace))
 
             new_workout = day.workout.model_copy(update={"steps": new_steps, "description": description})
             new_day = day.model_copy(update={"workout": new_workout})
@@ -965,7 +938,7 @@ class PaceZoneIntegrity:
         return plan
 
     def describe(self, ctx):
-        return "모든 step pace 는 제공된 PaceZones 값만 사용합니다."
+        return "모든 step pace 는 선수의 PaceZones 값 중 하나여야 합니다."
 
 
 class StandardizeWorkoutName:
