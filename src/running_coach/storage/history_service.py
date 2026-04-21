@@ -296,7 +296,8 @@ class CoachingHistoryService:
             decision_row=decision_row,
             metric_row=metric_row,
         )
-        has_active_plan = active_plan_days >= horizon_days
+        # horizon_days - 1 to tolerate daily roll-over (last day of plan window)
+        has_active_plan = active_plan_days >= horizon_days - 1
         has_new_activity = (
             last_plan_created_at is not None
             and latest_activity_created_at is not None

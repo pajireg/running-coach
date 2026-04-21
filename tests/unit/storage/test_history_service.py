@@ -374,6 +374,41 @@ def test_summarize_plan_freshness_ignores_same_day_stable_recovery_metrics():
     assert freshness["shouldGeneratePlan"] is False
 
 
+def test_summarize_plan_freshness_active_plan_tolerates_horizon_rollover():
+    # activePlanDays == horizon - 1: last day of window, scheduler rolled forward by one
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 6,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasActivePlan"] is True
+    assert freshness["shouldGeneratePlan"] is False
+
+
+def test_summarize_plan_freshness_replans_when_two_days_short():
+    # activePlanDays == horizon - 2: genuine gap, should still trigger replan
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 5,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 19))
+
+    assert freshness["hasActivePlan"] is False
+    assert freshness["shouldGeneratePlan"] is True
+    assert "missing_active_plan" in freshness["reasons"]
+
+
 def test_planned_workout_category_and_target_match_score():
     planned = {
         "workout_name": "Running Coach: Threshold Session",
