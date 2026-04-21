@@ -36,36 +36,34 @@ def fake_genai_client():
         yield instance
 
 
+@pytest.fixture
+def deps():
+    """GeminiClient 에 필요한 context_builder + safety_validator."""
+    history = MagicMock()
+    history.summarize_training_background.return_value = {}
+    history.list_recent_completed_activities.return_value = []
+    return {
+        "context_builder": CoachingContextBuilder(history_service=history),
+        "safety_validator": SafetyValidator(rules=list(DEFAULT_SAFETY_RULES)),
+    }
+
+
 class TestGeminiClientDispatch:
-    def test_default_mode_is_legacy(self, fake_genai_client):
-        client = GeminiClient(api_key="x")
+    def test_default_mode_is_legacy(self, fake_genai_client, deps):
+        client = GeminiClient(api_key="x", **deps)
         assert client.mode == "legacy"
 
-    def test_legacy_mode_does_not_require_dependencies(self, fake_genai_client):
-        # legacy 모드는 context_builder/safety_validator 없이도 작동
-        client = GeminiClient(api_key="x", mode="legacy")
-        assert client.mode == "legacy"
-
-    def test_llm_driven_mode_requires_dependencies(self, fake_genai_client):
+    def test_both_modes_require_dependencies(self, fake_genai_client):
+        # legacy 와 llm_driven 모두 context_builder + safety_validator 필요
         with pytest.raises(GeminiError, match="context_builder"):
-            GeminiClient(api_key="x", mode="llm_driven")
+            GeminiClient(api_key="x", mode="legacy")
 
-    def test_llm_driven_mode_constructs_with_dependencies(self, fake_genai_client):
-        history = MagicMock()
-        history.summarize_training_background.return_value = {}
-        history.list_recent_completed_activities.return_value = []
-        builder = CoachingContextBuilder(history_service=history)
-        validator = SafetyValidator(rules=list(DEFAULT_SAFETY_RULES))
-        client = GeminiClient(
-            api_key="x",
-            mode="llm_driven",
-            context_builder=builder,
-            safety_validator=validator,
-        )
+    def test_llm_driven_mode_constructs_with_dependencies(self, fake_genai_client, deps):
+        client = GeminiClient(api_key="x", mode="llm_driven", **deps)
         assert client.mode == "llm_driven"
 
-    def test_legacy_mode_invokes_legacy_planner(self, fake_genai_client):
-        client = GeminiClient(api_key="x", mode="legacy")
+    def test_legacy_mode_invokes_legacy_planner(self, fake_genai_client, deps):
+        client = GeminiClient(api_key="x", mode="legacy", **deps)
         with patch.object(client._legacy, "generate_plan", return_value=None) as legacy_call:
             client.create_training_plan(
                 metrics=_metrics(),
@@ -74,18 +72,8 @@ class TestGeminiClientDispatch:
             )
             legacy_call.assert_called_once()
 
-    def test_llm_driven_mode_invokes_llm_planner(self, fake_genai_client):
-        history = MagicMock()
-        history.summarize_training_background.return_value = {}
-        history.list_recent_completed_activities.return_value = []
-        builder = CoachingContextBuilder(history_service=history)
-        validator = SafetyValidator(rules=list(DEFAULT_SAFETY_RULES))
-        client = GeminiClient(
-            api_key="x",
-            mode="llm_driven",
-            context_builder=builder,
-            safety_validator=validator,
-        )
+    def test_llm_driven_mode_invokes_llm_planner(self, fake_genai_client, deps):
+        client = GeminiClient(api_key="x", mode="llm_driven", **deps)
         with patch.object(client._llm, "generate_plan", return_value=None) as llm_call:
             client.create_training_plan(
                 metrics=_metrics(),

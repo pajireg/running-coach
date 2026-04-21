@@ -44,17 +44,22 @@ class GeminiClient:
         self.planner: TrainingPlanner = TrainingPlanner(self.client)
         self._mode: PlannerMode = mode
 
+        if context_builder is None or safety_validator is None:
+            raise GeminiError(
+                "context_builder and safety_validator are required for both legacy and llm_driven"
+            )
+
         # lazy import → 순환 의존 방지
         from ...coaching.planners.legacy import LegacySkeletonPlanner
 
-        self._legacy: "Planner" = LegacySkeletonPlanner(self.planner)
+        self._legacy: "Planner" = LegacySkeletonPlanner(
+            inner=self.planner,
+            context_builder=context_builder,
+            safety_validator=safety_validator,
+        )
         self._llm: Optional["Planner"] = None
 
         if mode == "llm_driven":
-            if context_builder is None or safety_validator is None:
-                raise GeminiError(
-                    "llm_driven mode requires context_builder and safety_validator"
-                )
             from ...coaching.planners.llm_driven import LLMDrivenPlanner
 
             self._llm = LLMDrivenPlanner(
