@@ -623,6 +623,20 @@ class TrainingPlanner:
             elif recovery_demand_days >= 2 and session_types[index] == "base":
                 session_types[index] = "recovery"
 
+        # quality 세션이 recovery_demand 로 제거됐다면, 원래 quality를 위해 잡아 뒀던
+        # 인접 recovery 슬롯은 근거가 사라지므로 base로 되돌린다.
+        # recovery_demand 기간(index < recovery_demand_days) 내 슬롯은 유지.
+        if quality_index is not None and session_types[quality_index] in {"rest", "recovery"}:
+            for adj in (quality_index - 1, quality_index + 1):
+                if (
+                    0 <= adj < 7
+                    and adj >= recovery_demand_days
+                    and session_types[adj] == "recovery"
+                    and adj != long_run_index - 1
+                    and adj != long_run_index + 1
+                ):
+                    session_types[adj] = "base"
+
         if recovery_demand_days and "long_run" not in session_types:
             later_long_run_candidates = [
                 index
