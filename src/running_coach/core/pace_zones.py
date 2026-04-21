@@ -30,6 +30,11 @@ class PaceZones:
 
     def for_step(self, step_type: str, session_type: str) -> str:
         if step_type == "Warmup":
+            # recovery/long_run: 워밍업이 본 운동보다 빠르면 안 됨
+            if session_type == "recovery":
+                return self.recovery
+            if session_type == "long_run":
+                return self.long_run
             return self.warmup
         if step_type == "Cooldown":
             return self.cooldown

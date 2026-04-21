@@ -89,22 +89,7 @@ def _pace_for_step(
     step_type: str,
     session_type: str,
 ) -> str:
-    zones = pace_zones.to_dict()
-    if step_type == "Warmup":
-        return zones.get("warmup", "6:45")
-    if step_type == "Cooldown":
-        return zones.get("cooldown", "7:10")
-    if step_type == "Recovery":
-        return zones.get("recovery", "7:20")
-    if step_type == "Interval":
-        return zones.get("interval", "4:30")
-    if session_type == "recovery":
-        return zones.get("recovery", "7:20")
-    if session_type == "long_run":
-        return zones.get("longRun", "6:40")
-    if session_type == "quality":
-        return zones.get("tempo", "5:15")
-    return zones.get("base", "6:45")
+    return pace_zones.for_step(step_type, session_type)
 
 
 def _step_dict(
@@ -887,8 +872,6 @@ class PaceZoneIntegrity:
     TOLERANCE_SECONDS = 5
 
     def check(self, plan, ctx):
-        zones_dict = ctx.pace_zones.to_dict()
-        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
         out: list[Violation] = []
         for i, day in enumerate(plan.plan):
             for j, s in enumerate(day.workout.steps):
@@ -905,12 +888,14 @@ class PaceZoneIntegrity:
                         )
                     )
                     break
-                if not any(abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a):
+                expected_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
+                expected_secs = _pace_seconds(expected_pace)
+                if expected_secs is not None and abs(parsed - expected_secs) > self.TOLERANCE_SECONDS:
                     out.append(
                         Violation(
                             rule_id=self.rule_id,
                             severity=self.severity,
-                            message=f"day {i} step {j} pace {s.target_value} outside zones",
+                            message=f"day {i} step {j} ({s.type}) pace {s.target_value} != expected {expected_pace}",
                             day_index=i,
                         )
                     )

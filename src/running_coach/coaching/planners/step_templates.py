@@ -112,7 +112,7 @@ class StepTemplateEngine:
         cooldown = cls._COOLDOWN
         main = max(2700, target_secs - warmup - cooldown)
         return [
-            _step("Warmup", warmup, pz.warmup),
+            _step("Warmup", warmup, pz.long_run),
             _step("Run", main, pz.long_run),
             _step("Cooldown", cooldown, pz.cooldown),
         ]

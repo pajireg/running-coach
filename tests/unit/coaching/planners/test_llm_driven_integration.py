@@ -73,13 +73,13 @@ def _steps(session_type: str) -> list[dict]:
         ]
     if session_type == "long_run":
         return [
-            {"type": "Warmup", "durationValue": 600, "targetValue": "6:45", **base},
+            {"type": "Warmup", "durationValue": 600, "targetValue": "6:40", **base},
             {"type": "Run", "durationValue": 3600, "targetValue": "6:40", **base},
             {"type": "Cooldown", "durationValue": 300, "targetValue": "7:10", **base},
         ]
     if session_type == "recovery":
         return [
-            {"type": "Warmup", "durationValue": 300, "targetValue": "6:45", **base},
+            {"type": "Warmup", "durationValue": 300, "targetValue": "7:20", **base},
             {"type": "Run", "durationValue": 1500, "targetValue": "7:20", **base},
             {"type": "Cooldown", "durationValue": 300, "targetValue": "7:10", **base},
         ]

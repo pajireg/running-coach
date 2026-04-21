@@ -85,13 +85,13 @@ def make_day(
             ]
         elif session_type == "long_run":
             steps = [
-                make_step("Warmup", 600, "6:45"),
+                make_step("Warmup", 600, "6:40"),
                 make_step("Run", 3600, "6:40"),
                 make_step("Cooldown", 300, "7:10"),
             ]
         elif session_type == "recovery":
             steps = [
-                make_step("Warmup", 300, "6:45"),
+                make_step("Warmup", 300, "7:20"),
                 make_step("Run", 1500, "7:20"),
                 make_step("Cooldown", 300, "7:10"),
             ]
