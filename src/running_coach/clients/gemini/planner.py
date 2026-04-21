@@ -886,7 +886,7 @@ class TrainingPlanner:
         if target_minutes <= 0:
             return False
         target_seconds = target_minutes * 60
-        return total_seconds < target_seconds * 0.6 or total_seconds > target_seconds * 1.4
+        return total_seconds < target_seconds * 0.8 or total_seconds > target_seconds * 1.2
 
     def _default_steps_for_skeleton_day(self, skeleton_day: dict[str, Any]) -> list[dict[str, Any]]:
         session_type = str(skeleton_day.get("sessionType") or "base")

@@ -1,7 +1,7 @@
 """훈련 계획 오케스트레이터"""
 
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from ..utils.logger import get_logger
 from .container import ServiceContainer
@@ -203,16 +203,19 @@ class TrainingOrchestrator:
             return None
 
     def _existing_garmin_workout_ids(self, plan) -> list[str]:
-        """새 계획 범위의 기존 Garmin workout id 조회."""
+        """새 계획 범위 + 미실행 과거 워크아웃의 Garmin workout id 조회."""
         if not self.container.settings.persist_history:
             return []
         try:
+            today = date.today()
+            # 오늘 이전 미실행 과거 워크아웃도 포함 (최대 14일)
+            earliest = min(plan.start_date, today - timedelta(days=14))
             return self.container.history_service.list_planned_garmin_workout_ids(
-                start_date=plan.start_date,
+                start_date=earliest,
                 end_date=plan.end_date,
             )
         except Exception as e:
-            logger.warning(f"기존 Garmin workout id 조회 실패 (prefix fallback 사용): {e}")
+            logger.warning(f"기존 Garmin workout id 조회 실패: {e}")
             return []
 
     def _clear_garmin_sync_results(self, plan) -> None:
