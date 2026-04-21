@@ -40,7 +40,13 @@ Do not rely on Garmin workout titles for cleanup. Use stored `garmin_workout_id`
 
 In service mode, do not assume a fixed athlete routine. `05:00,17:00` is only the current user's default. Preserve configurable scheduling through `--times` and `COACH_SCHEDULE_TIMES`.
 
-In `auto` mode, reconcile first and call the LLM only when the active plan is missing, no previous plan decision exists, a new Garmin activity was recorded after the last plan, recovery metrics materially worsened after the last plan, a key workout was missed, or base-volume misses accumulated. Treat a single missed recovery run as extra rest unless other triggers exist. If the plan is fresh, keep existing Garmin workouts and sync only completed activities as needed.
+In `auto` mode, the scheduler returns one of three states from `_should_generate_plan()`:
+
+- `skip` — plan is fresh, no triggers fired; keep existing Garmin workouts, sync completed activities only.
+- `extend` — athlete completed today's workout normally (`target_match_score >= 0.75`) and the plan is otherwise stable; keep the existing 6 future days and ask the LLM (or algorithm) to generate only 1 new day via `extend_training_plan()`.
+- `replan` — full 7-day generation; triggered when the active plan is missing, no prior decision exists, recovery metrics materially worsened, a key workout was missed, or base-volume misses accumulated.
+
+Treat a single missed recovery run as extra rest unless other triggers exist. Never collapse `extend` into `replan` just because a new activity was recorded — check `activity_is_normal_execution` first.
 
 Do not make hard-coded coaching assumptions such as “no long runs on consecutive days.” Use athlete state, recent training load, execution quality, recovery indicators, and training history to decide whether progression, maintenance, or recovery is appropriate.
 
@@ -52,8 +58,10 @@ Never commit real credentials, OAuth tokens, Garmin tokens, personal activity ex
 
 Two planner modes coexist and are selected by `COACH_PLANNER_MODE`:
 
-- `legacy` (default) — `clients/gemini/planner.py::_build_weekly_skeleton` produces a rule-based 7-day skeleton and the LLM fills step detail inside fixed boundaries.
-- `llm_driven` — `coaching/planners/llm_driven.py` pipes `CoachingContext → prompt → LLM → Pydantic → SafetyValidator`. The LLM decides session placement, weekly volume, duration, and phase; the algorithm only enforces hard safety bounds and auto-corrects violations.
+- `legacy` (default, **free tier**) — `LegacySkeletonPlanner` in `coaching/planners/legacy.py`. Uses `_build_weekly_skeleton` for session placement and volume, then `StepTemplateEngine` + `DescriptionRenderer` for deterministic step structure and Korean description. **No LLM calls.** `QualitySubtypeSelector` picks quality subtype (interval/fartlek/threshold/tempo) from phase + readiness + injury_risk. Pipeline: skeleton → steps → description → `SafetyValidator` (15 rules).
+- `llm_driven` (**paid tier**) — `coaching/planners/llm_driven.py` pipes `CoachingContext → prompt → LLM → Pydantic → SafetyValidator`. The LLM decides session placement, weekly volume, duration, and phase; the algorithm only enforces hard safety bounds and auto-corrects violations. Supports `extend_plan()` for 1-day extension without full replan.
+
+Both modes require `context_builder` and `safety_validator` at construction time. The `GeminiClient` constructor enforces this; do not make either optional.
 
 When touching coaching logic, respect the following:
 
