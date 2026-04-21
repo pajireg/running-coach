@@ -1667,13 +1667,25 @@ class CoachingHistoryService:
                 ) AS schedule_shift_count,
                 COUNT(*) FILTER (
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                      AND execution_date >= (
+                          SELECT MIN(workout_date) FROM planned_workouts
+                          WHERE athlete_id = %(athlete_id)s
+                      )
                 ) AS unplanned_session_count,
                 COUNT(*) FILTER (
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                      AND execution_date >= (
+                          SELECT MIN(workout_date) FROM planned_workouts
+                          WHERE athlete_id = %(athlete_id)s
+                      )
                       AND COALESCE(execution_payload->>'actualCategory', '') IN ('recovery', 'base')
                 ) AS unplanned_easy_count,
                 COUNT(*) FILTER (
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
+                      AND execution_date >= (
+                          SELECT MIN(workout_date) FROM planned_workouts
+                          WHERE athlete_id = %(athlete_id)s
+                      )
                       AND COALESCE(execution_payload->>'actualCategory', '') IN (
                           'quality',
                           'long_run'

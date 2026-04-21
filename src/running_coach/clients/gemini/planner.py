@@ -578,7 +578,14 @@ class TrainingPlanner:
         if quality_index is not None:
             session_types[quality_index] = "quality"
 
-        rest_days = max(1, 7 - run_days)
+        # 불가 요일은 이미 강제 휴식이므로 추가 rest 배치 개수에서 차감
+        forced_rest_count = sum(
+            1 for day in days
+            if not availability_map.get(
+                cast(Any, day["date"]).weekday(), {}
+            ).get("isAvailable", True)
+        )
+        rest_days = max(0, 7 - run_days - forced_rest_count)
         recovery_pool = []
         if quality_index is not None:
             recovery_pool.extend(
