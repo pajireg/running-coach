@@ -6,12 +6,13 @@ LLM 이 결정하는 것: 세션 타입 배치·주간 볼륨·duration·step �
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from ...exceptions import GeminiQuotaExceededError, GeminiResponseParseError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
-from ...models.training import TrainingPlan
+from ...models.training import DailyPlan, TrainingPlan
 from ...utils.logger import get_logger
 from ..prompt import LLMPromptTemplate
 from ..safety.metrics import emit_plan_generated
@@ -105,6 +106,103 @@ class LLMDrivenPlanner:
 
         logger.info(
             "LLMDrivenPlanner 완료: %d 위반 auto-correct",
+            len(result.violations),
+        )
+        return result.plan
+
+    def extend_plan(
+        self,
+        existing_days: list[DailyPlan],
+        new_date: date,
+        metrics: AdvancedMetrics,
+        race_config: RaceConfig,
+        include_strength: bool = False,
+    ) -> Optional[TrainingPlan]:
+        """기존 6일 유지 + 신규 1일 LLM 생성 → 7일 TrainingPlan 반환."""
+        if len(existing_days) != 6:
+            logger.warning(
+                "extend_plan: existing_days=%d (6 필요); full replan fallback",
+                len(existing_days),
+            )
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_insufficient_days"],
+            )
+
+        try:
+            ctx = self._context_builder.build(
+                metrics=metrics,
+                race_config=race_config,
+                replan_reasons=["normal_execution_extend"],
+            )
+        except Exception as exc:
+            logger.exception("CoachingContext 조립 실패; full replan fallback (%s)", exc)
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_context_error"],
+            )
+
+        safety_descriptions = self._safety.describe_rules(ctx)
+        prompt = LLMPromptTemplate.render_extend(
+            ctx,
+            existing_days=existing_days,
+            new_date=new_date,
+            safety_rules=safety_descriptions,
+            include_strength=include_strength,
+        )
+
+        try:
+            raw_json = self._invoke_gemini(prompt)
+        except GeminiQuotaExceededError:
+            logger.warning("Gemini quota 초과; full replan fallback")
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_quota"],
+            )
+        except Exception as exc:
+            logger.exception("Gemini 호출 실패; full replan fallback (%s)", exc)
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_gemini_error"],
+            )
+
+        try:
+            new_day = DailyPlan.model_validate(raw_json)
+        except Exception as exc:
+            logger.exception("extend_plan 파싱 실패; full replan fallback (%s)", exc)
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_parse_error"],
+            )
+
+        try:
+            plan = TrainingPlan(plan=list(existing_days) + [new_day])
+        except Exception as exc:
+            logger.exception("TrainingPlan 조립 실패; full replan fallback (%s)", exc)
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_assemble_error"],
+            )
+
+        result = self._safety.validate(plan, ctx)
+        emit_plan_generated(
+            mode="llm_driven_extend",
+            violation_count=len(result.violations),
+            unresolvable=result.unresolvable,
+        )
+        if result.unresolvable:
+            logger.warning(
+                "SafetyValidator 수렴 실패 (%d violations); full replan fallback",
+                len(result.violations),
+            )
+            return self.generate_plan(
+                metrics, race_config, include_strength=include_strength,
+                replan_reasons=["extend_fallback_safety"],
+            )
+
+        logger.info(
+            "LLMDrivenPlanner.extend_plan 완료: 기존 %d일 유지 + 1일 추가, %d 위반 auto-correct",
+            len(existing_days),
             len(result.violations),
         )
         return result.plan

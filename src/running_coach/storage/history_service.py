@@ -303,6 +303,29 @@ class CoachingHistoryService:
             and latest_activity_created_at is not None
             and latest_activity_created_at > last_plan_created_at
         )
+
+        # 새 활동이 계획된 워크아웃을 정상 이수한 것인지 확인
+        execution_row: dict[str, Any] = {}
+        if has_new_activity and last_plan_created_at is not None:
+            execution_row = self._fetchone(
+                """
+                SELECT we.target_match_score
+                FROM workout_executions we
+                JOIN activities a ON a.activity_id = we.activity_id
+                WHERE we.athlete_id = %(athlete_id)s
+                  AND we.planned_workout_id IS NOT NULL
+                  AND a.created_at > %(since)s
+                ORDER BY a.created_at DESC
+                LIMIT 1
+                """,
+                {"athlete_id": athlete_id, "since": last_plan_created_at},
+            ) or {}
+        latest_execution_score = execution_row.get("target_match_score")
+        activity_is_normal_execution = (
+            latest_execution_score is not None
+            and float(latest_execution_score) >= MEANINGFUL_MATCH_THRESHOLD
+        )
+
         has_significant_recovery_change = bool(recovery_shift_reasons)
         missed_start_date = as_of - timedelta(days=3)
         if last_plan_decision_date is not None:
@@ -374,10 +397,20 @@ class CoachingHistoryService:
         has_missed_key_workout = missed_key_workout_count > 0
         has_missed_base_volume = missed_base_count >= 2
         should_replan_for_missed_workout = has_missed_key_workout or has_missed_base_volume
+
+        # extend: 정상 이수 후 호라이즌을 하루 늘리는 모드 (기존 6일 유지 + 새 1일 추가)
+        should_extend_plan = (
+            has_active_plan
+            and has_new_activity
+            and activity_is_normal_execution
+            and not has_significant_recovery_change
+            and not should_replan_for_missed_workout
+            and last_plan_created_at is not None
+        )
         should_generate_plan = (
             not has_active_plan
             or last_plan_created_at is None
-            or has_new_activity
+            or (has_new_activity and not activity_is_normal_execution)
             or has_significant_recovery_change
             or should_replan_for_missed_workout
         )
@@ -386,8 +419,10 @@ class CoachingHistoryService:
             reasons.append("missing_active_plan")
         if last_plan_created_at is None:
             reasons.append("no_previous_plan_decision")
-        if has_new_activity:
+        if has_new_activity and not activity_is_normal_execution:
             reasons.append("new_activity_since_last_plan")
+        if should_extend_plan:
+            reasons.append("normal_execution_extend")
         if has_significant_recovery_change:
             reasons.append("significant_recovery_change")
         if has_missed_key_workout:
@@ -422,9 +457,53 @@ class CoachingHistoryService:
             "hasMissedPlannedWorkout": has_missed_planned_workout,
             "hasMissedKeyWorkout": has_missed_key_workout,
             "shouldReplanForMissedWorkout": should_replan_for_missed_workout,
+            "activityIsNormalExecution": activity_is_normal_execution,
+            "shouldExtendPlan": should_extend_plan,
             "shouldGeneratePlan": should_generate_plan,
             "reasons": reasons,
         }
+
+    def fetch_future_plan(self, from_date: date, days: int = 6) -> list[DailyPlan]:
+        """from_date 부터 days 일치 planned_workouts 를 DailyPlan 리스트로 반환."""
+        rows = self._fetchall(
+            """
+            SELECT workout_date, workout_name, is_rest, total_duration_seconds, plan_payload
+            FROM planned_workouts
+            WHERE athlete_id = %(athlete_id)s
+              AND source = %(source)s
+              AND workout_date >= %(from_date)s
+            ORDER BY workout_date
+            LIMIT %(days)s
+            """,
+            {
+                "athlete_id": self._athlete_id(),
+                "source": WORKOUT_SOURCE,
+                "from_date": from_date,
+                "days": days,
+            },
+        )
+        result: list[DailyPlan] = []
+        for row in rows:
+            payload = row.get("plan_payload") or {}
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            workout_data = dict(payload.get("workout") or {})
+            workout_data.setdefault("workoutName", row["workout_name"])
+            try:
+                daily = DailyPlan.model_validate(
+                    {
+                        "date": row["workout_date"].isoformat()
+                        if hasattr(row["workout_date"], "isoformat")
+                        else str(row["workout_date"]),
+                        "workout": workout_data,
+                    }
+                )
+                result.append(daily)
+            except Exception as exc:
+                logger.warning(
+                    "fetch_future_plan: %s 행 파싱 실패 (%s)", row.get("workout_date"), exc
+                )
+        return result
 
     @staticmethod
     def _recovery_shift_reasons(

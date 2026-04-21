@@ -55,12 +55,31 @@ class TrainingOrchestrator:
 
             replan_reasons: list[str] = []
             if run_mode == "auto":
-                should_generate, replan_reasons = self._should_generate_plan(metrics.date)
-                if not should_generate:
+                plan_mode, replan_reasons = self._should_generate_plan(metrics.date)
+                if plan_mode == "skip":
                     logger.info("새 재계획 조건이 없어 기존 훈련 계획을 유지합니다.")
                     self._sync_completed_activity_calendar(metrics.date)
                     logger.info("\n업데이트 완료")
                     return True
+                if plan_mode == "extend":
+                    logger.info("정상 이수 확인: 기존 플랜 6일 유지 + 1일 연장 모드")
+                    plan = self._extend_plan(metrics, training_background)
+                    if not plan:
+                        logger.error("계획 연장 실패")
+                        return False
+                    logger.info(f"\n훈련 계획 연장 완료! ({len(plan.plan)}일)")
+                    existing_workout_ids = self._existing_garmin_workout_ids(plan)
+                    self._persist_plan_history(metrics, plan, training_background)
+                    logger.info("기존 Running Coach 워크아웃 정리 중...")
+                    self.container.garmin_client.cleanup_existing_workouts(
+                        workout_ids=existing_workout_ids or None
+                    )
+                    self._clear_garmin_sync_results(plan)
+                    self._upload_garmin_workouts(plan)
+                    self._sync_google_calendar(plan, metrics.date)
+                    logger.info("\n업데이트 완료")
+                    return True
+                # plan_mode == "replan"
 
             # 3. 훈련 계획 생성
             if replan_reasons:
@@ -90,41 +109,7 @@ class TrainingOrchestrator:
             self._clear_garmin_sync_results(plan)
 
             # 5. Garmin에 업로드
-            logger.info("Garmin에 워크아웃 업로드 중...")
-            workout_manager = self.container.garmin_client.workout_manager
-            assert workout_manager is not None
-            for daily_plan in plan.plan:
-                workout = daily_plan.workout
-
-                if daily_plan.session_type == "rest" or workout.is_rest:
-                    logger.info(f"[{daily_plan.date}] 휴식")
-                    continue
-
-                logger.info(f"[{daily_plan.date}] {workout.workout_name}")
-
-                try:
-                    workout_id = workout_manager.create_workout(workout)
-                    if workout_id:
-                        workout_manager.schedule_workout(workout_id, daily_plan.date)
-                        self._persist_garmin_sync_result(
-                            workout_date=daily_plan.date,
-                            garmin_workout_id=workout_id,
-                            garmin_schedule_status="scheduled",
-                        )
-                    else:
-                        self._persist_garmin_sync_result(
-                            workout_date=daily_plan.date,
-                            garmin_workout_id=None,
-                            garmin_schedule_status="upload_failed",
-                        )
-                    time.sleep(1)  # API 부하 방지
-                except Exception as e:
-                    self._persist_garmin_sync_result(
-                        workout_date=daily_plan.date,
-                        garmin_workout_id=None,
-                        garmin_schedule_status=f"error: {str(e)[:90]}",
-                    )
-                    logger.error(f"워크아웃 업로드 실패: {e}")
+            self._upload_garmin_workouts(plan)
 
             self._sync_google_calendar(plan, metrics.date)
 
@@ -261,11 +246,11 @@ class TrainingOrchestrator:
         except Exception as e:
             logger.warning(f"Garmin 동기화 결과 저장 실패 (계속 진행): {e}")
 
-    def _should_generate_plan(self, as_of) -> tuple[bool, list[str]]:
-        """auto 모드에서 LLM 계획 생성이 필요한지 판단. (should_generate, reasons) 반환."""
+    def _should_generate_plan(self, as_of) -> tuple[str, list[str]]:
+        """auto 모드에서 계획 생성 모드 판단. ("skip"|"extend"|"replan", reasons) 반환."""
         if not self.container.settings.persist_history:
             logger.info("히스토리 저장이 꺼져 있어 auto 모드에서도 계획을 생성합니다.")
-            return True, ["history_disabled"]
+            return "replan", ["history_disabled"]
 
         try:
             freshness = self.container.history_service.summarize_plan_freshness(
@@ -273,17 +258,18 @@ class TrainingOrchestrator:
             )
         except Exception as e:
             logger.warning(f"계획 freshness 판단 실패로 재계획을 진행합니다: {e}")
-            return True, ["freshness_check_failed"]
+            return "replan", ["freshness_check_failed"]
 
         reasons = list(freshness.get("reasons") or [])
         logger.info(
             (
-                "계획 freshness: active=%s, new_activity=%s, recovery_change=%s, "
-                "missed=%s(key=%s, base=%s, recovery=%s), "
+                "계획 freshness: active=%s, new_activity=%s, normal_exec=%s, "
+                "recovery_change=%s, missed=%s(key=%s, base=%s, recovery=%s), "
                 "last_plan=%s, latest_activity=%s, reasons=%s"
             ),
             freshness["hasActivePlan"],
             freshness["hasNewActivitySinceLastPlan"],
+            freshness.get("activityIsNormalExecution"),
             freshness.get("recoveryShiftReasons", []),
             freshness.get("missedWorkoutCount", 0),
             freshness.get("missedKeyWorkoutCount", 0),
@@ -293,7 +279,74 @@ class TrainingOrchestrator:
             freshness["latestActivityCreatedAt"],
             reasons,
         )
-        return bool(freshness["shouldGeneratePlan"]), reasons
+        if freshness.get("shouldExtendPlan"):
+            return "extend", reasons
+        if freshness["shouldGeneratePlan"]:
+            return "replan", reasons
+        return "skip", reasons
+
+    def _extend_plan(self, metrics, training_background):
+        """정상 이수 후 기존 6일 유지 + 1일 연장."""
+        from datetime import timedelta
+
+        today = self._coerce_date(metrics.date)
+        from_date = today + timedelta(days=1)
+        existing_days = self.container.history_service.fetch_future_plan(from_date, days=6)
+        if len(existing_days) != 6:
+            logger.warning(
+                "extend: 기존 플랜 %d일만 존재 (6 필요) → 전체 재계획으로 fallback",
+                len(existing_days),
+            )
+            return self.container.gemini_client.create_training_plan(
+                metrics=metrics,
+                race_config=self.container.settings.race,
+                include_strength=self.container.settings.include_strength,
+                training_background=training_background,
+                replan_reasons=["extend_fallback_insufficient_days"],
+            )
+        new_date = from_date + timedelta(days=6)
+        return self.container.gemini_client.extend_training_plan(
+            existing_days=existing_days,
+            new_date=new_date,
+            metrics=metrics,
+            race_config=self.container.settings.race,
+            include_strength=self.container.settings.include_strength,
+        )
+
+    def _upload_garmin_workouts(self, plan) -> None:
+        """Garmin에 워크아웃 업로드."""
+        logger.info("Garmin에 워크아웃 업로드 중...")
+        workout_manager = self.container.garmin_client.workout_manager
+        assert workout_manager is not None
+        for daily_plan in plan.plan:
+            workout = daily_plan.workout
+            if daily_plan.session_type == "rest" or workout.is_rest:
+                logger.info(f"[{daily_plan.date}] 휴식")
+                continue
+            logger.info(f"[{daily_plan.date}] {workout.workout_name}")
+            try:
+                workout_id = workout_manager.create_workout(workout)
+                if workout_id:
+                    workout_manager.schedule_workout(workout_id, daily_plan.date)
+                    self._persist_garmin_sync_result(
+                        workout_date=daily_plan.date,
+                        garmin_workout_id=workout_id,
+                        garmin_schedule_status="scheduled",
+                    )
+                else:
+                    self._persist_garmin_sync_result(
+                        workout_date=daily_plan.date,
+                        garmin_workout_id=None,
+                        garmin_schedule_status="upload_failed",
+                    )
+                time.sleep(1)
+            except Exception as e:
+                self._persist_garmin_sync_result(
+                    workout_date=daily_plan.date,
+                    garmin_workout_id=None,
+                    garmin_schedule_status=f"error: {str(e)[:90]}",
+                )
+                logger.error(f"워크아웃 업로드 실패: {e}")
 
     def _sync_google_calendar(self, plan, as_of) -> None:
         """계획과 실제 운동 기록을 Google Calendar에 동기화."""

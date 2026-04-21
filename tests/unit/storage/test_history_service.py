@@ -178,6 +178,9 @@ class _FreshnessHistoryService(CoachingHistoryService):
             }
         if "MAX(created_at) AS latest_activity_created_at" in query:
             return {"latest_activity_created_at": self.rows.get("latest_activity_created_at")}
+        if "we.target_match_score" in query and "JOIN activities" in query:
+            score = self.rows.get("latest_execution_score")
+            return {"target_match_score": score} if score is not None else None
         if "COUNT(*) AS missed_workout_count" in query:
             return {
                 "missed_workout_count": self.rows.get("missed_workout_count", 0),
@@ -407,6 +410,66 @@ def test_summarize_plan_freshness_replans_when_two_days_short():
     assert freshness["hasActivePlan"] is False
     assert freshness["shouldGeneratePlan"] is True
     assert "missing_active_plan" in freshness["reasons"]
+
+
+def test_summarize_plan_freshness_extend_on_normal_execution():
+    # 정상 이수(match_score >= 0.75) → extend 모드
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 6,
+            "last_plan_created_at": datetime(2026, 4, 21, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 21),
+            "latest_activity_created_at": datetime(2026, 4, 21, 20, tzinfo=timezone.utc),
+            "latest_execution_score": 0.90,
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 22))
+
+    assert freshness["activityIsNormalExecution"] is True
+    assert freshness["shouldExtendPlan"] is True
+    assert freshness["shouldGeneratePlan"] is False
+    assert "normal_execution_extend" in freshness["reasons"]
+
+
+def test_summarize_plan_freshness_replans_on_unexpected_activity():
+    # 예정에 없던 활동(no execution row) → 전체 재계획
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 6,
+            "last_plan_created_at": datetime(2026, 4, 21, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 21),
+            "latest_activity_created_at": datetime(2026, 4, 21, 20, tzinfo=timezone.utc),
+            # latest_execution_score 없음 → 매칭 실패
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 22))
+
+    assert freshness["activityIsNormalExecution"] is False
+    assert freshness["shouldExtendPlan"] is False
+    assert freshness["shouldGeneratePlan"] is True
+    assert "new_activity_since_last_plan" in freshness["reasons"]
+
+
+def test_summarize_plan_freshness_replans_on_poor_execution():
+    # 이수했지만 match_score < 0.75 → 전체 재계획
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 6,
+            "last_plan_created_at": datetime(2026, 4, 21, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 21),
+            "latest_activity_created_at": datetime(2026, 4, 21, 20, tzinfo=timezone.utc),
+            "latest_execution_score": 0.50,
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 22))
+
+    assert freshness["activityIsNormalExecution"] is False
+    assert freshness["shouldExtendPlan"] is False
+    assert freshness["shouldGeneratePlan"] is True
+    assert "new_activity_since_last_plan" in freshness["reasons"]
 
 
 def test_planned_workout_category_and_target_match_score():

@@ -1,5 +1,6 @@
 """Gemini AI 클라이언트 (legacy ↔ llm_driven 디스패처)."""
 
+from datetime import date
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from google import genai
@@ -7,7 +8,7 @@ from google import genai
 from ...exceptions import GeminiError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
-from ...models.training import TrainingPlan
+from ...models.training import DailyPlan, TrainingPlan
 from ...utils.logger import get_logger
 from .planner import TrainingPlanner
 
@@ -89,4 +90,34 @@ class GeminiClient:
             include_strength=include_strength,
             training_background=training_background,
             replan_reasons=replan_reasons,
+        )
+
+    def extend_training_plan(
+        self,
+        existing_days: list[DailyPlan],
+        new_date: date,
+        metrics: AdvancedMetrics,
+        race_config: RaceConfig,
+        include_strength: bool = False,
+    ) -> Optional[TrainingPlan]:
+        """llm_driven 모드에서 기존 6일 유지 + 1일 연장. legacy 모드는 전체 재생성."""
+        if self._mode == "llm_driven" and self._llm is not None:
+            from ...coaching.planners.llm_driven import LLMDrivenPlanner
+
+            if isinstance(self._llm, LLMDrivenPlanner):
+                logger.info("훈련 계획 연장 (planner=llm_driven_extend)")
+                return self._llm.extend_plan(
+                    existing_days=existing_days,
+                    new_date=new_date,
+                    metrics=metrics,
+                    race_config=race_config,
+                    include_strength=include_strength,
+                )
+
+        logger.info("훈련 계획 연장 (planner=%s, fallback to full replan)", self._mode)
+        return self.create_training_plan(
+            metrics=metrics,
+            race_config=race_config,
+            include_strength=include_strength,
+            replan_reasons=["extend_fallback_legacy"],
         )

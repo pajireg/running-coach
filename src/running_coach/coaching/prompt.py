@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .context import CoachingContext, CoachingScores
+
+if TYPE_CHECKING:
+    from ..models.training import DailyPlan
 
 
 def _score_hint(score: float) -> str:
@@ -268,6 +271,83 @@ class LLMPromptTemplate:
         )
 
         sections.append("[출력 스키마]\n" + _as_json(OUTPUT_SCHEMA))
+        sections.append("Return ONLY valid JSON matching the schema.")
+
+        return "\n\n".join(sections)
+
+    @classmethod
+    def render_extend(
+        cls,
+        ctx: CoachingContext,
+        existing_days: "list[DailyPlan]",
+        new_date: date,
+        safety_rules: list[str],
+        include_strength: bool = False,
+    ) -> str:
+        """기존 6일 확정 + 신규 1일만 설계하는 extend 프롬프트."""
+        locked = [
+            {
+                "date": d.date.isoformat(),
+                "sessionType": d.session_type,
+                "plannedMinutes": d.planned_minutes,
+                "workoutName": d.workout.workout_name,
+            }
+            for d in existing_days
+        ]
+
+        sections: list[str] = []
+        sections.append("당신은 시니어 러닝 코치입니다.")
+        sections.append(
+            f"[오늘] {ctx.today.isoformat()} — 오늘 훈련이 정상 이수되어 "
+            "호라이즌을 하루 연장합니다."
+        )
+
+        if ctx.metrics is not None:
+            gemini_metrics = ctx.metrics.to_gemini_dict()
+            sections.append(f"[오늘 지표 (health)] {_as_json(gemini_metrics.get('health') or {})}")
+            sections.append(f"[퍼포먼스] {_as_json(gemini_metrics.get('performance') or {})}")
+
+        sections.append("[스코어]\n" + _scores_block(ctx.scores))
+        sections.append(
+            "[페이스 존 (targetValue 는 반드시 이 값 중 하나로 선택)]\n"
+            + _as_json(ctx.pace_zones.to_dict())
+        )
+        sections.append("[지난 14일 실제 수행 이력 (raw)]\n" + _as_json(_execution_rows(ctx)))
+
+        active_inj = _active_injury_dict(ctx)
+        sections.append("[활성 부상] " + _as_json(active_inj))
+        sections.append("[최근 주관적 피드백] " + _as_json(_feedback_rows(ctx)))
+        sections.append("[훈련 블록] " + _as_json(_training_block_dict(ctx)))
+        sections.append("[대회 컨텍스트] " + _as_json(_race_goal_dict(ctx)))
+
+        rules_block = "\n".join(f"- {line}" for line in safety_rules)
+        sections.append("[반드시 지켜야 할 안전 원칙]\n" + rules_block)
+
+        sections.append(
+            "[확정된 6일 세션 — 이 세션들은 변경하지 마세요]\n" + _as_json(locked)
+        )
+        sections.append(
+            f"[결정 과제]\n"
+            f"{new_date.isoformat()} 1일치 세션만 새로 설계하세요.\n"
+            "위 확정 세션과 연결되는 흐름을 고려하여 sessionType, plannedMinutes, "
+            "step 구조를 결정하세요."
+        )
+        if include_strength:
+            sections.append(
+                "[근력 훈련 참고]\n"
+                "workout.description 에 한국어 보조 근력 조언을 덧붙이세요.\n"
+                "(steps 에는 러닝 step 만; sportType 은 반드시 RUNNING.)"
+            )
+        else:
+            sections.append("[근력 훈련]\n러닝만 계획하고 steps 에 근력 세션을 넣지 마세요.")
+
+        single_day_schema = {
+            "date": "YYYY-MM-DD",
+            "sessionType": "rest|recovery|base|quality|long_run",
+            "plannedMinutes": "integer >= 0",
+            "workout": OUTPUT_SCHEMA["plan"][0]["workout"],  # type: ignore[index]
+        }
+        sections.append("[출력 스키마 — 단일 DailyPlan JSON 객체]\n" + _as_json(single_day_schema))
         sections.append("Return ONLY valid JSON matching the schema.")
 
         return "\n\n".join(sections)
