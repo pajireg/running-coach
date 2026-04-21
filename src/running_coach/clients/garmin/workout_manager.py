@@ -20,8 +20,6 @@ from garminconnect.workout import (  # type: ignore[import-untyped]
 from ...config.constants import (
     DEFAULT_PACE_MARGIN,
     STEP_TYPE_MAP,
-    SUPPORTED_WORKOUT_PREFIXES,
-    WORKOUT_PREFIX,
 )
 from ...exceptions import GarminWorkoutError
 from ...models.training import Workout
@@ -102,40 +100,26 @@ class WorkoutManager:
     ) -> int:
         """현재 앱이 생성한 기존 워크아웃 삭제.
 
-        Args:
-            workout_ids: DB에 저장된 Garmin workout id 목록. 있으면 이 값을 우선 사용.
-            future_only: 미래 워크아웃만 삭제 (현재 미사용)
-
-        Returns:
-            삭제된 워크아웃 개수
+        DB에 저장된 garmin_workout_id 기준으로만 삭제한다.
+        ID 없이 이름 prefix로 탐색하는 fallback은 StandardizeWorkoutName 적용 이후
+        canonical 이름('Recovery Run' 등)과 prefix가 일치하지 않아 항상 0건이며,
+        사용자의 동명 워크아웃을 잘못 삭제할 위험이 있으므로 제거했다.
         """
-        logger.info("기존 %s 워크아웃 정리 중...", WORKOUT_PREFIX)
-
-        try:
-            deleted_count = 0
-            ids_to_delete = [str(workout_id) for workout_id in workout_ids or [] if workout_id]
-
-            if ids_to_delete:
-                for workout_id in ids_to_delete:
-                    self._delete_workout(workout_id)
-                    deleted_count += 1
-                logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
-                return deleted_count
-
-            workouts = self.garmin.get_workouts() if hasattr(self.garmin, "get_workouts") else []
-            for w in workouts:
-                workout_name = str(w.get("workoutName") or "")
-                if any(prefix in workout_name for prefix in SUPPORTED_WORKOUT_PREFIXES):
-                    workout_id = w["workoutId"]
-                    self._delete_workout(workout_id)
-                    deleted_count += 1
-
-            logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
-            return deleted_count
-
-        except Exception as e:
-            logger.warning(f"워크아웃 정리 실패: {e}")
+        ids_to_delete = [str(wid) for wid in (workout_ids or []) if wid]
+        if not ids_to_delete:
+            logger.info("삭제할 이전 워크아웃 ID 없음 (건너뜀)")
             return 0
+
+        deleted_count = 0
+        try:
+            for workout_id in ids_to_delete:
+                self._delete_workout(workout_id)
+                deleted_count += 1
+        except Exception as e:
+            logger.warning(f"워크아웃 정리 실패 (삭제됨: {deleted_count}개): {e}")
+
+        logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
+        return deleted_count
 
     def _delete_workout(self, workout_id: str | int) -> None:
         if hasattr(self.garmin, "delete_workout"):

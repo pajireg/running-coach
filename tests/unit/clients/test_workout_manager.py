@@ -66,16 +66,24 @@ def test_create_workout_uses_json_upload_payload():
     assert step["targetValueOne"] > step["targetValueTwo"]
 
 
-def test_schedule_and_cleanup_use_native_methods_when_available():
+def test_schedule_uses_native_method():
     garmin = _FakeGarmin()
     manager = WorkoutManager(garmin)
 
     manager.schedule_workout("42", date(2026, 4, 17))
-    deleted_count = manager.delete_generated_workouts()
 
     assert garmin.scheduled == ("42", "2026-04-17")
-    assert deleted_count == 1
-    assert garmin.deleted_ids == [10]
+
+
+def test_cleanup_without_ids_skips_deletion():
+    # prefix fallback 제거 후: ID 없으면 0건 반환 (사용자 워크아웃 오삭제 방지)
+    garmin = _FakeGarmin()
+    manager = WorkoutManager(garmin)
+
+    deleted_count = manager.delete_generated_workouts()
+
+    assert deleted_count == 0
+    assert garmin.deleted_ids == []
 
 
 def test_cleanup_prefers_database_workout_ids():
