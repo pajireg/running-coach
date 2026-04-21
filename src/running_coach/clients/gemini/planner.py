@@ -215,8 +215,6 @@ class TrainingPlanner:
             "7. RATIONALE:",
             "   - Put a brief Korean rationale in 'description'.",
             "   - Tie it to the race goal or general fitness.",
-            "   - Do NOT mention specific pace values (e.g. '5:00', '6:45') in the description.",
-            "     Use zone names instead (e.g. 'tempo 페이스', '회복 페이스').",
             "8. SESSION CONTENT:",
             "   - For rest days, return an empty steps array.",
             "   - For recovery/base/long days, mostly use Warmup, Run, Cooldown.",

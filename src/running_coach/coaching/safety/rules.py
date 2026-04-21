@@ -924,14 +924,42 @@ class PaceZoneIntegrity:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
+            old_steps = day.workout.steps
             new_steps = []
-            for s in day.workout.steps:
+            description = day.workout.description or ""
+
+            for s in old_steps:
                 if s.target_type != "speed":
                     new_steps.append(s)
                     continue
-                zone_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
-                new_steps.append(_build_step(s.type, s.duration_value, zone_pace))
-            new_workout = day.workout.model_copy(update={"steps": new_steps})
+                expected_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
+                # quality/Run은 threshold·tempo 모두 유효 — 범위 내면 LLM 선택 유지
+                if day.session_type == "quality" and s.type == "Run":
+                    threshold_s = _pace_seconds(ctx.pace_zones.threshold)
+                    tempo_s = _pace_seconds(ctx.pace_zones.tempo)
+                    parsed = _pace_seconds(s.target_value or "")
+                    if parsed is not None and any(
+                        a is not None and abs(parsed - a) <= self.TOLERANCE_SECONDS
+                        for a in (threshold_s, tempo_s)
+                    ):
+                        new_steps.append(s)  # 유효 — LLM 페이스 유지
+                        continue
+                # 위반 스텝만 교체
+                parsed = _pace_seconds(s.target_value or "")
+                expected_secs = _pace_seconds(expected_pace)
+                if parsed is None or (
+                    expected_secs is not None and abs(parsed - expected_secs) > self.TOLERANCE_SECONDS
+                ):
+                    old_pace = s.target_value or ""
+                    new_step = _build_step(s.type, s.duration_value, expected_pace)
+                    # description의 해당 페이스 수치도 동기화
+                    if old_pace and old_pace != expected_pace and _PACE_RE.fullmatch(old_pace.strip()):
+                        description = description.replace(old_pace, expected_pace)
+                    new_steps.append(new_step)
+                else:
+                    new_steps.append(s)
+
+            new_workout = day.workout.model_copy(update={"steps": new_steps, "description": description})
             new_day = day.model_copy(update={"workout": new_workout})
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
