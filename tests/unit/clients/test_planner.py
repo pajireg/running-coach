@@ -647,9 +647,9 @@ def test_default_steps_use_personalized_pace_targets_from_skeleton():
 
     steps = planner._default_steps_for_skeleton_day(base_day)
 
-    assert steps[0]["targetValue"] == "6:20"
-    assert steps[1]["targetValue"] == "6:20"
-    assert steps[-1]["targetValue"] == "6:45"
+    assert steps[0]["targetValue"] == "6:35"   # warmup: LT+125s (base보다 15s 느림)
+    assert steps[1]["targetValue"] == "6:20"   # base run pace: LT+110s
+    assert steps[-1]["targetValue"] == "6:55"  # cooldown: LT+145s (recovery pace)
 
 
 def test_normalize_plan_json_adds_pace_targets_to_warmup_and_cooldown():

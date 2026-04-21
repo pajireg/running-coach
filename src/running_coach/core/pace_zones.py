@@ -30,11 +30,10 @@ class PaceZones:
 
     def for_step(self, step_type: str, session_type: str) -> str:
         if step_type == "Warmup":
-            # recovery/long_run: 워밍업이 본 운동보다 빠르면 안 됨
+            # recovery 세션: warmup(LT+125) < recovery run(LT+145)이므로 recovery pace 사용
             if session_type == "recovery":
                 return self.recovery
-            if session_type == "long_run":
-                return self.long_run
+            # 그 외: warmup(LT+125) > base/long_run(LT+105~110) — 표준 warmup 존 사용
             return self.warmup
         if step_type == "Cooldown":
             return self.cooldown
@@ -86,8 +85,10 @@ class PaceZoneEngine:
             base=cls._format_pace(threshold_seconds + 110),
             long_run=cls._format_pace(threshold_seconds + 105),
             recovery=cls._format_pace(threshold_seconds + 145),
-            warmup=cls._format_pace(threshold_seconds + 110),
-            cooldown=cls._format_pace(threshold_seconds + 135),
+            # Pfitzinger: 워밍업은 easy pace보다 15~30s/km 느림
+            warmup=cls._format_pace(threshold_seconds + 125),
+            # 쿨다운은 recovery pace (가장 편안한 속도)
+            cooldown=cls._format_pace(threshold_seconds + 145),
         )
 
     @classmethod

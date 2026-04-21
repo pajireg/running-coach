@@ -26,8 +26,8 @@ DEFAULT_ZONES = PaceZones(
     base="6:45",
     long_run="6:40",
     recovery="7:20",
-    warmup="6:45",
-    cooldown="7:10",
+    warmup="7:00",   # base(6:45)보다 15s 느림 — Pfitzinger 기준
+    cooldown="7:20", # recovery pace — 가장 편안한 속도
 )
 
 
@@ -76,30 +76,30 @@ def make_day(
     elif steps is None:
         if session_type == "quality":
             steps = [
-                make_step("Warmup", 900, "6:45"),
+                make_step("Warmup", 900, "7:00"),
                 make_step("Interval", 240, "4:30"),
                 make_step("Recovery", 120, "7:20"),
                 make_step("Interval", 240, "4:30"),
                 make_step("Recovery", 120, "7:20"),
-                make_step("Cooldown", 600, "7:10"),
+                make_step("Cooldown", 600, "7:20"),
             ]
         elif session_type == "long_run":
             steps = [
-                make_step("Warmup", 600, "6:40"),
+                make_step("Warmup", 600, "7:00"),
                 make_step("Run", 3600, "6:40"),
-                make_step("Cooldown", 300, "7:10"),
+                make_step("Cooldown", 300, "7:20"),
             ]
         elif session_type == "recovery":
             steps = [
                 make_step("Warmup", 300, "7:20"),
                 make_step("Run", 1500, "7:20"),
-                make_step("Cooldown", 300, "7:10"),
+                make_step("Cooldown", 300, "7:20"),
             ]
         else:
             steps = [
-                make_step("Warmup", 600, "6:45"),
+                make_step("Warmup", 600, "7:00"),
                 make_step("Run", 1800, "6:45"),
-                make_step("Cooldown", 300, "7:10"),
+                make_step("Cooldown", 300, "7:20"),
             ]
     return DailyPlan(
         date=d,

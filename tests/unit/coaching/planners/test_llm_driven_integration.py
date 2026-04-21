@@ -66,27 +66,27 @@ def _steps(session_type: str) -> list[dict]:
         return []
     if session_type == "quality":
         return [
-            {"type": "Warmup", "durationValue": 900, "targetValue": "6:45", **base},
+            {"type": "Warmup", "durationValue": 900, "targetValue": "7:00", **base},
             {"type": "Interval", "durationValue": 240, "targetValue": "4:30", **base},
             {"type": "Recovery", "durationValue": 120, "targetValue": "7:20", **base},
-            {"type": "Cooldown", "durationValue": 600, "targetValue": "7:10", **base},
+            {"type": "Cooldown", "durationValue": 600, "targetValue": "7:20", **base},
         ]
     if session_type == "long_run":
         return [
-            {"type": "Warmup", "durationValue": 600, "targetValue": "6:40", **base},
+            {"type": "Warmup", "durationValue": 600, "targetValue": "7:00", **base},
             {"type": "Run", "durationValue": 3600, "targetValue": "6:40", **base},
-            {"type": "Cooldown", "durationValue": 300, "targetValue": "7:10", **base},
+            {"type": "Cooldown", "durationValue": 300, "targetValue": "7:20", **base},
         ]
     if session_type == "recovery":
         return [
             {"type": "Warmup", "durationValue": 300, "targetValue": "7:20", **base},
             {"type": "Run", "durationValue": 1500, "targetValue": "7:20", **base},
-            {"type": "Cooldown", "durationValue": 300, "targetValue": "7:10", **base},
+            {"type": "Cooldown", "durationValue": 300, "targetValue": "7:20", **base},
         ]
     return [
-        {"type": "Warmup", "durationValue": 600, "targetValue": "6:45", **base},
+        {"type": "Warmup", "durationValue": 600, "targetValue": "7:00", **base},
         {"type": "Run", "durationValue": 1800, "targetValue": "6:45", **base},
-        {"type": "Cooldown", "durationValue": 300, "targetValue": "7:10", **base},
+        {"type": "Cooldown", "durationValue": 300, "targetValue": "7:20", **base},
     ]
 
 

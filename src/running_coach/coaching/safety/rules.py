@@ -888,6 +888,22 @@ class PaceZoneIntegrity:
                         )
                     )
                     break
+                # quality Run 스텝은 threshold와 tempo 모두 유효 (LLM이 선택)
+                if day.session_type == "quality" and s.type == "Run":
+                    threshold_s = _pace_seconds(ctx.pace_zones.threshold)
+                    tempo_s = _pace_seconds(ctx.pace_zones.tempo)
+                    valid = any(
+                        a is not None and abs(parsed - a) <= self.TOLERANCE_SECONDS
+                        for a in (threshold_s, tempo_s)
+                    )
+                    if not valid:
+                        out.append(Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=f"day {i} step {j} (Run/quality) pace {s.target_value} outside threshold/tempo",
+                            day_index=i,
+                        ))
+                    break
                 expected_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
                 expected_secs = _pace_seconds(expected_pace)
                 if expected_secs is not None and abs(parsed - expected_secs) > self.TOLERANCE_SECONDS:
