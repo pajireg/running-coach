@@ -111,14 +111,14 @@ class WorkoutManager:
             return 0
 
         deleted_count = 0
-        try:
-            for workout_id in ids_to_delete:
+        for workout_id in ids_to_delete:
+            try:
                 self._delete_workout(workout_id)
                 deleted_count += 1
-        except Exception as e:
-            logger.warning(f"워크아웃 정리 실패 (삭제됨: {deleted_count}개): {e}")
+            except Exception as e:
+                logger.warning(f"워크아웃 삭제 실패 (id={workout_id}): {e}")
 
-        logger.info(f"{deleted_count}개의 기존 워크아웃 삭제됨")
+        logger.info(f"{deleted_count}/{len(ids_to_delete)}개의 기존 워크아웃 삭제됨")
         return deleted_count
 
     def _delete_workout(self, workout_id: str | int) -> None:
