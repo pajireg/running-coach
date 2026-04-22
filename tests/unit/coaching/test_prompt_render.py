@@ -19,6 +19,7 @@ from running_coach.coaching.context import (
     TrainingBlockSnapshot,
 )
 from running_coach.coaching.prompt import OUTPUT_SCHEMA, LLMPromptTemplate
+from running_coach.coaching.safety import DEFAULT_SAFETY_RULES, SafetyValidator
 from running_coach.core.pace_zones import PaceZones
 from running_coach.models.context import ActivityContext
 from running_coach.models.health import HealthMetrics
@@ -135,6 +136,27 @@ class TestPromptSections:
         assert "2026-04-20" in rendered
         assert "2026-04-26" in rendered  # today + 6
 
+    def test_contains_rolling_horizon_context(self, rendered):
+        assert "rolling 7-day horizon" in rendered
+        assert "매일 체크인" in rendered
+        assert "오늘부터 이어지는 7일치 훈련" in rendered
+        assert "현재 7일 흐름 안에서 맡는 역할" in rendered
+
+    def test_does_not_prompt_with_calendar_week_ban_examples(self, rendered):
+        assert "금주" not in rendered
+        assert "이번 주 마무리" not in rendered
+        assert "다음 주 준비" not in rendered
+        assert "캘린더 주간을 닫는 표현" not in rendered
+
+    def test_default_safety_rules_use_rolling_horizon_language(self):
+        rendered = LLMPromptTemplate.render(
+            _full_ctx(),
+            safety_rules=SafetyValidator(list(DEFAULT_SAFETY_RULES)).describe_rules(_full_ctx()),
+        )
+        assert "이번 주" not in rendered
+        assert "주간 " not in rendered
+        assert "7일 계획 범위" in rendered
+
     def test_contains_scores(self, rendered):
         assert "회복도 68" in rendered
         assert "피로도 52" in rendered
@@ -180,6 +202,7 @@ class TestPromptSections:
 
     def test_contains_availability(self, rendered):
         assert '"maxDurationMinutes": 60' in rendered
+        assert "요일별 가용성" in rendered
 
     def test_contains_long_run_allowed_dates(self, rendered):
         assert "세션 배치 하드 제약" in rendered

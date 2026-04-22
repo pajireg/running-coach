@@ -346,7 +346,7 @@ class InjuryBlockQuality:
 
     def describe(self, ctx):
         if ctx.scores.active_injury_severity >= 6:
-            return "활성 부상 severity 가 높아 이번 주는 quality 세션을 배치하지 않습니다."
+            return "활성 부상 severity 가 높아 7일 계획 범위에는 quality 세션을 배치하지 않습니다."
         return "활성 부상 severity ≥ 6 일 때 quality 세션을 배치하지 않습니다."
 
 
@@ -432,7 +432,7 @@ class MaxOneLongRun:
         return plan
 
     def describe(self, ctx):
-        return "주간 장거리는 정확히 1회입니다."
+        return "7일 계획 범위의 장거리는 정확히 1회입니다."
 
 
 class PreferLongRunAvailability:
@@ -701,7 +701,7 @@ class WeeklyHardCap:
         return plan
 
     def describe(self, ctx):
-        return "주간 hard(quality+long_run) 세션은 최대 2회입니다."
+        return "7일 계획 범위의 hard(quality+long_run) 세션은 최대 2회입니다."
 
 
 class RespectUnavailability:
@@ -774,7 +774,7 @@ class MinOneRestPerWeek:
         return _replace_day(plan, target, new_day)
 
     def describe(self, ctx):
-        return "주간 최소 1일 휴식을 보장합니다."
+        return "7일 계획 범위에서 최소 1일 휴식을 보장합니다."
 
 
 class AcwrCap:
@@ -886,10 +886,10 @@ class AcwrCap:
         if chronic_weekly > 0:
             cap_km = chronic_weekly * self.CAP_RATIO
             return (
-                f"주간 총 러닝량은 {cap_km:.0f}km 이하여야 합니다 "
-                f"(chronic {chronic_weekly:.1f}km/wk 기준 ACWR ≤ {self.CAP_RATIO})."
+                f"7일 총 러닝량은 {cap_km:.0f}km 이하여야 합니다 "
+                f"(chronic load {chronic_weekly:.1f}km/7d 기준 ACWR ≤ {self.CAP_RATIO})."
             )
-        return "주간 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
+        return "7일 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
 
 
 class MaxDurationPerDay:

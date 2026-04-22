@@ -19,7 +19,7 @@ _BASE: dict[str, str] = {
     ),
     "recovery": (
         "오늘은 피로를 풀면서 다리 순환을 살리는 회복주입니다. "
-        "낮은 강도는 회복을 방해하지 않으면서 주간 리듬과 유산소 기반을 유지해 줍니다. "
+        "낮은 강도는 회복을 방해하지 않으면서 훈련 리듬과 유산소 기반을 유지해 줍니다. "
         "대화가 편한 페이스로 끝까지 가볍게 마무리하세요."
     ),
     "base": (
@@ -28,7 +28,7 @@ _BASE: dict[str, str] = {
         "속도를 증명하려 하지 말고 호흡이 안정적인 범위에 머무르세요."
     ),
     "long_run": (
-        "오늘은 주간 지구력의 중심이 되는 장거리 러닝입니다. "
+        "오늘은 현재 계획 범위에서 지구력의 중심이 되는 장거리 러닝입니다. "
         "긴 시간 움직이며 글리코겐 사용 효율과 피로 저항력, 후반 집중력이 좋아집니다. "
         "초반을 여유 있게 시작하고 마지막까지 자세가 무너지지 않게 유지하세요."
     ),
@@ -53,7 +53,7 @@ _BASE: dict[str, str] = {
         "빠른 구간은 날카롭게, 느린 구간은 확실히 회복되게 달리세요."
     ),
     "quality": (
-        "오늘은 이번 주 핵심 능력을 자극하는 품질 세션입니다. "
+        "오늘은 현재 상태에서 필요한 핵심 능력을 자극하는 품질 세션입니다. "
         "목표 강도 안에서 달리면 속도 지속력과 러닝 경제성이 좋아집니다. "
         "정해진 페이스 범위를 넘기지 말고 마지막 반복까지 자세를 유지하세요."
     ),
@@ -104,6 +104,21 @@ _ADAPTATION_TERMS = (
     "VO2max",
 )
 
+_FORBIDDEN_ROLLING_HORIZON_FRAMING = (
+    "금주",
+    "이번 주",
+    "주간",
+    "이번 주 훈련을 마무리",
+    "주간 훈련을 마무리",
+    "훈련을 마무리하며",
+    "한 주를 마무리",
+    "다음 주 강도",
+    "다음 주 훈련",
+    "다음 주를 준비",
+    "next week",
+    "end of the week",
+)
+
 
 class DescriptionRenderer:
     """session_type + 컨텍스트 → 한국어 운동 설명."""
@@ -139,8 +154,11 @@ class DescriptionRenderer:
 
     @staticmethod
     def needs_expansion(description: str | None) -> bool:
-        """LLM 설명이 너무 짧거나 훈련 효과 설명이 없으면 deterministic 보강 대상."""
+        """LLM 설명이 짧거나 rolling horizon 맥락과 어긋나면 보강 대상."""
         text = (description or "").strip()
+        lowered = text.lower()
+        if any(term.lower() in lowered for term in _FORBIDDEN_ROLLING_HORIZON_FRAMING):
+            return True
         if len(text) < 55:
             return True
         return not any(term in text for term in _ADAPTATION_TERMS)

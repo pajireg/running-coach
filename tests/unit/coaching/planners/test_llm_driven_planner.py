@@ -260,6 +260,23 @@ class TestHappyPath:
         assert "유산소" in description
         assert "호흡" in description
 
+    def test_calendar_week_closure_description_is_replaced(self, planner, mock_gemini):
+        safe = _plan_json(["base", "quality", "base", "recovery", "base", "long_run", "rest"])
+        safe["plan"][6]["workout"]["description"] = (
+            "금주 훈련을 마무리하며 가볍게 몸을 풀어주는 베이스 런입니다. "
+            "체력을 과도하게 소진하지 않으면서 달리기 리듬을 유지하는 것이 핵심입니다. "
+            "가벼운 발걸음으로 주간 훈련을 성공적으로 마친다는 느낌으로 마무리하세요."
+        )
+        mock_gemini.models.generate_content.return_value = _fake_gemini_response(safe)
+
+        plan = planner.generate_plan(_metrics(), RaceConfig(), replan_reasons=["x"])
+
+        assert plan is not None
+        description = plan.plan[6].workout.description
+        assert "금주" not in description
+        assert "마무리하며" not in description
+        assert "회복을 완성" in description
+
     def test_unsafe_plan_gets_auto_corrected(self, planner, mock_gemini):
         """연속 quality → 두 번째가 recovery 로 강등."""
         unsafe = _plan_json(["quality", "quality", "base", "base", "base", "long_run", "rest"])

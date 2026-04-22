@@ -190,7 +190,7 @@ WORKOUT_CATALOG = {
     "Base Run": {
         "sessionType": "base",
         "stepContract": "Warmup + Run + Cooldown, main Run 은 base pace",
-        "paceIntent": "유산소 기반과 주간 볼륨",
+        "paceIntent": "유산소 기반과 7일 계획 볼륨",
     },
     "Interval": {
         "sessionType": "quality",
@@ -231,7 +231,7 @@ WORKOUT_CATALOG = {
 
 OUTPUT_SCHEMA = {
     "weekly": {
-        "summaryKo": "string (3-5문장, 한국어)",
+        "summaryKo": "string (3-5문장, 한국어; 오늘부터 7일 계획 요약)",
         "phase": "base|build|peak|taper|maintenance",
         "phaseReasonKo": "string (한국어)",
         "weeklyVolumeTargetKm": "number > 0",
@@ -285,8 +285,17 @@ class LLMPromptTemplate:
         end_date = ctx.today + timedelta(days=6)
         sections: list[str] = []
 
-        sections.append("당신은 시니어 러닝 코치입니다. 선수에게 7일 훈련 계획을 설계합니다.")
+        sections.append(
+            "당신은 시니어 러닝 코치입니다. 선수의 최신 상태를 반영해 "
+            "오늘부터 시작하는 rolling 7-day horizon 훈련 계획을 설계합니다."
+        )
         sections.append(f"[오늘] {ctx.today.isoformat()} / 계획 종료일 {end_date.isoformat()}")
+        sections.append(
+            "[운영 맥락]\n"
+            "이 서비스는 매일 체크인하며 Garmin 수행 기록, 회복 지표, 피드백을 다시 읽습니다.\n"
+            "매 체크인마다 오늘부터 이어지는 7일치 훈련을 현재 상태에 맞게 계획합니다.\n"
+            "각 날짜의 설명은 해당 날짜가 현재 7일 흐름 안에서 맡는 역할을 기준으로 작성하세요."
+        )
 
         if ctx.metrics is not None:
             gemini_metrics = ctx.metrics.to_gemini_dict()
@@ -318,7 +327,7 @@ class LLMPromptTemplate:
 
         sections.append("[재계획 트리거 사유] " + _as_json(ctx.replan_reasons))
 
-        sections.append("[주간 가용성] " + _as_json(_availability_rows(ctx)))
+        sections.append("[요일별 가용성] " + _as_json(_availability_rows(ctx)))
         sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
 
         sections.append("[훈련 배경] " + _as_json(_training_background_dict(ctx)))
@@ -335,7 +344,8 @@ class LLMPromptTemplate:
             "- sessionType 은 선택한 workoutType 의 sessionType 과 정확히 일치해야 합니다.\n"
             "- readiness 가 높고 chronic load 충분: Interval 또는 Threshold 로 능력 자극.\n"
             "- 피로/부상 지표 경계선: Tempo Run 또는 Fartlek 으로 완충.\n"
-            "- 최근 quality 수행력이 약했다면 이번 주는 Threshold 나 Tempo 로 base building.\n"
+            "- 최근 quality 수행력이 약했다면 현재 7일 범위는 Threshold 나 Tempo 로 "
+            "base building.\n"
             "- 대회까지 남은 기간 / phase 에 맞춰 특이성(race pace 근접) 조절.\n"
             "- Threshold/Tempo Run 은 continuous quality 이므로 main work 에 Run step 을 쓰고 "
             "Interval step 을 쓰지 마세요.\n"
@@ -364,13 +374,14 @@ class LLMPromptTemplate:
 
         sections.append(
             "[결정 과제]\n"
-            "1. 이번 주 weekly_volume_target_km 를 결정하세요.\n"
+            "1. 오늘부터 7일 rolling horizon 의 weekly_volume_target_km 를 결정하세요.\n"
             "2. 7일 각각의 workoutType 을 카탈로그에서 선택하고 sessionType 을 맞추세요.\n"
             "3. 각 일자의 plannedMinutes 를 결정하세요.\n"
             "4. 각 세션의 step 구조와 targetValue 페이스를 설계하세요. "
             "페이스는 safetyBands 안에서 선택하되 referenceCenters 를 그대로 "
             "복사할 필요는 없습니다.\n"
-            "5. weekly.summaryKo (3-5문장, 한국어)와 phase / phaseReasonKo 를 작성하세요."
+            "5. weekly.summaryKo 는 오늘부터 7일 계획 요약으로 작성하고 "
+            "phase / phaseReasonKo 를 함께 작성하세요."
         )
 
         sections.append("[출력 스키마]\n" + _as_json(OUTPUT_SCHEMA))
@@ -404,6 +415,13 @@ class LLMPromptTemplate:
             f"[오늘] {ctx.today.isoformat()} — 오늘 훈련이 정상 이수되어 "
             "호라이즌을 하루 연장합니다."
         )
+        sections.append(
+            "[운영 맥락]\n"
+            "이 서비스는 매일 체크인하며 최신 Garmin 수행 기록, 회복 지표, 피드백을 반영합니다.\n"
+            "오늘 정상 이수된 세션 뒤에 새 하루를 추가해 오늘부터 이어지는 "
+            "rolling 7-day horizon 을 유지합니다.\n"
+            "새 날짜 설명은 확정된 6일과 연결되는 역할을 기준으로 작성하세요."
+        )
 
         if ctx.metrics is not None:
             gemini_metrics = ctx.metrics.to_gemini_dict()
@@ -421,7 +439,7 @@ class LLMPromptTemplate:
 
         active_inj = _active_injury_dict(ctx)
         sections.append("[활성 부상] " + _as_json(active_inj))
-        sections.append("[주간 가용성] " + _as_json(_availability_rows(ctx)))
+        sections.append("[요일별 가용성] " + _as_json(_availability_rows(ctx)))
         sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
         sections.append("[최근 주관적 피드백] " + _as_json(_feedback_rows(ctx)))
         sections.append("[훈련 블록] " + _as_json(_training_block_dict(ctx)))

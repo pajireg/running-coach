@@ -544,6 +544,12 @@ description, or if the safety validator changes a session type, the deterministi
 description renderer rebuilds the description so Garmin and calendar text still match
 the final workout.
 
+The 7-day plan is a rolling horizon, not a fixed calendar-week story. The service
+checks in every day, rereads Garmin execution, recovery metrics, and feedback, then
+keeps the next 7 days coherent. Workout descriptions are written from the role each
+session plays in the current 7-day flow. Descriptions that drift into stale
+calendar-week framing are replaced by deterministic rolling-horizon explanations.
+
 ## LLM Role
 
 The LLM is used for:
