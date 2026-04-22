@@ -19,10 +19,11 @@ from ...utils.logger import get_logger
 from ..prompt import LLMPromptTemplate
 from ..safety.metrics import emit_plan_generated
 from ..safety.validator import SafetyValidator
+from .description_renderer import DescriptionRenderer
 
 if TYPE_CHECKING:
     from ...clients.llm import JSONLLMClient
-    from ..context import CoachingContextBuilder
+    from ..context import CoachingContext, CoachingContextBuilder
     from .legacy import LegacySkeletonPlanner
 
 
@@ -99,6 +100,7 @@ class LLMDrivenPlanner:
                 metrics, race_config, training_background, include_strength
             )
 
+        plan = self._ensure_explanatory_descriptions(plan, ctx)
         result = self._safety.validate(plan, ctx)
         emit_plan_generated(
             mode="llm_driven",
@@ -118,7 +120,7 @@ class LLMDrivenPlanner:
             "LLMDrivenPlanner 완료: %d 위반 auto-correct",
             len(result.violations),
         )
-        return result.plan
+        return self._ensure_explanatory_descriptions(result.plan, ctx)
 
     def extend_plan(
         self,
@@ -206,6 +208,7 @@ class LLMDrivenPlanner:
                 replan_reasons=["extend_fallback_assemble_error"],
             )
 
+        plan = self._ensure_explanatory_descriptions(plan, ctx)
         result = self._safety.validate(plan, ctx)
         emit_plan_generated(
             mode="llm_driven_extend",
@@ -229,13 +232,42 @@ class LLMDrivenPlanner:
             len(existing_days),
             len(result.violations),
         )
-        return result.plan
+        return self._ensure_explanatory_descriptions(result.plan, ctx)
 
     # ------------------------------------------------------------------
 
     def _invoke_llm(self, prompt: str) -> dict[str, Any]:
         """Provider adapter 를 통해 structured JSON 호출."""
         return self._llm_client.invoke_json(prompt)
+
+    @staticmethod
+    def _ensure_explanatory_descriptions(
+        plan: TrainingPlan,
+        ctx: "CoachingContext",
+    ) -> TrainingPlan:
+        """짧거나 generic 한 LLM 설명은 deterministic 코치 설명으로 보강."""
+        updated_days: list[DailyPlan] = []
+        changed = False
+        for day in plan.plan:
+            if not DescriptionRenderer.needs_expansion(day.workout.description):
+                updated_days.append(day)
+                continue
+
+            quality_subtype = DescriptionRenderer.quality_subtype_from_workout_name(
+                day.workout.workout_name
+            )
+            description = DescriptionRenderer.render(
+                session_type=day.session_type or "base",
+                quality_subtype=quality_subtype if day.session_type == "quality" else None,
+                ctx=ctx,
+            )
+            workout = day.workout.model_copy(update={"description": description})
+            updated_days.append(day.model_copy(update={"workout": workout}))
+            changed = True
+
+        if not changed:
+            return plan
+        return plan.model_copy(update={"plan": updated_days})
 
     def _legacy_fallback(
         self,

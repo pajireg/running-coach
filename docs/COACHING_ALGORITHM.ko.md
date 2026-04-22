@@ -537,11 +537,17 @@ LLM을 호출하기 전에 규칙 엔진이 아래를 먼저 정합니다.
 `Long Run`은 반드시 그 날짜 중 하나에 있어야 하며, 파싱 후 safety validator가 같은
 계약을 다시 강제합니다.
 
+워크아웃 설명도 코칭 계약의 일부입니다. 각 설명은 오늘 이 세션을 배치한 이유,
+기대하는 적응 효과, 실행 중 지킬 포인트를 짧게 포함해야 합니다. LLM이 너무 짧고
+일반적인 설명을 반환하거나 safety validator가 세션 타입을 바꾸면, deterministic
+description renderer가 최종 세션에 맞는 한국어 설명을 다시 만들어 Garmin과 캘린더
+문구가 실제 훈련과 어긋나지 않게 합니다.
+
 ## LLM의 역할
 
 LLM은 다음을 담당합니다.
 
-- 세션 설명
+- 세션 배치 이유, 기대 적응, 실행 포인트를 포함한 설명
 - 워크아웃 step 상세
 - 허용된 `sessionType` 안에서 canonical workout type 선택 (`Interval`, `Threshold`,
   `Tempo Run`, `Fartlek` 등)
@@ -562,6 +568,7 @@ LLM이 하면 안 되는 것:
 - 잘못된 날짜나 이름 수정
 - `workoutType`, `sessionType`, `workout.workoutName`은 훈련 카탈로그와 일치해야
   하며, 불일치가 남으면 safety layer가 최종 방어선으로 보정
+- 너무 짧거나 세션과 어긋나는 설명은 deterministic 한국어 코칭 설명으로 교체
 - threshold/tempo 페이스의 단일 장시간 `Interval` step은 continuous `Run` 블록으로
   정규화하고 `Threshold` 또는 `Tempo Run`으로 이름을 맞춤
 - 명백히 잘못된 step은 안전한 fallback으로 교체

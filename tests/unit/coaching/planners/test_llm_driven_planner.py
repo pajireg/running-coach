@@ -248,6 +248,18 @@ class TestHappyPath:
         assert plan.weekly is not None
         assert plan.weekly.phase == "build"
 
+    def test_short_llm_description_is_expanded(self, planner, mock_gemini):
+        safe = _plan_json(["base", "quality", "base", "recovery", "base", "long_run", "rest"])
+        mock_gemini.models.generate_content.return_value = _fake_gemini_response(safe)
+
+        plan = planner.generate_plan(_metrics(), RaceConfig(), replan_reasons=["x"])
+
+        assert plan is not None
+        description = plan.plan[0].workout.description
+        assert len(description) > 55
+        assert "유산소" in description
+        assert "호흡" in description
+
     def test_unsafe_plan_gets_auto_corrected(self, planner, mock_gemini):
         """연속 quality → 두 번째가 recovery 로 강등."""
         unsafe = _plan_json(["quality", "quality", "base", "base", "base", "long_run", "rest"])

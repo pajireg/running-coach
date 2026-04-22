@@ -537,11 +537,19 @@ For `llm_driven`, the prompt includes concrete `longRunAllowedDates` derived fro
 must be placed on one of those dates, and the safety validator enforces the same
 contract after parsing.
 
+Workout descriptions are also part of the coaching contract. Each non-empty
+description should briefly tell the athlete why the session is placed today, what
+adaptation it targets, and the key execution cue. If the LLM returns a short generic
+description, or if the safety validator changes a session type, the deterministic
+description renderer rebuilds the description so Garmin and calendar text still match
+the final workout.
+
 ## LLM Role
 
 The LLM is used for:
 
-- workout descriptions
+- workout descriptions that explain session rationale, expected adaptation, and one
+  execution cue
 - workout-step detail
 - canonical workout type selection (`Interval`, `Threshold`, `Tempo Run`, `Fartlek`,
   etc.) inside the allowed `sessionType`
@@ -562,6 +570,8 @@ After generation, output is normalized again:
 - wrong dates or workout names are corrected
 - `workoutType`, `sessionType`, and `workout.workoutName` are expected to match the
   workout catalog; the safety layer still corrects mismatches as a final guard
+- short or stale workout descriptions are replaced with deterministic Korean coaching
+  explanations
 - a single long `Interval` step at threshold or tempo pace is normalized as a continuous
   `Run` block and named `Threshold` or `Tempo Run`
 - invalid steps can be replaced by safe fallbacks

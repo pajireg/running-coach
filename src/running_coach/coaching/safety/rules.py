@@ -226,9 +226,22 @@ def _rebuild_day(
     new_session_type: "SessionType",
     pace_zones: "PaceZones",
     planned_minutes: Optional[int] = None,
+    ctx: "CoachingContext | None" = None,
 ) -> "DailyPlan":
     """세션 타입 변경 + steps/workout_name/planned_minutes 재구성."""
     from ...models.training import DailyPlan
+    from ..planners.description_renderer import DescriptionRenderer
+
+    description = day.workout.description
+    if ctx is not None:
+        quality_subtype = DescriptionRenderer.quality_subtype_from_workout_name(
+            day.workout.workout_name
+        )
+        description = DescriptionRenderer.render(
+            session_type=new_session_type,
+            quality_subtype=quality_subtype if new_session_type == "quality" else None,
+            ctx=ctx,
+        )
 
     if new_session_type == "rest":
         return DailyPlan.model_validate(
@@ -238,7 +251,7 @@ def _rebuild_day(
                 "plannedMinutes": 0,
                 "workout": {
                     "workoutName": _WORKOUT_NAMES["rest"],
-                    "description": day.workout.description,
+                    "description": description,
                     "sportType": "RUNNING",
                     "steps": [],
                 },
@@ -256,7 +269,7 @@ def _rebuild_day(
             "plannedMinutes": planned_minutes,
             "workout": {
                 "workoutName": _WORKOUT_NAMES[new_session_type],
-                "description": day.workout.description,
+                "description": description,
                 "sportType": "RUNNING",
                 "steps": steps_raw,
             },
@@ -325,7 +338,9 @@ class InjuryBlockQuality:
             day = plan.plan[v.day_index]
             # quality → recovery, duration × 0.65
             new_minutes = max(20, int((day.planned_minutes or 40) * 0.65))
-            new_day = _rebuild_day(day, "recovery", ctx.pace_zones, planned_minutes=new_minutes)
+            new_day = _rebuild_day(
+                day, "recovery", ctx.pace_zones, planned_minutes=new_minutes, ctx=ctx
+            )
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -412,7 +427,7 @@ class MaxOneLongRun:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "base", ctx.pace_zones)
+            new_day = _rebuild_day(day, "base", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -493,12 +508,14 @@ class PreferLongRunAvailability:
             "long_run",
             ctx.pace_zones,
             planned_minutes=old_long_minutes,
+            ctx=ctx,
         )
         new_old = _rebuild_day(
             old_long_day,
             replacement_type,
             ctx.pace_zones,
             planned_minutes=replacement_minutes,
+            ctx=ctx,
         )
         plan = _replace_day(plan, target_index, new_target)
         return _replace_day(plan, long_index, new_old)
@@ -563,7 +580,7 @@ class NoBackToBackQuality:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -598,7 +615,7 @@ class NoQualityAfterLongRun:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -643,7 +660,7 @@ class Quality48hSpacing:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "recovery", ctx.pace_zones)
+            new_day = _rebuild_day(day, "recovery", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -679,7 +696,7 @@ class WeeklyHardCap:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "base", ctx.pace_zones)
+            new_day = _rebuild_day(day, "base", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -713,7 +730,7 @@ class RespectUnavailability:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, "rest", ctx.pace_zones)
+            new_day = _rebuild_day(day, "rest", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 
@@ -753,7 +770,7 @@ class MinOneRestPerWeek:
         # long_run 에서 가장 먼 index 선택
         long_idx = next((i for i, d in enumerate(plan.plan) if d.session_type == "long_run"), 0)
         target = max(candidates, key=lambda i: abs(i - long_idx))
-        new_day = _rebuild_day(plan.plan[target], "rest", ctx.pace_zones)
+        new_day = _rebuild_day(plan.plan[target], "rest", ctx.pace_zones, ctx=ctx)
         return _replace_day(plan, target, new_day)
 
     def describe(self, ctx):
@@ -861,7 +878,7 @@ class AcwrCap:
         if not candidates:
             return plan
         target_idx = max(candidates, key=lambda t: t[1])[0]
-        new_day = _rebuild_day(plan.plan[target_idx], "rest", ctx.pace_zones)
+        new_day = _rebuild_day(plan.plan[target_idx], "rest", ctx.pace_zones, ctx=ctx)
         return _replace_day(plan, target_idx, new_day)
 
     def describe(self, ctx):
@@ -964,7 +981,7 @@ class NonRestHasSteps:
             if v.day_index is None:
                 continue
             day = plan.plan[v.day_index]
-            new_day = _rebuild_day(day, day.session_type or "base", ctx.pace_zones)
+            new_day = _rebuild_day(day, day.session_type or "base", ctx.pace_zones, ctx=ctx)
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 

@@ -247,7 +247,10 @@ OUTPUT_SCHEMA = {
             "plannedMinutes": "integer >= 0",
             "workout": {
                 "workoutName": "must exactly equal workoutType",
-                "description": "string (한국어)",
+                "description": (
+                    "string (한국어 2-3문장: 오늘 이 훈련을 하는 이유, 좋아지는 능력, "
+                    "실행 포인트 포함)"
+                ),
                 "sportType": "RUNNING",
                 "steps": [
                     {
@@ -340,6 +343,16 @@ class LLMPromptTemplate:
             "Threshold 또는 Tempo Run 으로 선택하세요."
         )
 
+        sections.append(
+            "[코치 설명 작성 규칙]\n"
+            "각 workout.description 은 한국어 2-3문장으로 작성하세요.\n"
+            "- 오늘 이 훈련을 배치한 이유를 설명하세요.\n"
+            "- 어떤 능력이 좋아지는지 구체적으로 말하세요 "
+            "(예: 유산소 기반, 피로 저항력, 젖산 역치, 페이스 감각, 회복).\n"
+            "- 사용자가 실행 중 지킬 포인트를 한 문장으로 덧붙이세요.\n"
+            "- 한 구절짜리 일반 설명이나 workoutType 반복만 쓰지 마세요."
+        )
+
         if include_strength:
             sections.append(
                 "[근력 훈련 참고]\n"
@@ -429,6 +442,12 @@ class LLMPromptTemplate:
             f"{new_date.isoformat()} 1일치 세션만 새로 설계하세요.\n"
             "위 확정 세션과 연결되는 흐름을 고려하여 sessionType, workoutType, plannedMinutes, "
             "step 구조를 결정하세요."
+        )
+        sections.append(
+            "[코치 설명 작성 규칙]\n"
+            "workout.description 은 한국어 2-3문장으로 작성하세요. "
+            "오늘 이 훈련을 하는 이유, 좋아지는 능력, 실행 포인트를 모두 포함하고 "
+            "한 구절짜리 일반 설명은 쓰지 마세요."
         )
         if include_strength:
             sections.append(

@@ -32,6 +32,8 @@ class TestNoBackToBackQuality:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[1].session_type == "recovery"
+        assert "회복주" in fixed.plan[1].workout.description
+        assert "유산소 기반" in fixed.plan[1].workout.description
         assert rule.check(fixed, healthy_ctx) == []
 
     def test_corrector_preserves_long_run_when_quality_before_long_run(self, healthy_ctx):

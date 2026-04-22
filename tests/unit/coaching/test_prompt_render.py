@@ -207,6 +207,13 @@ class TestPromptSections:
         assert "Interval step 을 쓰지 마세요" in rendered
         assert "단일 10분 이상 continuous Interval step 금지" in rendered
 
+    def test_contains_description_contract(self, rendered):
+        assert "코치 설명 작성 규칙" in rendered
+        assert "오늘 이 훈련을 배치한 이유" in rendered
+        assert "어떤 능력이 좋아지는지" in rendered
+        assert "실행 중 지킬 포인트" in rendered
+        assert "한 구절짜리 일반 설명" in rendered
+
     def test_contains_output_schema(self, rendered):
         assert "출력 스키마" in rendered
         schema_json = json.dumps(OUTPUT_SCHEMA, ensure_ascii=False, sort_keys=True)
