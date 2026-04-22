@@ -1,11 +1,11 @@
-"""NonRestHasSteps + MinStepDuration + PaceZoneIntegrity."""
+"""NonRestHasSteps + MinStepDuration + PaceBandIntegrity."""
 
 from __future__ import annotations
 
 from running_coach.coaching.safety.rules import (
     MinStepDuration,
     NonRestHasSteps,
-    PaceZoneIntegrity,
+    PaceBandIntegrity,
 )
 from running_coach.models.training import DailyPlan, TrainingPlan, Workout
 
@@ -83,10 +83,26 @@ class TestMinStepDuration:
         assert rule.check(fixed, healthy_ctx) == []
 
 
-class TestPaceZoneIntegrity:
+class TestPaceBandIntegrity:
     def test_passes_with_zone_paces(self, healthy_ctx):
         plan = make_plan(["base", "quality", "base", "base", "base", "long_run", "rest"])
-        assert PaceZoneIntegrity().check(plan, healthy_ctx) == []
+        assert PaceBandIntegrity().check(plan, healthy_ctx) == []
+
+    def test_passes_with_llm_selected_pace_inside_band(self, healthy_ctx):
+        # base center is 6:45, but llm_driven may choose another safe easy pace.
+        adjusted_step = make_step("Run", 1800, "6:20")
+        days = make_plan(["base"] * 6 + ["rest"]).plan
+        days[0] = make_day(
+            days[0].date,
+            "base",
+            steps=[
+                make_step("Warmup", 600, "7:00"),
+                adjusted_step,
+                make_step("Cooldown", 300, "7:20"),
+            ],
+        )
+        plan = TrainingPlan(plan=days)
+        assert PaceBandIntegrity().check(plan, healthy_ctx) == []
 
     def test_detects_pace_outside_zones(self, healthy_ctx):
         # Run step 에 3:30 (interval 보다 빠른) 페이스 주입
@@ -102,11 +118,11 @@ class TestPaceZoneIntegrity:
             ],
         )
         plan = TrainingPlan(plan=days)
-        violations = PaceZoneIntegrity().check(plan, healthy_ctx)
+        violations = PaceBandIntegrity().check(plan, healthy_ctx)
         assert any(v.day_index == 0 for v in violations)
 
-    def test_corrector_overwrites_with_zone_pace(self, healthy_ctx):
-        rule = PaceZoneIntegrity()
+    def test_corrector_clamps_to_band_boundary(self, healthy_ctx):
+        rule = PaceBandIntegrity()
         fast_step = make_step("Run", 1800, "3:30")
         days = make_plan(["base"] * 6 + ["rest"]).plan
         days[0] = make_day(
@@ -121,6 +137,6 @@ class TestPaceZoneIntegrity:
         plan = TrainingPlan(plan=days)
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
-        # Run step pace 이 base zone (6:45) 으로 덮어써짐
-        assert fixed.plan[0].workout.steps[1].target_value == "6:45"
+        # Run step pace 이 base band 의 빠른 경계(6:00)로 clamp 됨
+        assert fixed.plan[0].workout.steps[1].target_value == "6:00"
         assert rule.check(fixed, healthy_ctx) == []

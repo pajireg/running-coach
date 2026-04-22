@@ -1,7 +1,7 @@
 """LLMDrivenPlanner: context → prompt → Gemini → Pydantic → SafetyValidator 파이프라인.
 
-알고리즘이 결정하는 것: 점수·pace zones·안전 제약.
-LLM 이 결정하는 것: 세션 타입 배치·주간 볼륨·duration·step 구성·phase 해석.
+알고리즘이 결정하는 것: 점수·pace safety bounds·안전 제약.
+LLM 이 결정하는 것: 세션 타입 배치·주간 볼륨·duration·step 구성·페이스·phase 해석.
 """
 
 from __future__ import annotations
@@ -126,7 +126,9 @@ class LLMDrivenPlanner:
                 len(existing_days),
             )
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_insufficient_days"],
             )
 
@@ -139,7 +141,9 @@ class LLMDrivenPlanner:
         except Exception as exc:
             logger.exception("CoachingContext 조립 실패; full replan fallback (%s)", exc)
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_context_error"],
             )
 
@@ -157,13 +161,17 @@ class LLMDrivenPlanner:
         except GeminiQuotaExceededError:
             logger.warning("Gemini quota 초과; full replan fallback")
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_quota"],
             )
         except Exception as exc:
             logger.exception("Gemini 호출 실패; full replan fallback (%s)", exc)
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_gemini_error"],
             )
 
@@ -172,7 +180,9 @@ class LLMDrivenPlanner:
         except Exception as exc:
             logger.exception("extend_plan 파싱 실패; full replan fallback (%s)", exc)
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_parse_error"],
             )
 
@@ -181,7 +191,9 @@ class LLMDrivenPlanner:
         except Exception as exc:
             logger.exception("TrainingPlan 조립 실패; full replan fallback (%s)", exc)
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_assemble_error"],
             )
 
@@ -197,7 +209,9 @@ class LLMDrivenPlanner:
                 len(result.violations),
             )
             return self.generate_plan(
-                metrics, race_config, include_strength=include_strength,
+                metrics,
+                race_config,
+                include_strength=include_strength,
                 replan_reasons=["extend_fallback_safety"],
             )
 

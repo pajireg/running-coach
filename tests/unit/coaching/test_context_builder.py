@@ -181,6 +181,9 @@ class TestCoachingContextBuilder:
         assert isinstance(ctx.pace_zones, PaceZones)
         # race target pace 4:58 = 298s → interval 273s = 4:33
         assert ctx.pace_zones.interval == "4:33"
+        assert ctx.pace_profile is not None
+        assert ctx.pace_profile.threshold_basis == "race_target_pace"
+        assert ctx.pace_profile.bands["interval"].fast == "4:08"
 
     def test_availability_map_keyed_by_weekday(self, builder, race):
         ctx = builder.build(_metrics(), race)

@@ -32,7 +32,7 @@ The current design is:
 
 The operating principle is:
 
-`Code owns safety. In llm_driven mode, the LLM owns coaching judgment inside hard bounds.`
+`Code owns safety bounds and evidence normalization. In llm_driven mode, the LLM owns coaching prescription inside those hard bounds.`
 
 ## Quick Start
 

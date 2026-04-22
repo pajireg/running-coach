@@ -14,9 +14,9 @@ Running Coach is not designed as an LLM-only workout generator. The coaching eng
 
 The design principle is:
 
-`Code owns safety. In llm_driven mode, the LLM owns coaching judgment inside hard bounds.`
+`Code owns safety bounds and evidence normalization. In llm_driven mode, the LLM owns coaching prescription inside those hard bounds.`
 
-Under `llm_driven` mode, the split shifts: code owns only hard safety bounds (scoring, pace zones, 15 safety rules), and the LLM owns coaching judgment (session placement, weekly volume, phase interpretation).
+Under `llm_driven` mode, the split shifts: code owns hard safety bounds (scoring, pace capability profile, pace safety bands, 15 safety rules), and the LLM owns coaching prescription (session placement, weekly volume, concrete pace prescription, phase interpretation).
 
 This document explains what the engine looks at, how it turns raw data into planning signals, and why the current architecture was chosen.
 
@@ -326,9 +326,9 @@ Signals that support faster base prescriptions:
 
 This means a base run might gradually move from `6:30/km` to `6:00/km` or faster, but only if the same effort remains genuinely easy.
 
-### Personalized pace-zone engine
+### Personalized pace capability profile
 
-Workout pace targets are no longer fixed constants. The planner builds a `PaceZoneEngine` output for each weekly skeleton and uses those targets in deterministic workout steps. In `llm_driven` mode, the same pace-zone system is passed to the prompt and enforced by `PaceZoneIntegrity`.
+Workout pace targets are no longer fixed constants. In `legacy` mode, the planner still uses `PaceZoneEngine` center paces to fill deterministic workout steps. In `llm_driven` mode, the prompt receives a pace capability profile: threshold evidence, reference center paces, and safety bands. The LLM chooses concrete target paces inside those bands.
 
 Priority order:
 
@@ -337,7 +337,7 @@ Priority order:
 - inferred threshold pace from PRs such as 5K, 10K, half marathon, or marathon
 - conservative default threshold pace when no pace data exists
 
-The engine calculates center paces for:
+The engine calculates reference center paces and safety bands for:
 
 - interval
 - threshold / tempo
@@ -345,7 +345,7 @@ The engine calculates center paces for:
 - recovery
 - warmup / cooldown
 
-Garmin still receives these as pace zones, not exact single-speed mandates. The target pace is the center of the zone, and `WorkoutManager` applies session-specific margins.
+Garmin still receives a pace zone around each selected target. In `llm_driven` mode, the selected target pace comes from the LLM and `PaceBandIntegrity` only clamps values that fall outside the safety band. `WorkoutManager` then applies session-specific margins for Garmin.
 
 ### Warmup and cooldown pace zones
 

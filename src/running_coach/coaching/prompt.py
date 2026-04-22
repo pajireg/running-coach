@@ -11,6 +11,7 @@ from dataclasses import asdict
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
+from ..core.pace_zones import PaceCapabilityProfile
 from .context import CoachingContext, CoachingScores
 
 if TYPE_CHECKING:
@@ -145,6 +146,11 @@ def _training_background_dict(ctx: CoachingContext) -> dict[str, Any]:
     }
 
 
+def _pace_capability_dict(ctx: CoachingContext) -> dict[str, object]:
+    profile = ctx.pace_profile or PaceCapabilityProfile.from_zones(ctx.pace_zones)
+    return profile.to_prompt_dict()
+
+
 OUTPUT_SCHEMA = {
     "weekly": {
         "summaryKo": "string (3-5문장, 한국어)",
@@ -209,8 +215,10 @@ class LLMPromptTemplate:
         sections.append("[스코어]\n" + _scores_block(ctx.scores))
 
         sections.append(
-            "[페이스 존 (targetValue 는 반드시 이 값 중 하나로 선택)]\n"
-            + _as_json(ctx.pace_zones.to_dict())
+            "[페이스 능력 프로파일]\n"
+            "referenceCenters 는 참고값이고 safetyBands 는 허용 범위입니다. "
+            "targetValue 는 선수 상태와 세션 의도에 맞춰 safetyBands 안에서 선택하세요.\n"
+            + _as_json(_pace_capability_dict(ctx))
         )
 
         sections.append("[지난 14일 실제 수행 이력 (raw)]\n" + _as_json(_execution_rows(ctx)))
@@ -248,7 +256,7 @@ class LLMPromptTemplate:
             "- 피로/부상 지표 경계선: Tempo Run 또는 Fartlek 으로 완충.\n"
             "- 최근 quality 수행력이 약했다면 이번 주는 Threshold 나 Tempo 로 base building.\n"
             "- 대회까지 남은 기간 / phase 에 맞춰 특이성(race pace 근접) 조절.\n"
-            "각 quality 세션은 step 구조와 pace 가 위 분류 기준에 맞아야 "
+            "각 quality 세션은 step 구조와 선택한 페이스가 위 분류 기준에 맞아야 "
             "safety validator 가 workoutName 을 올바르게 붙일 수 있습니다."
         )
 
@@ -266,7 +274,9 @@ class LLMPromptTemplate:
             "1. 이번 주 weekly_volume_target_km 를 결정하세요.\n"
             "2. 7일 각각의 sessionType (rest/recovery/base/quality/long_run) 을 결정하세요.\n"
             "3. 각 일자의 plannedMinutes 를 결정하세요.\n"
-            "4. 각 세션의 step 구조를 설계하고, 반드시 PaceZones 값을 targetValue 에 사용하세요.\n"
+            "4. 각 세션의 step 구조와 targetValue 페이스를 설계하세요. "
+            "페이스는 safetyBands 안에서 선택하되 referenceCenters 를 그대로 "
+            "복사할 필요는 없습니다.\n"
             "5. weekly.summaryKo (3-5문장, 한국어)와 phase / phaseReasonKo 를 작성하세요."
         )
 
@@ -309,8 +319,10 @@ class LLMPromptTemplate:
 
         sections.append("[스코어]\n" + _scores_block(ctx.scores))
         sections.append(
-            "[페이스 존 (targetValue 는 반드시 이 값 중 하나로 선택)]\n"
-            + _as_json(ctx.pace_zones.to_dict())
+            "[페이스 능력 프로파일]\n"
+            "referenceCenters 는 참고값이고 safetyBands 는 허용 범위입니다. "
+            "targetValue 는 새 세션 의도에 맞춰 safetyBands 안에서 선택하세요.\n"
+            + _as_json(_pace_capability_dict(ctx))
         )
         sections.append("[지난 14일 실제 수행 이력 (raw)]\n" + _as_json(_execution_rows(ctx)))
 
@@ -323,9 +335,7 @@ class LLMPromptTemplate:
         rules_block = "\n".join(f"- {line}" for line in safety_rules)
         sections.append("[반드시 지켜야 할 안전 원칙]\n" + rules_block)
 
-        sections.append(
-            "[확정된 6일 세션 — 이 세션들은 변경하지 마세요]\n" + _as_json(locked)
-        )
+        sections.append("[확정된 6일 세션 — 이 세션들은 변경하지 마세요]\n" + _as_json(locked))
         sections.append(
             f"[결정 과제]\n"
             f"{new_date.isoformat()} 1일치 세션만 새로 설계하세요.\n"
@@ -359,6 +369,7 @@ class LLMPromptTemplate:
             "today": ctx.today.isoformat(),
             "scores": asdict(ctx.scores),
             "paceZones": ctx.pace_zones.to_dict(),
+            "paceCapability": _pace_capability_dict(ctx),
             "availability": _availability_rows(ctx),
             "executionHistory14d": _execution_rows(ctx),
             "activeInjury": _active_injury_dict(ctx),

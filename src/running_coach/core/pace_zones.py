@@ -62,6 +62,81 @@ class PaceZones:
         }
 
 
+@dataclass(frozen=True)
+class PaceBand:
+    """Allowed pace range for an LLM-selected workout target.
+
+    Values are MM:SS/km strings. ``fast`` is the faster boundary and ``slow`` is
+    the slower boundary.
+    """
+
+    fast: str
+    slow: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"fast": self.fast, "slow": self.slow}
+
+
+@dataclass(frozen=True)
+class PaceCapabilityProfile:
+    """Evidence and safety bounds for LLM pace prescription.
+
+    ``zones`` keeps deterministic center paces for legacy planning and fallback
+    corrections. ``bands`` is the contract used by ``llm_driven``: the LLM may
+    choose any pace inside the relevant band.
+    """
+
+    threshold_seconds: int
+    threshold_basis: str
+    zones: PaceZones
+    bands: dict[str, PaceBand]
+
+    def to_prompt_dict(self) -> dict[str, object]:
+        return {
+            "thresholdEstimate": PaceZoneEngine._format_pace(self.threshold_seconds),
+            "thresholdBasis": self.threshold_basis,
+            "referenceCenters": self.zones.to_dict(),
+            "safetyBands": {key: band.to_dict() for key, band in sorted(self.bands.items())},
+        }
+
+    def band_for_step(self, step_type: str, session_type: str) -> PaceBand:
+        key = self._band_key_for_step(step_type, session_type)
+        return self.bands[key]
+
+    @classmethod
+    def from_zones(
+        cls,
+        zones: PaceZones,
+        threshold_seconds: Optional[int] = None,
+        threshold_basis: str = "unknown",
+    ) -> "PaceCapabilityProfile":
+        threshold = threshold_seconds or PaceZoneEngine._pace_to_seconds(zones.threshold) or 295
+        return cls(
+            threshold_seconds=threshold,
+            threshold_basis=threshold_basis,
+            zones=zones,
+            bands=PaceZoneEngine._bands_from_zones(zones),
+        )
+
+    @staticmethod
+    def _band_key_for_step(step_type: str, session_type: str) -> str:
+        if step_type == "Warmup":
+            return "recovery" if session_type == "recovery" else "warmup"
+        if step_type == "Cooldown":
+            return "cooldown"
+        if step_type == "Recovery":
+            return "recovery"
+        if step_type == "Interval":
+            return "interval"
+        if session_type == "recovery":
+            return "recovery"
+        if session_type == "long_run":
+            return "longRun"
+        if session_type == "quality":
+            return "qualityContinuous"
+        return "base"
+
+
 class PaceZoneEngine:
     """Derive workout paces from LT pace, PRs, or race goal pace."""
 
@@ -77,7 +152,7 @@ class PaceZoneEngine:
 
     @classmethod
     def calculate(cls, metrics: AdvancedMetrics, race_config: RaceConfig) -> PaceZones:
-        threshold_seconds = cls._threshold_seconds(metrics, race_config)
+        threshold_seconds, _ = cls._threshold_profile(metrics, race_config)
         return PaceZones(
             interval=cls._format_pace(threshold_seconds - 25),
             threshold=cls._format_pace(threshold_seconds + 5),
@@ -92,7 +167,32 @@ class PaceZoneEngine:
         )
 
     @classmethod
+    def profile(
+        cls,
+        metrics: AdvancedMetrics,
+        race_config: RaceConfig,
+    ) -> PaceCapabilityProfile:
+        """Build pace evidence and safety bands for LLM prescription."""
+        threshold_seconds, basis = cls._threshold_profile(metrics, race_config)
+        zones = cls.calculate(metrics, race_config)
+        return PaceCapabilityProfile(
+            threshold_seconds=threshold_seconds,
+            threshold_basis=basis,
+            zones=zones,
+            bands=cls._bands_from_zones(zones),
+        )
+
+    @classmethod
     def _threshold_seconds(cls, metrics: AdvancedMetrics, race_config: RaceConfig) -> int:
+        threshold_seconds, _ = cls._threshold_profile(metrics, race_config)
+        return threshold_seconds
+
+    @classmethod
+    def _threshold_profile(
+        cls,
+        metrics: AdvancedMetrics,
+        race_config: RaceConfig,
+    ) -> tuple[int, str]:
         lt_pace = (
             metrics.performance.lactate_threshold.pace
             if metrics.performance.lactate_threshold
@@ -100,11 +200,11 @@ class PaceZoneEngine:
         )
         parsed_lt = cls._pace_to_seconds(lt_pace)
         if parsed_lt is not None:
-            return parsed_lt
+            return parsed_lt, "garmin_lactate_threshold"
 
         race_target = cls._pace_to_seconds(race_config.target_pace)
         if race_target is not None:
-            return race_target
+            return race_target, "race_target_pace"
 
         pr_estimates = [
             estimate
@@ -112,9 +212,9 @@ class PaceZoneEngine:
             if (estimate := cls._threshold_from_pr(pr)) is not None
         ]
         if pr_estimates:
-            return min(pr_estimates)
+            return min(pr_estimates), "personal_record_estimate"
 
-        return cls.DEFAULT_THRESHOLD_SECONDS
+        return cls.DEFAULT_THRESHOLD_SECONDS, "conservative_default"
 
     @classmethod
     def _threshold_from_pr(cls, pr: PersonalRecord) -> Optional[int]:
@@ -150,3 +250,30 @@ class PaceZoneEngine:
     def _format_pace(seconds: int) -> str:
         bounded = max(180, min(seconds, 600))
         return f"{bounded // 60}:{bounded % 60:02d}"
+
+    @classmethod
+    def _bands_from_zones(cls, zones: PaceZones) -> dict[str, PaceBand]:
+        margins = {
+            "interval": 25,
+            "threshold": 20,
+            "tempo": 25,
+            "qualityContinuous": 35,
+            "base": 45,
+            "longRun": 50,
+            "recovery": 70,
+            "warmup": 70,
+            "cooldown": 80,
+        }
+        centers = {
+            **zones.to_dict(),
+            "qualityContinuous": zones.tempo,
+        }
+        bands: dict[str, PaceBand] = {}
+        for key, center in centers.items():
+            center_seconds = cls._pace_to_seconds(center) or cls.DEFAULT_THRESHOLD_SECONDS
+            margin = margins[key]
+            bands[key] = PaceBand(
+                fast=cls._format_pace(center_seconds - margin),
+                slow=cls._format_pace(center_seconds + margin),
+            )
+        return bands

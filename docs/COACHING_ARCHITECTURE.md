@@ -78,7 +78,7 @@ Responsible for translating stored state into a safe, explainable weekly plan.
 
 Main modules:
 
-- `src/running_coach/coaching/context.py` — `CoachingContextBuilder` assembles scores, pace zones, execution history, injuries, feedback, availability, training background into a `CoachingContext` dataclass
+- `src/running_coach/coaching/context.py` — `CoachingContextBuilder` assembles scores, pace capability profile, execution history, injuries, feedback, availability, training background into a `CoachingContext` dataclass
 - `src/running_coach/coaching/prompt.py` — `LLMPromptTemplate` renders the context as a deterministic Korean prompt (prompt-cache friendly, no threshold leakage)
 - `src/running_coach/coaching/safety/` — 15 safety rules + `SafetyValidator` with multi-pass auto-correction
 - `src/running_coach/coaching/planners/` — `Planner` protocol, `LegacySkeletonPlanner`, `LLMDrivenPlanner`
@@ -88,7 +88,7 @@ Responsibilities (by path):
 
 - `context.py`: turn raw history_service output into a typed context (chronic load, raw 14-day execution rows, staleness-tagged feedback, etc.)
 - `prompt.py`: emit a structured prompt including a training catalog (Interval, Threshold, Tempo Run, Fartlek, Long Run, Base Run, Recovery Run, Rest Day)
-- `safety/`: enforce hard constraints (date starts today, max one long run, no back-to-back quality, injury blocks, ACWR cap, minimum one rest, pace zone integrity, workout name standardization, etc.) with auto-correction
+- `safety/`: enforce hard constraints (date starts today, max one long run, no back-to-back quality, injury blocks, ACWR cap, minimum one rest, pace safety bands, workout name standardization, etc.) with auto-correction
 - `planners/llm_driven.py`: pipeline `CoachingContext → prompt → Gemini → Pydantic → SafetyValidator`; falls back to `LegacySkeletonPlanner` on parse/quota/unresolvable errors
 - `clients/gemini/planner.py`: skeleton-building utility reused by `LegacySkeletonPlanner`
 
@@ -187,7 +187,7 @@ The boundary depends on `COACH_PLANNER_MODE`.
 **Algorithm owns (hard bounds)**:
 
 - readiness / fatigue / injury scoring (`history_service`)
-- PaceZone calculation from LT / PR / race target
+- pace capability profile and safety bands from LT / PR / race target
 - replan-trigger detection (`summarize_plan_freshness`)
 - safety rules enforced via `SafetyValidator`:
   - plan starts today
@@ -200,7 +200,7 @@ The boundary depends on `COACH_PLANNER_MODE`.
   - weekly hard cap ≤ 2 sessions
   - respect availability / max duration / min 1 rest
   - weekly km / chronic-weekly ≤ 1.5 (ACWR cap) with structural + duration scaling
-  - step pace must match a PaceZone value
+  - step pace must stay inside the relevant pace safety band
   - non-rest days must have valid steps with ≥ 60s per step
   - workout name standardization by session type + step structure
 
@@ -210,6 +210,7 @@ The boundary depends on `COACH_PLANNER_MODE`.
 - weekly volume target
 - planned minutes per day
 - step structure (warmup/run/interval/recovery/cooldown layout)
+- concrete target pace within the safety bands
 - phase interpretation (base / build / peak / taper)
 - Korean rationale and risk acknowledgements
 - training variety selection (Interval vs Threshold vs Tempo vs Fartlek based on athlete state)
@@ -261,7 +262,7 @@ The system is designed to degrade gracefully.
 - planned-vs-actual interpretation feeds back into next-week planning
 - Google Calendar clearly separates future plans and completed activities
 - cross-training load and Garmin-native load are both incorporated
-- workout pace targets are personalized through `PaceZoneEngine` before Garmin upload
+- workout pace targets are personalized through deterministic center paces in `legacy` mode and LLM-selected paces inside safety bands in `llm_driven` mode
 
 ## Current Limits
 

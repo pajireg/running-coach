@@ -261,6 +261,14 @@ class TestHappyPath:
         plan = planner.generate_plan(_metrics(), RaceConfig())
         assert plan is not None
 
+    def test_llm_selected_safe_pace_is_preserved(self, planner, mock_gemini):
+        safe = _plan_json(["base", "quality", "base", "recovery", "base", "long_run", "rest"])
+        safe["plan"][0]["workout"]["steps"][1]["targetValue"] = "6:20"
+        mock_gemini.models.generate_content.return_value = _fake_gemini_response(safe)
+        plan = planner.generate_plan(_metrics(), RaceConfig())
+        assert plan is not None
+        assert plan.plan[0].workout.steps[1].target_value == "6:20"
+
 
 class TestFallback:
     def test_quota_exceeded_falls_back(self, planner, mock_gemini, legacy_fallback):

@@ -1,7 +1,7 @@
 """CoachingContext: LLM·SafetyValidator 에 전달되는 입력 모음.
 
 LLM 이 코칭 판단을 직접 내리기 위해 필요한 모든 raw context 를 담는다.
-점수화(readiness/fatigue/injury)와 pace zones 는 여전히 알고리즘이 결정하지만
+점수화(readiness/fatigue/injury)와 pace safety bounds 는 여전히 알고리즘이 결정하지만
 `planning_notes` 같은 해석이 담긴 문자열은 포함하지 않는다 (LLM 에 threshold leak 방지).
 """
 
@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, cast
 
-from ..core.pace_zones import PaceZoneEngine, PaceZones
+from ..core.pace_zones import PaceCapabilityProfile, PaceZoneEngine, PaceZones
 from ..models.config import RaceConfig
 from ..models.metrics import AdvancedMetrics
 
@@ -125,6 +125,7 @@ class CoachingContext:
     today: date
     scores: CoachingScores
     pace_zones: PaceZones
+    pace_profile: Optional[PaceCapabilityProfile] = None
     metrics: Optional[AdvancedMetrics] = None
     availability: Mapping[int, AvailabilitySlot] = field(default_factory=dict)
     execution_history_14d: list[ExecutionDay] = field(default_factory=list)
@@ -178,7 +179,8 @@ class CoachingContextBuilder:
         background_raw = self._history.summarize_training_background(as_of)
         coaching_state = background_raw.get("coachingState") or {}
         planning_constraints = background_raw.get("planningConstraints") or {}
-        pace_zones = self._pace_engine.calculate(metrics, race_config)
+        pace_profile = self._build_pace_profile(metrics, race_config)
+        pace_zones = pace_profile.zones
         scores = self._build_scores(coaching_state)
         availability = self._build_availability(planning_constraints.get("availability") or [])
         execution_history = self._build_execution_history(as_of)
@@ -198,6 +200,7 @@ class CoachingContextBuilder:
             metrics=metrics,
             scores=scores,
             pace_zones=pace_zones,
+            pace_profile=pace_profile,
             availability=availability,
             execution_history_14d=execution_history,
             active_injury=active_injury,
@@ -209,6 +212,16 @@ class CoachingContextBuilder:
         )
 
     # -- field builders -----------------------------------------------------
+
+    def _build_pace_profile(
+        self,
+        metrics: AdvancedMetrics,
+        race_config: RaceConfig,
+    ) -> PaceCapabilityProfile:
+        if hasattr(self._pace_engine, "profile"):
+            return cast(PaceCapabilityProfile, self._pace_engine.profile(metrics, race_config))
+        zones = self._pace_engine.calculate(metrics, race_config)
+        return PaceCapabilityProfile.from_zones(zones)
 
     def _build_scores(self, coaching_state: dict[str, Any]) -> CoachingScores:
         load = coaching_state.get("load") or {}

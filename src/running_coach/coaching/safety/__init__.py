@@ -1,4 +1,4 @@
-"""안전 제약 검증: 13개 하드 룰 + validator."""
+"""안전 제약 검증: hard safety rules + validator."""
 
 from .rules import (
     DEFAULT_SAFETY_RULES,

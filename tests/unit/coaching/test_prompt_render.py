@@ -118,7 +118,7 @@ def _full_ctx() -> CoachingContext:
 SAFETY_RULES = [
     "quality/long_run 세션 사이 최소 1일 간격을 둡니다.",
     "주간 최소 1일 휴식을 보장합니다.",
-    "모든 step pace 는 제공된 PaceZones 값만 사용합니다.",
+    "모든 step pace 는 pace safety band 안에서 선택합니다.",
 ]
 
 
@@ -141,9 +141,17 @@ class TestPromptSections:
         assert "부상 리스크 30" in rendered
         assert "활성 부상 severity 4" in rendered
 
-    def test_contains_pace_zones(self, rendered):
+    def test_contains_pace_capability_profile(self, rendered):
+        assert "페이스 능력 프로파일" in rendered
+        assert "safetyBands" in rendered
+        assert "referenceCenters" in rendered
         assert "4:30" in rendered  # interval
         assert "6:45" in rendered  # base
+
+    def test_does_not_force_copying_reference_paces(self, rendered):
+        assert "targetValue 는 반드시 이 값 중 하나로 선택" not in rendered
+        assert "반드시 PaceZones 값을 targetValue 에 사용" not in rendered
+        assert "그대로 복사할 필요는 없습니다" in rendered
 
     def test_contains_execution_history_raw(self, rendered):
         assert "2026-04-19" in rendered
@@ -212,6 +220,8 @@ class TestContextAsDict:
         assert d["today"] == "2026-04-20"
         assert d["scores"]["readiness"] == 68
         assert d["paceZones"]["interval"] == "4:30"
+        assert "paceCapability" in d
+        assert "safetyBands" in d["paceCapability"]
         assert len(d["executionHistory14d"]) == 1
         assert d["activeInjury"]["injuryArea"] == "right knee"
         assert len(d["recentFeedback"]) == 1

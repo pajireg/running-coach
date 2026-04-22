@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ...core.pace_zones import PaceZones
+    from ...core.pace_zones import PaceBand, PaceCapabilityProfile, PaceZones
     from ...models.training import DailyPlan, SessionType, TrainingPlan
     from ..context import CoachingContext
 
@@ -90,6 +90,39 @@ def _pace_for_step(
     session_type: str,
 ) -> str:
     return pace_zones.for_step(step_type, session_type)
+
+
+def _format_pace(seconds: int) -> str:
+    bounded = max(180, min(seconds, 600))
+    return f"{bounded // 60}:{bounded % 60:02d}"
+
+
+def _pace_profile(ctx: "CoachingContext") -> "PaceCapabilityProfile":
+    if ctx.pace_profile is not None:
+        return ctx.pace_profile
+    from ...core.pace_zones import PaceCapabilityProfile
+
+    return PaceCapabilityProfile.from_zones(ctx.pace_zones)
+
+
+def _pace_band_for_step(ctx: "CoachingContext", step_type: str, session_type: str) -> "PaceBand":
+    return _pace_profile(ctx).band_for_step(step_type, session_type)
+
+
+def _pace_within_band(pace_seconds: int, band: "PaceBand") -> bool:
+    fast = _pace_seconds(band.fast)
+    slow = _pace_seconds(band.slow)
+    if fast is None or slow is None:
+        return False
+    return fast <= pace_seconds <= slow
+
+
+def _clamp_pace_to_band(pace_seconds: int, band: "PaceBand") -> str:
+    fast = _pace_seconds(band.fast)
+    slow = _pace_seconds(band.slow)
+    if fast is None or slow is None:
+        return _format_pace(pace_seconds)
+    return _format_pace(max(fast, min(pace_seconds, slow)))
 
 
 def _step_dict(
@@ -864,53 +897,50 @@ class MinStepDuration:
         return "각 step duration 은 최소 60초입니다."
 
 
-class PaceZoneIntegrity:
-    """step pace 가 선수의 PaceZones 값 중 어느 것과도 ±5초 이상 다름 → 해당 스텝만 교체.
+class PaceBandIntegrity:
+    """step pace 가 선수의 pace safety band 밖이면 해당 스텝만 경계값으로 보정.
 
-    어느 zone 값을 쓸지는 LLM(코치)이 결정한다. 이 룰은 zone 시스템 밖의
-    임의 페이스만 차단하는 hard bound 역할을 한다.
+    어느 band 안에서 정확히 어떤 페이스를 쓸지는 LLM(코치)이 결정한다. 이 룰은
+    위험하게 빠르거나 느린 페이스만 차단하는 hard bound 역할을 한다.
     """
 
-    rule_id = "pace_zone_integrity"
+    rule_id = "pace_band_integrity"
     severity: Severity = "warn"
-    TOLERANCE_SECONDS = 5
 
     def check(self, plan, ctx):
-        zones_dict = ctx.pace_zones.to_dict()
-        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
         out: list[Violation] = []
         for i, day in enumerate(plan.plan):
             for j, s in enumerate(day.workout.steps):
                 if s.target_type != "speed":
                     continue
                 parsed = _pace_seconds(s.target_value or "")
+                band = _pace_band_for_step(ctx, s.type, day.session_type or "base")
                 if parsed is None:
-                    out.append(Violation(
-                        rule_id=self.rule_id,
-                        severity=self.severity,
-                        message=f"day {i} step {j} unparseable pace '{s.target_value}'",
-                        day_index=i,
-                    ))
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=f"day {i} step {j} unparseable pace '{s.target_value}'",
+                            day_index=i,
+                        )
+                    )
                     break
-                if not any(
-                    abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a
-                ):
-                    out.append(Violation(
-                        rule_id=self.rule_id,
-                        severity=self.severity,
-                        message=(
-                            f"day {i} step {j} ({s.type}) pace "
-                            f"{s.target_value} outside zone system"
-                        ),
-                        day_index=i,
-                    ))
+                if not _pace_within_band(parsed, band):
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=(
+                                f"day {i} step {j} ({s.type}) pace "
+                                f"{s.target_value} outside safety band {band.fast}-{band.slow}"
+                            ),
+                            day_index=i,
+                        )
+                    )
                     break
         return out
 
     def correct(self, plan, ctx, violations):
-        zones_dict = ctx.pace_zones.to_dict()
-        allowed_seconds = {_pace_seconds(v) for v in zones_dict.values() if _pace_seconds(v)}
-
         for v in violations:
             if v.day_index is None:
                 continue
@@ -924,18 +954,17 @@ class PaceZoneIntegrity:
                     new_steps.append(s)
                     continue
                 parsed = _pace_seconds(s.target_value or "")
-                # 존 시스템 안에 있으면 LLM 선택 유지
-                if parsed is not None and any(
-                    abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a
-                ):
+                band = _pace_band_for_step(ctx, s.type, day.session_type or "base")
+                if parsed is not None and _pace_within_band(parsed, band):
                     new_steps.append(s)
                     continue
-                # 존 밖: 해당 스텝 타입·세션에 맞는 존 값으로 교체
                 fallback_pace = _pace_for_step(ctx.pace_zones, s.type, day.session_type or "base")
+                fallback_seconds = _pace_seconds(fallback_pace) or _pace_seconds(band.slow) or 420
+                corrected_pace = _clamp_pace_to_band(parsed or fallback_seconds, band)
                 old_pace = s.target_value or ""
-                if old_pace and old_pace != fallback_pace and _PACE_RE.fullmatch(old_pace.strip()):
-                    description = description.replace(old_pace, fallback_pace)
-                new_steps.append(_build_step(s.type, s.duration_value, fallback_pace))
+                if old_pace and old_pace != corrected_pace and _PACE_RE.fullmatch(old_pace.strip()):
+                    description = description.replace(old_pace, corrected_pace)
+                new_steps.append(_build_step(s.type, s.duration_value, corrected_pace))
 
             new_workout = day.workout.model_copy(
                 update={"steps": new_steps, "description": description}
@@ -945,7 +974,13 @@ class PaceZoneIntegrity:
         return plan
 
     def describe(self, ctx):
-        return "모든 step pace 는 선수의 PaceZones 값 중 하나여야 합니다."
+        return (
+            "각 step pace 는 선수의 pace safety band 안에서 선택하세요. "
+            "밴드 안의 구체 페이스는 세션 의도와 선수 상태에 맞춰 결정할 수 있습니다."
+        )
+
+
+PaceZoneIntegrity = PaceBandIntegrity
 
 
 class StandardizeWorkoutName:
@@ -1097,6 +1132,6 @@ DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     NonRestHasSteps(),
     InjuryReduceVolume(),
     MinStepDuration(),
-    PaceZoneIntegrity(),
+    PaceBandIntegrity(),
     StandardizeWorkoutName(),  # 마지막: 구조 변경 다 끝난 후 이름 정규화
 ]
