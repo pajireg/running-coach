@@ -24,7 +24,7 @@ class TestNoBackToBackQuality:
     def test_detects_quality_then_long_run(self, healthy_ctx):
         plan = make_plan(["base", "quality", "long_run", "base", "base", "base", "rest"])
         violations = NoBackToBackQuality().check(plan, healthy_ctx)
-        assert [v.day_index for v in violations] == [2]
+        assert [v.day_index for v in violations] == [1]
 
     def test_corrector_demotes_second_to_recovery(self, healthy_ctx):
         rule = NoBackToBackQuality()
@@ -32,6 +32,15 @@ class TestNoBackToBackQuality:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[1].session_type == "recovery"
+        assert rule.check(fixed, healthy_ctx) == []
+
+    def test_corrector_preserves_long_run_when_quality_before_long_run(self, healthy_ctx):
+        rule = NoBackToBackQuality()
+        plan = make_plan(["base", "quality", "long_run", "base", "base", "base", "rest"])
+        violations = rule.check(plan, healthy_ctx)
+        fixed = rule.correct(plan, healthy_ctx, violations)
+        assert fixed.plan[1].session_type == "recovery"
+        assert fixed.plan[2].session_type == "long_run"
         assert rule.check(fixed, healthy_ctx) == []
 
 
@@ -71,4 +80,14 @@ class TestQuality48hSpacing:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[1].session_type == "recovery"
+        assert rule.check(fixed, healthy_ctx) == []
+
+    def test_corrector_preserves_long_run_when_quality_before_long_run(self, healthy_ctx):
+        rule = Quality48hSpacing()
+        plan = make_plan(["base", "quality", "long_run", "base", "base", "base", "rest"])
+        violations = rule.check(plan, healthy_ctx)
+        assert [v.day_index for v in violations] == [1]
+        fixed = rule.correct(plan, healthy_ctx, violations)
+        assert fixed.plan[1].session_type == "recovery"
+        assert fixed.plan[2].session_type == "long_run"
         assert rule.check(fixed, healthy_ctx) == []

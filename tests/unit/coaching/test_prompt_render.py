@@ -181,6 +181,12 @@ class TestPromptSections:
     def test_contains_availability(self, rendered):
         assert '"maxDurationMinutes": 60' in rendered
 
+    def test_contains_long_run_allowed_dates(self, rendered):
+        assert "세션 배치 하드 제약" in rendered
+        assert "longRunAllowedDates" in rendered
+        assert "Long Run MUST be placed on one of those dates" in rendered
+        assert '"date": "2026-04-25"' in rendered
+
     def test_contains_training_background(self, rendered):
         assert '"totalRunCount": 512' in rendered
 
@@ -230,6 +236,7 @@ class TestContextAsDict:
         assert d["paceZones"]["interval"] == "4:30"
         assert "paceCapability" in d
         assert "safetyBands" in d["paceCapability"]
+        assert d["placementConstraints"]["longRunAllowedDates"][0]["date"] == "2026-04-25"
         assert d["workoutCatalog"]["Threshold"]["sessionType"] == "quality"
         assert len(d["executionHistory14d"]) == 1
         assert d["activeInjury"]["injuryArea"] == "right knee"

@@ -524,12 +524,18 @@ Before the LLM is called, a rule engine decides:
 - long runs finished too hard shorten the next long run and reduce intensity pressure
 - recent key sessions increase short-term recovery demand; close follow-up quality or long-run
   sessions are allowed only when recovery, fatigue, injury, and execution-quality signals are stable
-- long runs prefer weekend and user-preferred long-run days
+- long runs must use user-preferred long-run availability dates when any exist in the
+  7-day horizon; otherwise they prefer available weekend days
 - quality prefers mid-week and user-preferred quality days
 - unavailable weekdays are forced to rest
 - high cross-training load reduces run days and quality count
 
 The LLM does not own the weekly structure. It operates inside this boundary.
+
+For `llm_driven`, the prompt includes concrete `longRunAllowedDates` derived from
+`availability_rules`, not only weekday numbers. If that list is non-empty, `Long Run`
+must be placed on one of those dates, and the safety validator enforces the same
+contract after parsing.
 
 ## LLM Role
 

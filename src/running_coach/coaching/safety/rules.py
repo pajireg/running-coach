@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Optional, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from ...core.pace_zones import PaceBand, PaceCapabilityProfile, PaceZones
@@ -420,6 +420,120 @@ class MaxOneLongRun:
         return "주간 장거리는 정확히 1회입니다."
 
 
+class PreferLongRunAvailability:
+    """long_run 은 사용자가 long_run 선호로 지정한 가용 요일에 배치."""
+
+    rule_id = "prefer_long_run_availability"
+    severity: Severity = "block"
+
+    @staticmethod
+    def _preferred_weekdays(ctx: "CoachingContext") -> set[int]:
+        return {
+            weekday
+            for weekday, slot in ctx.availability.items()
+            if slot.is_available and slot.preferred_session_type == "long_run"
+        }
+
+    def _candidate_indexes(self, plan: "TrainingPlan", ctx: "CoachingContext") -> list[int]:
+        preferred_weekdays = self._preferred_weekdays(ctx)
+        if not preferred_weekdays:
+            return []
+        return [
+            i
+            for i, day in enumerate(plan.plan)
+            if day.date.weekday() in preferred_weekdays
+            and ctx.availability_for(day.date.weekday()).is_available
+        ]
+
+    def check(self, plan, ctx):
+        preferred_indexes = self._candidate_indexes(plan, ctx)
+        if not preferred_indexes:
+            return []
+        out: list[Violation] = []
+        preferred_index_set = set(preferred_indexes)
+        for i, day in enumerate(plan.plan):
+            if day.session_type == "long_run" and i not in preferred_index_set:
+                out.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        severity=self.severity,
+                        message=(
+                            f"long_run on day {i} ignores preferred long-run weekdays; "
+                            "moving to preferred availability"
+                        ),
+                        day_index=i,
+                    )
+                )
+        return out
+
+    def correct(self, plan, ctx, violations):
+        preferred_indexes = self._candidate_indexes(plan, ctx)
+        if not preferred_indexes:
+            return plan
+        long_index = next((v.day_index for v in violations if v.day_index is not None), None)
+        if long_index is None:
+            return plan
+
+        old_long_day = plan.plan[long_index]
+        old_long_minutes = (
+            old_long_day.planned_minutes or old_long_day.workout.total_duration_minutes
+        )
+        target_index = self._choose_target_index(plan, ctx, preferred_indexes, old_long_minutes)
+        if target_index == long_index:
+            return plan
+
+        target_day = plan.plan[target_index]
+        replacement_type = cast("SessionType", target_day.session_type or "base")
+        replacement_minutes = (
+            target_day.planned_minutes or target_day.workout.total_duration_minutes
+        )
+
+        new_target = _rebuild_day(
+            target_day,
+            "long_run",
+            ctx.pace_zones,
+            planned_minutes=old_long_minutes,
+        )
+        new_old = _rebuild_day(
+            old_long_day,
+            replacement_type,
+            ctx.pace_zones,
+            planned_minutes=replacement_minutes,
+        )
+        plan = _replace_day(plan, target_index, new_target)
+        return _replace_day(plan, long_index, new_old)
+
+    @staticmethod
+    def _choose_target_index(
+        plan: "TrainingPlan",
+        ctx: "CoachingContext",
+        preferred_indexes: list[int],
+        long_run_minutes: int,
+    ) -> int:
+        def score(index: int) -> tuple[int, int, int]:
+            day = plan.plan[index]
+            weekday = day.date.weekday()
+            max_minutes = ctx.availability_for(weekday).max_duration_minutes
+            enough_time = int(max_minutes is None or max_minutes >= long_run_minutes)
+            weekend = int(weekday in {5, 6})
+            adjacent_hard = any(
+                0 <= adj < len(plan.plan) and _is_hard(plan.plan[adj])
+                for adj in (index - 1, index + 1)
+            )
+            return (enough_time, weekend, int(not adjacent_hard))
+
+        return max(preferred_indexes, key=score)
+
+    def describe(self, ctx):
+        preferred_weekdays = sorted(self._preferred_weekdays(ctx))
+        if preferred_weekdays:
+            return (
+                f"long_run 은 선호 long_run 요일({preferred_weekdays}) 중 "
+                "계획 범위에 있는 날짜에만 배치합니다."
+            )
+        return "long_run 선호 요일이 지정되어 있으면 해당 가용 요일에 배치합니다."
+
+
 class NoBackToBackQuality:
     """연속된 두 날 모두 quality/long_run 이면 뒷날을 recovery 로."""
 
@@ -430,12 +544,16 @@ class NoBackToBackQuality:
         out: list[Violation] = []
         for i in range(1, len(plan.plan)):
             if _is_hard(plan.plan[i]) and _is_hard(plan.plan[i - 1]):
+                target_index = i - 1 if plan.plan[i].session_type == "long_run" else i
                 out.append(
                     Violation(
                         rule_id=self.rule_id,
                         severity=self.severity,
-                        message=f"back-to-back hard sessions day {i-1}→{i}; demoting day {i}",
-                        day_index=i,
+                        message=(
+                            f"back-to-back hard sessions day {i-1}→{i}; "
+                            f"demoting day {target_index}"
+                        ),
+                        day_index=target_index,
                     )
                 )
         return out
@@ -506,13 +624,16 @@ class Quality48hSpacing:
         out: list[Violation] = []
         for a, b in zip(hard_idx, hard_idx[1:]):
             if b - a < 2:
+                target_index = a if plan.plan[b].session_type == "long_run" else b
                 # NoBackToBackQuality 가 i=b 인 경우 처리하므로 여기선 추가만
                 out.append(
                     Violation(
                         rule_id=self.rule_id,
                         severity=self.severity,
-                        message=f"hard sessions {a} and {b} within 48h; demoting {b}",
-                        day_index=b,
+                        message=(
+                            f"hard sessions {a} and {b} within 48h; " f"demoting {target_index}"
+                        ),
+                        day_index=target_index,
                     )
                 )
         return out
@@ -1179,6 +1300,7 @@ DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     PlanStartsToday(),  # 날짜 정합성 먼저
     InjuryBlockQuality(),
     MaxOneLongRun(),
+    PreferLongRunAvailability(),
     NoBackToBackQuality(),
     NoQualityAfterLongRun(),
     Quality48hSpacing(),

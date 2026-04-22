@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import timedelta
+
 from running_coach.coaching.safety.rules import (
     MaxOneLongRun,
     MinOneRestPerWeek,
+    PreferLongRunAvailability,
     WeeklyHardCap,
 )
 
 from .conftest import make_plan
+
+
+def _weekend_long_run_ctx(healthy_ctx):
+    return replace(
+        healthy_ctx,
+        availability={
+            **healthy_ctx.availability,
+            5: replace(
+                healthy_ctx.availability[5],
+                max_duration_minutes=90,
+                preferred_session_type="long_run",
+            ),
+            6: replace(
+                healthy_ctx.availability[6],
+                max_duration_minutes=90,
+                preferred_session_type="long_run",
+            ),
+        },
+    )
 
 
 class TestMaxOneLongRun:
@@ -29,6 +52,34 @@ class TestMaxOneLongRun:
         assert fixed.plan[1].session_type == "long_run"  # 첫 번째 유지
         assert fixed.plan[5].session_type == "base"
         assert rule.check(fixed, healthy_ctx) == []
+
+
+class TestPreferLongRunAvailability:
+    def test_passes_when_long_run_on_preferred_weekend(self, healthy_ctx):
+        ctx = _weekend_long_run_ctx(healthy_ctx)
+        plan = make_plan(["base", "quality", "base", "base", "base", "long_run", "rest"])
+        assert PreferLongRunAvailability().check(plan, ctx) == []
+
+    def test_detects_weekday_long_run_when_weekend_preferred(self, healthy_ctx):
+        ctx = _weekend_long_run_ctx(healthy_ctx)
+        plan = make_plan(["base", "quality", "long_run", "base", "base", "recovery", "rest"])
+        violations = PreferLongRunAvailability().check(plan, ctx)
+        assert [v.day_index for v in violations] == [2]
+
+    def test_corrector_moves_long_run_to_preferred_weekend(self, healthy_ctx):
+        ctx = _weekend_long_run_ctx(healthy_ctx)
+        rule = PreferLongRunAvailability()
+        plan = make_plan(
+            ["rest", "base", "quality", "recovery", "rest", "long_run", "base"],
+            start=healthy_ctx.today + timedelta(days=3),
+        )
+
+        fixed = rule.correct(plan, ctx, rule.check(plan, ctx))
+
+        assert fixed.plan[2].date.weekday() == 5
+        assert fixed.plan[2].session_type == "long_run"
+        assert fixed.plan[5].session_type == "quality"
+        assert rule.check(fixed, ctx) == []
 
 
 class TestWeeklyHardCap:

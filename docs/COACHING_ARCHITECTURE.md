@@ -194,6 +194,7 @@ The boundary depends on `COACH_PLANNER_MODE`.
   - active injury severity ≥ 6 → no quality, volume × 0.65
   - active injury severity 3–5 → no intervals, volume × 0.85
   - max one long_run per week
+  - long_run must use user-preferred long-run availability dates when present
   - no back-to-back hard sessions
   - no quality the day after long run
   - quality sessions ≥ 48h apart

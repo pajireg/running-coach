@@ -96,6 +96,31 @@ def _availability_rows(ctx: CoachingContext) -> list[dict[str, Any]]:
     ]
 
 
+def _placement_constraints(ctx: CoachingContext) -> dict[str, Any]:
+    plan_dates = [ctx.today + timedelta(days=i) for i in range(7)]
+    preferred_long_run_weekdays = sorted(
+        weekday
+        for weekday, slot in ctx.availability.items()
+        if slot.is_available and slot.preferred_session_type == "long_run"
+    )
+    long_run_allowed_dates = [
+        {
+            "date": d.isoformat(),
+            "weekday": d.weekday(),
+            "maxDurationMinutes": ctx.availability_for(d.weekday()).max_duration_minutes,
+        }
+        for d in plan_dates
+        if d.weekday() in preferred_long_run_weekdays
+    ]
+    return {
+        "longRunPlacementPolicy": (
+            "If longRunAllowedDates is non-empty, Long Run MUST be placed on one of those dates."
+        ),
+        "preferredLongRunWeekdays": preferred_long_run_weekdays,
+        "longRunAllowedDates": long_run_allowed_dates,
+    }
+
+
 def _active_injury_dict(ctx: CoachingContext) -> dict[str, Any]:
     inj = ctx.active_injury
     if not inj.is_active:
@@ -291,6 +316,7 @@ class LLMPromptTemplate:
         sections.append("[재계획 트리거 사유] " + _as_json(ctx.replan_reasons))
 
         sections.append("[주간 가용성] " + _as_json(_availability_rows(ctx)))
+        sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
 
         sections.append("[훈련 배경] " + _as_json(_training_background_dict(ctx)))
 
@@ -382,6 +408,8 @@ class LLMPromptTemplate:
 
         active_inj = _active_injury_dict(ctx)
         sections.append("[활성 부상] " + _as_json(active_inj))
+        sections.append("[주간 가용성] " + _as_json(_availability_rows(ctx)))
+        sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
         sections.append("[최근 주관적 피드백] " + _as_json(_feedback_rows(ctx)))
         sections.append("[훈련 블록] " + _as_json(_training_block_dict(ctx)))
         sections.append("[대회 컨텍스트] " + _as_json(_race_goal_dict(ctx)))
@@ -435,6 +463,7 @@ class LLMPromptTemplate:
             "paceCapability": _pace_capability_dict(ctx),
             "workoutCatalog": WORKOUT_CATALOG,
             "availability": _availability_rows(ctx),
+            "placementConstraints": _placement_constraints(ctx),
             "executionHistory14d": _execution_rows(ctx),
             "activeInjury": _active_injury_dict(ctx),
             "recentFeedback": _feedback_rows(ctx),

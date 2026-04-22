@@ -194,6 +194,7 @@ DB는 애플리케이션의 정본 상태 저장소입니다.
   - 활성 부상 severity ≥ 6 → quality 제거, 볼륨 × 0.65
   - 활성 부상 severity 3–5 → 인터벌 제거, 볼륨 × 0.85
   - 주간 long_run ≤ 1회
+  - 사용자 선호 long_run 가용 날짜가 있으면 long_run은 그 날짜 중 하나에 배치
   - 연속된 두 날 hard session 금지
   - long run 다음 날 quality 금지
   - quality 세션 사이 최소 48시간
