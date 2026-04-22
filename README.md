@@ -175,6 +175,8 @@ secret:
 
 ```ini
 ADMIN_API_KEY=change-me
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
 ```
 
 Run the admin web app locally with:
@@ -184,10 +186,9 @@ uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 Open `/admin` and enter the admin key. The first page manages global LLM
-defaults and per-user overrides for planner mode, provider, and model. Gemini
-model changes are applied to the next `llm_driven` plan generation. OpenAI and
-Anthropic provider values can be stored for admin configuration, but provider
-runtime clients still need to be connected before they can generate plans.
+defaults and per-user overrides for planner mode, provider, and model. Gemini,
+OpenAI, and Anthropic model changes are applied to the next `llm_driven` plan
+generation. OpenAI uses the Responses API, and Anthropic uses the Messages API.
 
 ## Quality Checks
 

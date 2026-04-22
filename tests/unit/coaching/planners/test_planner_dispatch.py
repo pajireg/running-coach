@@ -63,6 +63,32 @@ class TestGeminiClientDispatch:
         assert client.mode == "llm_driven"
         assert client.model == "gemini-custom"
 
+    def test_llm_driven_can_use_openai_provider(self, fake_genai_client, deps):
+        client = GeminiClient(
+            api_key="x",
+            mode="llm_driven",
+            model="gpt-test",
+            llm_provider="openai",
+            openai_api_key="openai-key",
+            **deps,
+        )
+        assert client.mode == "llm_driven"
+        assert client.llm_provider == "openai"
+        assert client._llm._llm_client.provider == "openai"
+
+    def test_llm_driven_can_use_anthropic_provider(self, fake_genai_client, deps):
+        client = GeminiClient(
+            api_key="x",
+            mode="llm_driven",
+            model="claude-test",
+            llm_provider="anthropic",
+            anthropic_api_key="anthropic-key",
+            **deps,
+        )
+        assert client.mode == "llm_driven"
+        assert client.llm_provider == "anthropic"
+        assert client._llm._llm_client.provider == "anthropic"
+
     def test_legacy_mode_invokes_legacy_planner(self, fake_genai_client, deps):
         client = GeminiClient(api_key="x", mode="legacy", **deps)
         with patch.object(client._legacy, "generate_plan", return_value=None) as legacy_call:

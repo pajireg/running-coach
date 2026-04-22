@@ -51,6 +51,19 @@ class GeminiResponseParseError(GeminiError):
     pass
 
 
+# LLM provider 관련 예외
+class LLMProviderError(RunningCoachError):
+    """LLM provider API 기본 에러"""
+
+    pass
+
+
+class LLMProviderResponseParseError(LLMProviderError):
+    """LLM provider 응답 파싱 실패"""
+
+    pass
+
+
 # Google Calendar 관련 예외
 class CalendarError(RunningCoachError):
     """Google Calendar 기본 에러"""

@@ -4,7 +4,9 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from google import genai
+from google.genai import types
 
+from ...clients.llm import AnthropicMessagesJSONClient, OpenAIResponsesJSONClient
 from ...config.constants import GEMINI_MODEL
 from ...exceptions import GeminiError
 from ...models.config import RaceConfig
@@ -12,6 +14,7 @@ from ...models.metrics import AdvancedMetrics
 from ...models.training import DailyPlan, TrainingPlan
 from ...utils.logger import get_logger
 from .planner import TrainingPlanner
+from .response_parser import parse_gemini_json
 
 if TYPE_CHECKING:
     from ...coaching.context import CoachingContextBuilder
@@ -22,6 +25,27 @@ logger = get_logger(__name__)
 
 
 PlannerMode = Literal["legacy", "llm_driven"]
+
+
+class GeminiJSONClient:
+    """Google Gemini JSON adapter."""
+
+    provider = "gemini"
+
+    def __init__(self, client: Any, model: str):
+        self._client = client
+        self.model = model
+
+    def invoke_json(self, prompt: str) -> dict[str, Any]:
+        response = self._client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        raw_text = response.text or ""
+        if not raw_text:
+            raise GeminiError("Empty response from Gemini")
+        return parse_gemini_json(raw_text)
 
 
 class GeminiClient:
@@ -35,6 +59,9 @@ class GeminiClient:
         api_key: str,
         mode: PlannerMode = "legacy",
         model: str = GEMINI_MODEL,
+        llm_provider: str = "gemini",
+        openai_api_key: Optional[str] = None,
+        anthropic_api_key: Optional[str] = None,
         context_builder: Optional["CoachingContextBuilder"] = None,
         safety_validator: Optional["SafetyValidator"] = None,
     ):
@@ -43,6 +70,7 @@ class GeminiClient:
 
         self.api_key = api_key
         self.model = model
+        self.llm_provider = llm_provider
         self.client = genai.Client(api_key=api_key)
         self.planner: TrainingPlanner = TrainingPlanner(self.client)
         self._mode: PlannerMode = mode
@@ -66,12 +94,24 @@ class GeminiClient:
             from ...coaching.planners.llm_driven import LLMDrivenPlanner
 
             assert isinstance(self._legacy, LegacySkeletonPlanner)
+            llm_client = None
+            if llm_provider == "openai":
+                llm_client = OpenAIResponsesJSONClient(
+                    api_key=openai_api_key or "",
+                    model=model,
+                )
+            elif llm_provider == "anthropic":
+                llm_client = AnthropicMessagesJSONClient(
+                    api_key=anthropic_api_key or "",
+                    model=model,
+                )
             self._llm = LLMDrivenPlanner(
                 gemini_client=self.client,
                 model=model,
                 context_builder=context_builder,
                 safety_validator=safety_validator,
                 legacy_fallback=self._legacy,
+                llm_client=llm_client,
             )
 
     @property
@@ -93,7 +133,7 @@ class GeminiClient:
         else:
             active = self._legacy
 
-        logger.info("훈련 계획 생성 (planner=%s)", self._mode)
+        logger.info("훈련 계획 생성 (planner=%s, llm_provider=%s)", self._mode, self.llm_provider)
         return active.generate_plan(
             metrics,
             race_config,

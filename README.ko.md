@@ -169,6 +169,8 @@ COACH_PLANNER_MODE=llm_driven
 
 ```ini
 ADMIN_API_KEY=change-me
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
 ```
 
 로컬에서 관리자 웹 앱을 실행하려면:
@@ -178,10 +180,9 @@ uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 `/admin`을 열고 관리자 키를 입력하면 전역 LLM 기본값과 사용자별 override의
-planner mode, provider, model을 변경할 수 있습니다. Gemini 모델 변경은 다음
-`llm_driven` 계획 생성부터 적용됩니다. OpenAI와 Anthropic provider 값은 관리자
-설정으로 저장할 수 있지만, 실제 계획 생성을 위해서는 provider 런타임 client 연결이
-후속으로 필요합니다.
+planner mode, provider, model을 변경할 수 있습니다. Gemini, OpenAI, Anthropic
+모델 변경은 다음 `llm_driven` 계획 생성부터 적용됩니다. OpenAI는 Responses API,
+Anthropic은 Messages API를 사용합니다.
 
 주요 서비스:
 

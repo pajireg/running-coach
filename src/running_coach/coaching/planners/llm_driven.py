@@ -1,4 +1,4 @@
-"""LLMDrivenPlanner: context → prompt → Gemini → Pydantic → SafetyValidator 파이프라인.
+"""LLMDrivenPlanner: context → prompt → LLM → Pydantic → SafetyValidator 파이프라인.
 
 알고리즘이 결정하는 것: 점수·pace safety bounds·안전 제약.
 LLM 이 결정하는 것: 세션 타입 배치·주간 볼륨·duration·step 구성·페이스·phase 해석.
@@ -9,8 +9,9 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING, Any, Optional, cast
 
-from ...clients.gemini.response_parser import parse_gemini_json
-from ...exceptions import GeminiQuotaExceededError, GeminiResponseParseError
+from ...clients.gemini.client import GeminiJSONClient
+from ...config.constants import GEMINI_MODEL
+from ...exceptions import GeminiQuotaExceededError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
 from ...models.training import DailyPlan, TrainingPlan
@@ -20,6 +21,7 @@ from ..safety.metrics import emit_plan_generated
 from ..safety.validator import SafetyValidator
 
 if TYPE_CHECKING:
+    from ...clients.llm import JSONLLMClient
     from ..context import CoachingContextBuilder
     from .legacy import LegacySkeletonPlanner
 
@@ -28,18 +30,23 @@ logger = get_logger(__name__)
 
 
 class LLMDrivenPlanner:
-    """Gemini 기반 Planner. Quota / 파싱 실패 시 legacy fallback."""
+    """LLM 기반 Planner. Quota / 파싱 실패 시 legacy fallback."""
 
     def __init__(
         self,
-        gemini_client: Any,
-        model: str,
+        *,
+        gemini_client: Any | None = None,
+        model: str | None = None,
         context_builder: "CoachingContextBuilder",
         safety_validator: SafetyValidator,
         legacy_fallback: "LegacySkeletonPlanner",
+        llm_client: "JSONLLMClient | None" = None,
     ):
-        self._client = gemini_client
-        self._model = model
+        if llm_client is None:
+            if gemini_client is None:
+                raise ValueError("gemini_client or llm_client is required")
+            llm_client = GeminiJSONClient(client=gemini_client, model=model or GEMINI_MODEL)
+        self._llm_client = llm_client
         self._context_builder = context_builder
         self._safety = safety_validator
         self._fallback = legacy_fallback
@@ -72,14 +79,14 @@ class LLMDrivenPlanner:
         )
 
         try:
-            raw_json = self._invoke_gemini(prompt)
+            raw_json = self._invoke_llm(prompt)
         except GeminiQuotaExceededError:
             logger.warning("Gemini quota 초과; legacy fallback")
             return self._legacy_fallback(
                 metrics, race_config, training_background, include_strength
             )
         except Exception as exc:
-            logger.exception("Gemini 호출 실패; legacy fallback (%s)", exc)
+            logger.exception("LLM 호출 실패; legacy fallback (%s)", exc)
             return self._legacy_fallback(
                 metrics, race_config, training_background, include_strength
             )
@@ -159,9 +166,9 @@ class LLMDrivenPlanner:
         )
 
         try:
-            raw_json = self._invoke_gemini(prompt)
+            raw_json = self._invoke_llm(prompt)
         except GeminiQuotaExceededError:
-            logger.warning("Gemini quota 초과; full replan fallback")
+            logger.warning("LLM quota 초과; full replan fallback")
             return self.generate_plan(
                 metrics,
                 race_config,
@@ -169,7 +176,7 @@ class LLMDrivenPlanner:
                 replan_reasons=["extend_fallback_quota"],
             )
         except Exception as exc:
-            logger.exception("Gemini 호출 실패; full replan fallback (%s)", exc)
+            logger.exception("LLM 호출 실패; full replan fallback (%s)", exc)
             return self.generate_plan(
                 metrics,
                 race_config,
@@ -226,19 +233,9 @@ class LLMDrivenPlanner:
 
     # ------------------------------------------------------------------
 
-    def _invoke_gemini(self, prompt: str) -> dict[str, Any]:
-        """Gemini structured JSON 호출. 재시도·파싱은 내부 메서드가 담당."""
-        from google.genai import types  # lazy import
-
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        raw_text = response.text or ""
-        if not raw_text:
-            raise GeminiResponseParseError("Empty response from Gemini")
-        return parse_gemini_json(raw_text)
+    def _invoke_llm(self, prompt: str) -> dict[str, Any]:
+        """Provider adapter 를 통해 structured JSON 호출."""
+        return self._llm_client.invoke_json(prompt)
 
     def _legacy_fallback(
         self,

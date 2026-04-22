@@ -46,9 +46,15 @@ class ServiceContainer:
             logger.warning("관리자 LLM 설정 로드 실패; 배포 기본값 사용 (%s)", exc)
 
         planner_mode = llm_settings.planner_mode
-        if llm_settings.llm_provider != "gemini" and planner_mode == "llm_driven":
+        missing_provider_key = (
+            llm_settings.llm_provider == "openai"
+            and not settings.openai_api_key
+            or llm_settings.llm_provider == "anthropic"
+            and not settings.anthropic_api_key
+        )
+        if missing_provider_key and planner_mode == "llm_driven":
             logger.warning(
-                "LLM provider=%s 는 아직 런타임 planner에 연결되지 않음; legacy planner 사용",
+                "LLM provider=%s API key 누락; legacy planner 사용",
                 llm_settings.llm_provider,
             )
             planner_mode = "legacy"
@@ -57,6 +63,9 @@ class ServiceContainer:
             api_key=settings.gemini_api_key,
             mode=planner_mode,
             model=llm_settings.llm_model,
+            llm_provider=llm_settings.llm_provider,
+            openai_api_key=settings.openai_api_key,
+            anthropic_api_key=settings.anthropic_api_key,
             context_builder=context_builder,
             safety_validator=safety_validator,
         )
