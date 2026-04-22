@@ -96,9 +96,8 @@ class TrainingPlanner:
             and recovery_too_hard_count == 0
             and long_run_too_hard_count == 0
         )
-        recent_key_session = (
-            (days_since_long_run is not None and days_since_long_run <= 1)
-            or (days_since_quality is not None and days_since_quality <= 1)
+        recent_key_session = (days_since_long_run is not None and days_since_long_run <= 1) or (
+            days_since_quality is not None and days_since_quality <= 1
         )
         recovery_demand_days = 0
         if fatigue >= 80 or injury >= 60 or active_injury_severity >= 6:
@@ -127,16 +126,12 @@ class TrainingPlanner:
             execution_adjustment_notes.append(note)
         if reduced_stimulus_count >= 2:
             baseline_weekly_km *= 0.92
-            note = (
-                "최근 계획보다 약한 자극으로 끝난 세션이 반복되어 이번 주 강도를 낮췄습니다."
-            )
+            note = "최근 계획보다 약한 자극으로 끝난 세션이 반복되어 이번 주 강도를 낮췄습니다."
             planning_notes.append(note)
             execution_adjustment_notes.append(note)
         if excessive_stimulus_count >= 2:
             baseline_weekly_km *= 0.9
-            note = (
-                "최근 계획보다 강한 자극이 반복되어 회복 비중을 늘리고 볼륨을 감산했습니다."
-            )
+            note = "최근 계획보다 강한 자극이 반복되어 회복 비중을 늘리고 볼륨을 감산했습니다."
             planning_notes.append(note)
             execution_adjustment_notes.append(note)
 
@@ -187,15 +182,11 @@ class TrainingPlanner:
             execution_adjustment_notes.append(note)
         elif unplanned_session_count >= 2:
             quality_count = max(0, quality_count - 1)
-            note = (
-                "최근 비계획 세션이 누적되어 이번 주는 계획 단순성과 회복을 우선합니다."
-            )
+            note = "최근 비계획 세션이 누적되어 이번 주는 계획 단순성과 회복을 우선합니다."
             planning_notes.append(note)
             execution_adjustment_notes.append(note)
         elif unplanned_easy_count >= 2:
-            note = (
-                "최근 비계획 easy/base 세션이 있어 주간 총량은 유지하되 강도 증가는 억제합니다."
-            )
+            note = "최근 비계획 easy/base 세션이 있어 주간 총량은 유지하되 강도 증가는 억제합니다."
             planning_notes.append(note)
             execution_adjustment_notes.append(note)
         if recovery_too_hard_count >= 1:
@@ -256,8 +247,7 @@ class TrainingPlanner:
         quality_candidates = [
             i
             for i, day in enumerate(days)
-            if day["date"].weekday() in {1, 2, 3}
-            and abs(i - long_run_index) > 1
+            if day["date"].weekday() in {1, 2, 3} and abs(i - long_run_index) > 1
         ]
         preferred_quality_indexes = [
             i for i, day in enumerate(days) if day["date"].weekday() in preferred_quality_days
@@ -284,10 +274,11 @@ class TrainingPlanner:
 
         # 불가 요일은 이미 강제 휴식이므로 추가 rest 배치 개수에서 차감
         forced_rest_count = sum(
-            1 for day in days
-            if not availability_map.get(
-                cast(Any, day["date"]).weekday(), {}
-            ).get("isAvailable", True)
+            1
+            for day in days
+            if not availability_map.get(cast(Any, day["date"]).weekday(), {}).get(
+                "isAvailable", True
+            )
         )
         rest_days = max(0, 7 - run_days - forced_rest_count)
         recovery_pool = []
@@ -480,11 +471,7 @@ class TrainingPlanner:
     ) -> str:
         notes: list[str] = []
         unavailability_note = next(
-            (
-                note
-                for note in planning_notes
-                if "불가 요일" in note and current_date in note
-            ),
+            (note for note in planning_notes if "불가 요일" in note and current_date in note),
             "",
         )
         if session_type == "long_run" and day_index == long_run_index:
@@ -515,11 +502,7 @@ class TrainingPlanner:
         elif session_type == "base":
             notes.extend(note for note in planning_notes if "비러닝" in note or "주간 목표" in note)
             adjustment_note = next(
-                (
-                    note
-                    for note in execution_adjustment_notes
-                    if "비계획" in note or "회복" in note
-                ),
+                (note for note in execution_adjustment_notes if "비계획" in note or "회복" in note),
                 "",
             )
             if adjustment_note:
@@ -534,9 +517,7 @@ class TrainingPlanner:
                 (
                     note
                     for note in execution_adjustment_notes
-                    if "약한 자극" in note
-                    or "강한 자극" in note
-                    or "비계획 고강도" in note
+                    if "약한 자극" in note or "강한 자극" in note or "비계획 고강도" in note
                 ),
                 "",
             )

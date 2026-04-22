@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 from google import genai
 from google.genai import types
 
-from ...clients.llm import AnthropicMessagesJSONClient, OpenAIResponsesJSONClient
+from ...clients.llm import AnthropicMessagesJSONClient, JSONLLMClient, OpenAIResponsesJSONClient
 from ...config.constants import GEMINI_MODEL
 from ...exceptions import GeminiError
 from ...models.config import RaceConfig
@@ -94,7 +94,7 @@ class GeminiClient:
             from ...coaching.planners.llm_driven import LLMDrivenPlanner
 
             assert isinstance(self._legacy, LegacySkeletonPlanner)
-            llm_client = None
+            llm_client: Optional[JSONLLMClient] = None
             if llm_provider == "openai":
                 llm_client = OpenAIResponsesJSONClient(
                     api_key=openai_api_key or "",

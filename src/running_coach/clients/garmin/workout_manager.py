@@ -3,20 +3,6 @@
 from datetime import date
 from typing import Any, Optional, cast
 
-from garminconnect.workout import (  # type: ignore[import-untyped]
-    ConditionType,
-    ExecutableStep,
-    RunningWorkout,
-    SportType,
-    StepType,
-    TargetType,
-    WorkoutSegment,
-    create_cooldown_step,
-    create_interval_step,
-    create_recovery_step,
-    create_warmup_step,
-)
-
 from ...config.constants import (
     DEFAULT_PACE_MARGIN,
     STEP_TYPE_MAP,
@@ -27,6 +13,15 @@ from ...utils.logger import get_logger
 from ...utils.time_utils import pace_to_ms
 
 logger = get_logger(__name__)
+
+SPORT_TYPE_RUNNING = 1
+STEP_TYPE_WARMUP = 1
+STEP_TYPE_COOLDOWN = 2
+STEP_TYPE_INTERVAL = 3
+STEP_TYPE_RECOVERY = 4
+STEP_TYPE_REST = 5
+CONDITION_TYPE_TIME = 2
+TARGET_TYPE_NO_TARGET = 1
 
 
 class WorkoutManager:
@@ -129,9 +124,14 @@ class WorkoutManager:
         self.garmin.garth.delete("connectapi", url, api=True)
 
     def _build_workout_payload(self, workout: Workout) -> dict[str, Any]:
-        """Garmin typed workout 모델과 동일한 JSON 생성."""
+        """Garmin workout upload JSON 생성.
+
+        garminconnect.workout 의 typed Pydantic 모델은 0.3.x 기준 Pydantic v1
+        Config 문법을 사용해 deprecation warning 을 발생시킨다. 업로드 API는
+        dict payload 를 받으므로 동일한 JSON 구조를 직접 구성한다.
+        """
         sport_type = {
-            "sportTypeId": SportType.RUNNING,
+            "sportTypeId": SPORT_TYPE_RUNNING,
             "sportTypeKey": "running",
             "displayOrder": 1,
         }
@@ -155,19 +155,20 @@ class WorkoutManager:
                 )
             )
 
-        workout_payload = RunningWorkout(
-            workoutName=workout.workout_name,
-            description=workout.description,
-            estimatedDurationInSecs=total_duration,
-            workoutSegments=[
-                WorkoutSegment(
-                    segmentOrder=1,
-                    sportType=sport_type,
-                    workoutSteps=executable_steps,
-                )
+        return {
+            "workoutName": workout.workout_name,
+            "sportType": sport_type,
+            "estimatedDurationInSecs": total_duration,
+            "workoutSegments": [
+                {
+                    "segmentOrder": 1,
+                    "sportType": sport_type,
+                    "workoutSteps": executable_steps,
+                }
             ],
-        )
-        return cast(dict[str, Any], workout_payload.to_dict())
+            "author": {},
+            "description": workout.description,
+        }
 
     def _target_payload(
         self,
@@ -175,9 +176,9 @@ class WorkoutManager:
         workout: Workout,
     ) -> tuple[dict[str, Any], Optional[float], Optional[float]]:
         target_dict = {
-            "workoutTargetTypeId": TargetType.NO_TARGET,
+            "workoutTargetTypeId": TARGET_TYPE_NO_TARGET,
             "workoutTargetTypeKey": "no.target",
-            "displayOrder": TargetType.NO_TARGET,
+            "displayOrder": TARGET_TYPE_NO_TARGET,
         }
         if step.target_type != "speed":
             return target_dict, None, None
@@ -229,40 +230,53 @@ class WorkoutManager:
         target_dict: dict[str, Any],
         target_val_one: Optional[float],
         target_val_two: Optional[float],
-    ) -> ExecutableStep:
+    ) -> dict[str, Any]:
         if step_type_key == "warmup":
-            step_payload = create_warmup_step(
-                duration_val,
-                step_order=order,
-                target_type=target_dict,
-            )
+            step_type = {
+                "stepTypeId": STEP_TYPE_WARMUP,
+                "stepTypeKey": "warmup",
+                "displayOrder": 1,
+            }
         elif step_type_key == "cooldown":
-            step_payload = create_cooldown_step(
-                duration_val, step_order=order, target_type=target_dict
-            )
+            step_type = {
+                "stepTypeId": STEP_TYPE_COOLDOWN,
+                "stepTypeKey": "cooldown",
+                "displayOrder": 2,
+            }
         elif step_type_key == "recovery":
-            step_payload = create_recovery_step(
-                duration_val, step_order=order, target_type=target_dict
-            )
+            step_type = {
+                "stepTypeId": STEP_TYPE_RECOVERY,
+                "stepTypeKey": "recovery",
+                "displayOrder": 4,
+            }
+        elif step_type_key == "rest":
+            step_type = {
+                "stepTypeId": STEP_TYPE_REST,
+                "stepTypeKey": "rest",
+                "displayOrder": STEP_TYPE_REST,
+            }
         else:
-            step_payload = create_interval_step(
-                duration_val, step_order=order, target_type=target_dict
-            )
-            if step_type_key == "rest":
-                step_payload.stepType = {
-                    "stepTypeId": StepType.REST,
-                    "stepTypeKey": "rest",
-                    "displayOrder": StepType.REST,
-                }
-                step_payload.endCondition = {
-                    "conditionTypeId": ConditionType.TIME,
-                    "conditionTypeKey": "time",
-                    "displayOrder": ConditionType.TIME,
-                    "displayable": True,
-                }
+            step_type = {
+                "stepTypeId": STEP_TYPE_INTERVAL,
+                "stepTypeKey": "interval",
+                "displayOrder": 3,
+            }
 
+        step_payload: dict[str, Any] = {
+            "type": "ExecutableStepDTO",
+            "stepOrder": order,
+            "stepType": step_type,
+            "endCondition": {
+                "conditionTypeId": CONDITION_TYPE_TIME,
+                "conditionTypeKey": "time",
+                "displayOrder": CONDITION_TYPE_TIME,
+                "displayable": True,
+            },
+            "endConditionValue": duration_val,
+            "targetType": target_dict,
+        }
         if target_val_one is not None:
-            step_payload.targetValueOne = target_val_one
+            step_payload["targetValueOne"] = target_val_one
         if target_val_two is not None:
-            step_payload.targetValueTwo = target_val_two
+            step_payload["targetValueTwo"] = target_val_two
         return step_payload

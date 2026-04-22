@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "garminconnect>=0.3.0",
+    "garminconnect>=0.3.3",
     "google-api-python-client==2.187.0",
     "google-auth-httplib2==0.3.0",
     "google-auth-oauthlib==1.2.3",

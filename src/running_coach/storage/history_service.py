@@ -234,23 +234,27 @@ class CoachingHistoryService:
         """현재 계획이 최신 데이터 기준으로 재사용 가능한지 요약."""
         athlete_id = self._athlete_id()
         end_date = as_of + timedelta(days=horizon_days - 1)
-        plan_row = self._fetchone(
-            """
+        plan_row = (
+            self._fetchone(
+                """
             SELECT COUNT(*) AS active_plan_days
             FROM planned_workouts
             WHERE athlete_id = %(athlete_id)s
               AND source = %(source)s
               AND workout_date BETWEEN %(as_of)s AND %(end_date)s
             """,
-            {
-                "athlete_id": athlete_id,
-                "source": WORKOUT_SOURCE,
-                "as_of": as_of,
-                "end_date": end_date,
-            },
-        ) or {}
-        decision_row = self._fetchone(
-            """
+                {
+                    "athlete_id": athlete_id,
+                    "source": WORKOUT_SOURCE,
+                    "as_of": as_of,
+                    "end_date": end_date,
+                },
+            )
+            or {}
+        )
+        decision_row = (
+            self._fetchone(
+                """
             SELECT created_at AS last_plan_created_at,
                    decision_date AS last_plan_decision_date,
                    rationale
@@ -260,10 +264,13 @@ class CoachingHistoryService:
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id},
-        ) or {}
-        metric_row = self._fetchone(
-            """
+                {"athlete_id": athlete_id},
+            )
+            or {}
+        )
+        metric_row = (
+            self._fetchone(
+                """
             SELECT
                 metric_date,
                 sleep_score,
@@ -276,16 +283,21 @@ class CoachingHistoryService:
             ORDER BY metric_date DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
-        activity_row = self._fetchone(
-            """
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
+        activity_row = (
+            self._fetchone(
+                """
             SELECT MAX(created_at) AS latest_activity_created_at
             FROM activities
             WHERE athlete_id = %(athlete_id)s
             """,
-            {"athlete_id": athlete_id},
-        ) or {}
+                {"athlete_id": athlete_id},
+            )
+            or {}
+        )
 
         active_plan_days = int(plan_row.get("active_plan_days") or 0)
         last_plan_created_at = decision_row.get("last_plan_created_at")
@@ -307,8 +319,9 @@ class CoachingHistoryService:
         # 새 활동이 계획된 워크아웃을 정상 이수한 것인지 확인
         execution_row: dict[str, Any] = {}
         if has_new_activity and last_plan_created_at is not None:
-            execution_row = self._fetchone(
-                """
+            execution_row = (
+                self._fetchone(
+                    """
                 SELECT we.target_match_score
                 FROM workout_executions we
                 JOIN activities a ON a.activity_id = we.activity_id
@@ -318,8 +331,10 @@ class CoachingHistoryService:
                 ORDER BY a.created_at DESC
                 LIMIT 1
                 """,
-                {"athlete_id": athlete_id, "since": last_plan_created_at},
-            ) or {}
+                    {"athlete_id": athlete_id, "since": last_plan_created_at},
+                )
+                or {}
+            )
         latest_execution_score = execution_row.get("target_match_score")
         activity_is_normal_execution = (
             latest_execution_score is not None
@@ -333,8 +348,9 @@ class CoachingHistoryService:
         missed_end_date = as_of - timedelta(days=1)
         missed_row: dict[str, Any] = {}
         if missed_start_date <= missed_end_date:
-            missed_row = self._fetchone(
-                """
+            missed_row = (
+                self._fetchone(
+                    """
                 SELECT
                     COUNT(*) AS missed_workout_count,
                     COUNT(*) FILTER (
@@ -379,14 +395,16 @@ class CoachingHistoryService:
                   AND NOT pw.is_rest
                   AND we.workout_execution_id IS NULL
                 """,
-                {
-                    "athlete_id": athlete_id,
-                    "source": WORKOUT_SOURCE,
-                    "missed_start_date": missed_start_date,
-                    "missed_end_date": missed_end_date,
-                    "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
-                },
-            ) or {}
+                    {
+                        "athlete_id": athlete_id,
+                        "source": WORKOUT_SOURCE,
+                        "missed_start_date": missed_start_date,
+                        "missed_end_date": missed_end_date,
+                        "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
+                    },
+                )
+                or {}
+            )
         missed_workout_count = int(missed_row.get("missed_workout_count") or 0)
         missed_long_run_count = int(missed_row.get("missed_long_run_count") or 0)
         missed_quality_count = int(missed_row.get("missed_quality_count") or 0)
@@ -492,9 +510,11 @@ class CoachingHistoryService:
             try:
                 daily = DailyPlan.model_validate(
                     {
-                        "date": row["workout_date"].isoformat()
-                        if hasattr(row["workout_date"], "isoformat")
-                        else str(row["workout_date"]),
+                        "date": (
+                            row["workout_date"].isoformat()
+                            if hasattr(row["workout_date"], "isoformat")
+                            else str(row["workout_date"])
+                        ),
                         "workout": workout_data,
                     }
                 )
@@ -1180,8 +1200,9 @@ class CoachingHistoryService:
             """,
             {"athlete_id": athlete_id, "cutoff": as_of - timedelta(days=365)},
         )
-        lifetime_row = self._fetchone(
-            """
+        lifetime_row = (
+            self._fetchone(
+                """
             SELECT
                 COUNT(*) AS total_run_count,
                 ROUND(COALESCE(SUM(distance_km), 0)::numeric, 2) AS total_distance_km,
@@ -1191,8 +1212,10 @@ class CoachingHistoryService:
             WHERE athlete_id = %(athlete_id)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             """,
-            {"athlete_id": athlete_id},
-        ) or {}
+                {"athlete_id": athlete_id},
+            )
+            or {}
+        )
 
         return {
             "recent6Weeks": [
@@ -1315,8 +1338,9 @@ class CoachingHistoryService:
             """,
             {"athlete_id": athlete_id},
         )
-        goal_row = self._fetchone(
-            """
+        goal_row = (
+            self._fetchone(
+                """
             SELECT goal_name, race_date, distance, goal_time, target_pace, priority
             FROM race_goals
             WHERE athlete_id = %(athlete_id)s
@@ -1325,10 +1349,13 @@ class CoachingHistoryService:
             ORDER BY priority ASC, race_date ASC NULLS LAST
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
-        block_row = self._fetchone(
-            """
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
+        block_row = (
+            self._fetchone(
+                """
             SELECT phase, starts_on, ends_on, focus, weekly_volume_target_km
             FROM training_blocks
             WHERE athlete_id = %(athlete_id)s
@@ -1337,8 +1364,10 @@ class CoachingHistoryService:
             ORDER BY starts_on DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
         return {
             "availability": [
                 {
@@ -1384,8 +1413,9 @@ class CoachingHistoryService:
         """최근 수행/주관 피드백/부상 상태를 반영한 코칭 상태 요약."""
         athlete_id = self._athlete_id()
         adherence_window_days = 42
-        load_row = self._fetchone(
-            """
+        load_row = (
+            self._fetchone(
+                """
             SELECT
                 ROUND(COALESCE(SUM(CASE
                     WHEN activity_date >= %(d7)s THEN distance_km ELSE 0
@@ -1430,16 +1460,19 @@ class CoachingHistoryService:
               AND activity_date >= %(d28)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             """,
-            {
-                "athlete_id": athlete_id,
-                "d7": as_of - timedelta(days=6),
-                "d14": as_of - timedelta(days=13),
-                "d21": as_of - timedelta(days=20),
-                "d28": as_of - timedelta(days=27),
-            },
-        ) or {}
-        load_variability_row = self._fetchone(
-            """
+                {
+                    "athlete_id": athlete_id,
+                    "d7": as_of - timedelta(days=6),
+                    "d14": as_of - timedelta(days=13),
+                    "d21": as_of - timedelta(days=20),
+                    "d28": as_of - timedelta(days=27),
+                },
+            )
+            or {}
+        )
+        load_variability_row = (
+            self._fetchone(
+                """
             WITH day_series AS (
                 SELECT generate_series(%(d7)s::date, %(as_of)s::date, interval '1 day')::date AS day
             ),
@@ -1504,12 +1537,14 @@ class CoachingHistoryService:
                 COUNT(*) FILTER (WHERE load_units > 0) AS active_days
             FROM normalized_loads
             """,
-            {
-                "athlete_id": athlete_id,
-                "d7": as_of - timedelta(days=6),
-                "as_of": as_of,
-            },
-        ) or {}
+                {
+                    "athlete_id": athlete_id,
+                    "d7": as_of - timedelta(days=6),
+                    "as_of": as_of,
+                },
+            )
+            or {}
+        )
         daily_load_rows = self._fetchall(
             """
             WITH day_series AS (
@@ -1565,8 +1600,9 @@ class CoachingHistoryService:
         acute_ewma_load = self._ewma_load(daily_load_rows, span_days=7)
         chronic_ewma_load = self._ewma_load(daily_load_rows, span_days=28)
         ewma_load_ratio = self._ewma_ratio(acute_ewma_load, chronic_ewma_load)
-        recovery_row = self._fetchone(
-            """
+        recovery_row = (
+            self._fetchone(
+                """
             SELECT
                 body_battery,
                 hrv,
@@ -1582,10 +1618,13 @@ class CoachingHistoryService:
             ORDER BY metric_date DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
-        adherence_row = self._fetchone(
-            """
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
+        adherence_row = (
+            self._fetchone(
+                """
             WITH recent_plans AS (
                 SELECT planned_workout_id, is_rest, workout_date
                 FROM planned_workouts
@@ -1642,16 +1681,19 @@ class CoachingHistoryService:
                 (SELECT count FROM unplanned) AS unplanned_run_count
             FROM plan_status
             """,
-            {
-                "athlete_id": athlete_id,
-                "source": WORKOUT_SOURCE,
-                "from_date": as_of - timedelta(days=adherence_window_days - 1),
-                "to_date": as_of,
-                "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
-            },
-        ) or {}
-        execution_pattern_row = self._fetchone(
-            """
+                {
+                    "athlete_id": athlete_id,
+                    "source": WORKOUT_SOURCE,
+                    "from_date": as_of - timedelta(days=adherence_window_days - 1),
+                    "to_date": as_of,
+                    "meaningful_match_threshold": MEANINGFUL_MATCH_THRESHOLD,
+                },
+            )
+            or {}
+        )
+        execution_pattern_row = (
+            self._fetchone(
+                """
             SELECT
                 COUNT(*) FILTER (
                     WHERE execution_payload->>'executionStatus' = 'completed_as_planned'
@@ -1705,14 +1747,17 @@ class CoachingHistoryService:
             WHERE athlete_id = %(athlete_id)s
               AND execution_date BETWEEN %(from_date)s AND %(to_date)s
             """,
-            {
-                "athlete_id": athlete_id,
-                "from_date": as_of - timedelta(days=13),
-                "to_date": as_of,
-            },
-        ) or {}
-        feedback_row = self._fetchone(
-            """
+                {
+                    "athlete_id": athlete_id,
+                    "from_date": as_of - timedelta(days=13),
+                    "to_date": as_of,
+                },
+            )
+            or {}
+        )
+        feedback_row = (
+            self._fetchone(
+                """
             SELECT
                 feedback_date,
                 fatigue_score,
@@ -1728,10 +1773,13 @@ class CoachingHistoryService:
             ORDER BY feedback_date DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
-        injury_row = self._fetchone(
-            """
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
+        injury_row = (
+            self._fetchone(
+                """
             SELECT
                 injury_area,
                 severity,
@@ -1744,8 +1792,10 @@ class CoachingHistoryService:
             ORDER BY severity DESC, status_date DESC
             LIMIT 1
             """,
-            {"athlete_id": athlete_id, "as_of": as_of},
-        ) or {}
+                {"athlete_id": athlete_id, "as_of": as_of},
+            )
+            or {}
+        )
 
         readiness_score = self._readiness_score_from_history(
             load_row,
@@ -2624,12 +2674,15 @@ class CoachingHistoryService:
     ) -> float:
         planned_category = self._planned_workout_category(candidate)
         target_duration = self._int_or_none(candidate.get("total_duration_seconds"))
-        target_match = self._target_match_score(
-            planned_category=planned_category,
-            actual_category=actual_category,
-            target_duration=target_duration,
-            actual_duration=actual_duration,
-        ) or 0.0
+        target_match = (
+            self._target_match_score(
+                planned_category=planned_category,
+                actual_category=actual_category,
+                target_duration=target_duration,
+                actual_duration=actual_duration,
+            )
+            or 0.0
+        )
         offset_days = self._planned_workout_offset_days(activity_date, candidate)
         if offset_days == 0:
             date_score = 1.0
@@ -2729,16 +2782,18 @@ class CoachingHistoryService:
             * history_confidence
         )
         score += (
-            CoachingHistoryService._completion_rate(
-                adherence_row.get("matched_workout_count"),
-                adherence_row.get("planned_workout_count"),
+            (
+                CoachingHistoryService._completion_rate(
+                    adherence_row.get("matched_workout_count"),
+                    adherence_row.get("planned_workout_count"),
+                )
+                - 0.65
             )
-            - 0.65
-        ) * 25 * history_confidence
-        score -= float(adherence_row.get("unplanned_run_count") or 0.0) * 2.5 * history_confidence
-        score -= (
-            float(adherence_row.get("skipped_workout_count") or 0.0) * 3.0 * history_confidence
+            * 25
+            * history_confidence
         )
+        score -= float(adherence_row.get("unplanned_run_count") or 0.0) * 2.5 * history_confidence
+        score -= float(adherence_row.get("skipped_workout_count") or 0.0) * 3.0 * history_confidence
         score += (float(recovery_row.get("body_battery") or 50.0) - 50.0) * 0.35
         score += (float(recovery_row.get("sleep_score") or 70.0) - 70.0) * 0.12
         score += (float(recovery_row.get("hrv") or 60.0) - 60.0) * 0.08

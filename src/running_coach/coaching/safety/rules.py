@@ -1008,8 +1008,9 @@ class StandardizeWorkoutName:
         continuous_name = cls._continuous_interval_name(day, ctx)
         if continuous_name:
             return continuous_name
-        if day.workout_type in {"Interval", "Threshold", "Tempo Run", "Fartlek"}:
-            return day.workout_type
+        workout_type = str(day.workout_type)
+        if workout_type in {"Interval", "Threshold", "Tempo Run", "Fartlek"}:
+            return workout_type
         return cls._classify_quality(day, ctx)
 
     @staticmethod

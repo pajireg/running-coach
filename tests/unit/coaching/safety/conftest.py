@@ -26,8 +26,8 @@ DEFAULT_ZONES = PaceZones(
     base="6:45",
     long_run="6:40",
     recovery="7:20",
-    warmup="7:00",   # base(6:45)보다 15s 느림 — Pfitzinger 기준
-    cooldown="7:20", # recovery pace — 가장 편안한 속도
+    warmup="7:00",  # base(6:45)보다 15s 느림 — Pfitzinger 기준
+    cooldown="7:20",  # recovery pace — 가장 편안한 속도
 )
 
 

@@ -1,12 +1,12 @@
 """설정 관리"""
 
 from datetime import date
-from typing import Literal, Optional
+from typing import Literal, Optional, cast
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..models.config import RaceConfig
-from ..models.llm_settings import LLMSettings
+from ..models.llm_settings import LLMProvider, LLMSettings
 from .constants import (
     DEFAULT_DB_NAME,
     DEFAULT_LLM_MODEL,
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     coach_planner_mode: Literal["legacy", "llm_driven"] = "legacy"
 
     # 배포 기본 LLM 설정. DB admin/system settings 값이 우선한다.
-    llm_provider: str = DEFAULT_LLM_PROVIDER
+    llm_provider: LLMProvider = cast(LLMProvider, DEFAULT_LLM_PROVIDER)
     llm_model: str = DEFAULT_LLM_MODEL
 
     # 후속 provider client 연결용 서비스 비밀값

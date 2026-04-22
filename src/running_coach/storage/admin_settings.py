@@ -34,10 +34,12 @@ class AdminSettingsService:
             {"keys": [KEY_PLANNER_MODE, KEY_PROVIDER, KEY_MODEL]},
         )
         values = {str(row["setting_key"]): str(row["setting_value"]) for row in rows}
-        return LLMSettings(
-            planner_mode=values.get(KEY_PLANNER_MODE, self.deployment_defaults.planner_mode),
-            llm_provider=values.get(KEY_PROVIDER, self.deployment_defaults.llm_provider),
-            llm_model=values.get(KEY_MODEL, self.deployment_defaults.llm_model),
+        return LLMSettings.model_validate(
+            {
+                "planner_mode": values.get(KEY_PLANNER_MODE, self.deployment_defaults.planner_mode),
+                "llm_provider": values.get(KEY_PROVIDER, self.deployment_defaults.llm_provider),
+                "llm_model": values.get(KEY_MODEL, self.deployment_defaults.llm_model),
+            }
         )
 
     def update_global_llm_settings(self, patch: AdminLLMSettingsPatch) -> LLMSettings:
@@ -79,10 +81,12 @@ class AdminSettingsService:
         override_planner_mode = row.get("planner_mode")
         override_provider = row.get("llm_provider")
         override_model = row.get("llm_model")
-        effective = LLMSettings(
-            planner_mode=override_planner_mode or global_settings.planner_mode,
-            llm_provider=override_provider or global_settings.llm_provider,
-            llm_model=override_model or global_settings.llm_model,
+        effective = LLMSettings.model_validate(
+            {
+                "planner_mode": override_planner_mode or global_settings.planner_mode,
+                "llm_provider": override_provider or global_settings.llm_provider,
+                "llm_model": override_model or global_settings.llm_model,
+            }
         )
         return UserLLMSettings(
             user_id=user_id,

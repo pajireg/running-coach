@@ -5,13 +5,11 @@ from running_coach.exceptions import GeminiResponseParseError
 
 
 def test_parse_gemini_json_strips_markdown_fence():
-    parsed = parse_gemini_json(
-        """
+    parsed = parse_gemini_json("""
         ```json
         {"plan": [{"date": "2026-04-22"}]}
         ```
-        """
-    )
+        """)
 
     assert parsed == {"plan": [{"date": "2026-04-22"}]}
 

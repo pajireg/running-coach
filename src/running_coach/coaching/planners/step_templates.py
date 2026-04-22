@@ -53,7 +53,7 @@ class StepTemplateEngine:
     - Run @ tempo pace → "Tempo Run"
     """
 
-    _WARMUP = 600   # 10 min
+    _WARMUP = 600  # 10 min
     _COOLDOWN = 300  # 5 min
     _SHORT_WU = 300  # 5 min (recovery 세션)
 
