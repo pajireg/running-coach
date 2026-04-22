@@ -192,6 +192,14 @@ class TestPromptSections:
         assert "결정 과제" in rendered
         assert "weekly_volume_target_km" in rendered
         assert "sessionType" in rendered
+        assert "workoutType" in rendered
+
+    def test_contains_workout_catalog_contract(self, rendered):
+        assert "훈련 카탈로그" in rendered
+        assert "workout.workoutName 은 반드시 workoutType 과 정확히 같은 문자열" in rendered
+        assert "Threshold/Tempo Run 은 continuous quality" in rendered
+        assert "Interval step 을 쓰지 마세요" in rendered
+        assert "단일 10분 이상 continuous Interval step 금지" in rendered
 
     def test_contains_output_schema(self, rendered):
         assert "출력 스키마" in rendered
@@ -222,6 +230,7 @@ class TestContextAsDict:
         assert d["paceZones"]["interval"] == "4:30"
         assert "paceCapability" in d
         assert "safetyBands" in d["paceCapability"]
+        assert d["workoutCatalog"]["Threshold"]["sessionType"] == "quality"
         assert len(d["executionHistory14d"]) == 1
         assert d["activeInjury"]["injuryArea"] == "right knee"
         assert len(d["recentFeedback"]) == 1

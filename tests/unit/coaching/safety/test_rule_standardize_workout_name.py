@@ -39,6 +39,7 @@ class TestStandardizeWorkoutName:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[0].workout.workout_name == "Rest Day"
+        assert fixed.plan[0].workout_type == "Rest Day"
         assert rule.check(fixed, healthy_ctx) == []
 
     def test_quality_without_interval_becomes_tempo_run(self, healthy_ctx):
@@ -64,6 +65,33 @@ class TestStandardizeWorkoutName:
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[1].workout.workout_name == "Tempo Run"
 
+    def test_single_long_interval_at_threshold_becomes_threshold_run(self, healthy_ctx):
+        rule = StandardizeWorkoutName()
+        from .conftest import make_step
+
+        threshold_steps = [
+            make_step("Warmup", 600, "7:00"),
+            make_step("Interval", 1200, "5:00"),
+            make_step("Cooldown", 600, "7:20"),
+        ]
+        days = [make_day(healthy_ctx.today + timedelta(days=i), "base") for i in range(7)]
+        days[1] = make_day(
+            healthy_ctx.today + timedelta(days=1),
+            "quality",
+            workout_name="Interval",
+            steps=threshold_steps,
+        )
+        plan = TrainingPlan(plan=days)
+        violations = rule.check(plan, healthy_ctx)
+        assert any(v.day_index == 1 for v in violations)
+
+        fixed = rule.correct(plan, healthy_ctx, violations)
+
+        assert fixed.plan[1].workout.workout_name == "Threshold"
+        assert fixed.plan[1].workout_type == "Threshold"
+        assert [s.type for s in fixed.plan[1].workout.steps] == ["Warmup", "Run", "Cooldown"]
+        assert rule.check(fixed, healthy_ctx) == []
+
     def test_long_run_gets_long_run_name(self, healthy_ctx):
         rule = StandardizeWorkoutName()
         days = [make_day(healthy_ctx.today + timedelta(days=i), "base") for i in range(7)]
@@ -72,3 +100,4 @@ class TestStandardizeWorkoutName:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert fixed.plan[0].workout.workout_name == "Long Run"
+        assert fixed.plan[0].workout_type == "Long Run"
