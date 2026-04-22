@@ -39,6 +39,16 @@ def test_workout_step_normalizes_pace_suffix():
     assert step.target_value == "4:45"
 
 
+def test_daily_plan_backfills_workout_type_from_canonical_name():
+    start = date(2026, 4, 17)
+    payload = [_day_payload(start + timedelta(days=i), workout_name="Threshold") for i in range(7)]
+
+    plan = TrainingPlan.model_validate({"plan": payload})
+
+    assert plan.plan[0].session_type == "quality"
+    assert plan.plan[0].workout_type == "Threshold"
+
+
 def test_training_plan_requires_consecutive_dates():
     start = date(2026, 4, 17)
     payload = {"plan": [_day_payload(start + timedelta(days=i)) for i in range(7)]}

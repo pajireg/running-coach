@@ -1005,14 +1005,45 @@ class StandardizeWorkoutName:
     def _expected_name(cls, day, ctx=None) -> str:
         if day.session_type != "quality":
             return cls._STANDARD.get(day.session_type or "base", "Base Run")
+        continuous_name = cls._continuous_interval_name(day, ctx)
+        if continuous_name:
+            return continuous_name
+        if day.workout_type in {"Interval", "Threshold", "Tempo Run", "Fartlek"}:
+            return day.workout_type
         return cls._classify_quality(day, ctx)
 
     @staticmethod
-    def _classify_quality(day, ctx=None) -> str:
+    def _continuous_interval_name(day, ctx=None) -> str | None:
+        """LLM이 continuous quality block을 Interval step으로 낸 경우 보정."""
+        if ctx is None:
+            return None
+        interval_steps = [s for s in day.workout.steps if s.type == "Interval"]
+        if len(interval_steps) != 1:
+            return None
+        step = interval_steps[0]
+        if step.duration_value < 600:
+            return None
+        pace_sec = _pace_seconds(step.target_value or "")
+        if pace_sec is None:
+            return None
+        zones = ctx.pace_zones.to_dict()
+        threshold_sec = _pace_seconds(zones.get("threshold", ""))
+        if threshold_sec is not None and abs(pace_sec - threshold_sec) <= 5:
+            return "Threshold"
+        tempo_sec = _pace_seconds(zones.get("tempo", ""))
+        if tempo_sec is not None and abs(pace_sec - tempo_sec) <= 5:
+            return "Tempo Run"
+        return None
+
+    @classmethod
+    def _classify_quality(cls, day, ctx=None) -> str:
         """quality 세션의 step 구성·페이스로 구체 훈련 종류를 판별."""
         steps = day.workout.steps
         interval_steps = [s for s in steps if s.type == "Interval"]
         if interval_steps:
+            continuous_name = cls._continuous_interval_name(day, ctx)
+            if continuous_name:
+                return continuous_name
             # Fartlek: Interval duration 이 서로 다르게 섞였으면 (1.5배 이상 차이)
             if len(interval_steps) >= 2:
                 durations = [s.duration_value for s in interval_steps]
@@ -1037,11 +1068,35 @@ class StandardizeWorkoutName:
             return "Threshold"
         return "Tempo Run"
 
+    @classmethod
+    def _normalized_steps(cls, day, ctx):
+        expected = cls._expected_name(day, ctx)
+        if expected not in {"Threshold", "Tempo Run"}:
+            return day.workout.steps
+        if not cls._continuous_interval_name(day, ctx):
+            return day.workout.steps
+        return [
+            (
+                _build_step(
+                    "Run",
+                    s.duration_value,
+                    s.target_value or "0:00",
+                    target_type=s.target_type,
+                )
+                if s.type == "Interval"
+                else s
+            )
+            for s in day.workout.steps
+        ]
+
     def check(self, plan, ctx):
         out: list[Violation] = []
         for i, day in enumerate(plan.plan):
             expected = self._expected_name(day, ctx)
-            if day.workout.workout_name != expected:
+            normalized_steps = self._normalized_steps(day, ctx)
+            steps_changed = normalized_steps != day.workout.steps
+            type_changed = day.workout_type != expected
+            if day.workout.workout_name != expected or type_changed or steps_changed:
                 out.append(
                     Violation(
                         rule_id=self.rule_id,
@@ -1060,8 +1115,10 @@ class StandardizeWorkoutName:
                 continue
             day = plan.plan[v.day_index]
             expected = self._expected_name(day, ctx)
-            new_workout = day.workout.model_copy(update={"workout_name": expected})
-            new_day = day.model_copy(update={"workout": new_workout})
+            new_workout = day.workout.model_copy(
+                update={"workout_name": expected, "steps": self._normalized_steps(day, ctx)}
+            )
+            new_day = day.model_copy(update={"workout": new_workout, "workout_type": expected})
             plan = _replace_day(plan, v.day_index, new_day)
         return plan
 

@@ -2077,6 +2077,9 @@ class CoachingHistoryService:
     def _serialize_daily_plan(day: DailyPlan) -> dict[str, Any]:
         return {
             "date": day.date.isoformat(),
+            "sessionType": day.session_type,
+            "workoutType": day.workout_type,
+            "plannedMinutes": day.planned_minutes,
             "workout": day.workout.model_dump(by_alias=True),
         }
 

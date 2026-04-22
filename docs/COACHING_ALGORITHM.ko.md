@@ -537,6 +537,8 @@ LLM은 다음을 담당합니다.
 
 - 세션 설명
 - 워크아웃 step 상세
+- 허용된 `sessionType` 안에서 canonical workout type 선택 (`Interval`, `Threshold`,
+  `Tempo Run`, `Fartlek` 등)
 - 레이스 맥락 설명
 - 코칭 문장 다듬기
 
@@ -552,6 +554,10 @@ LLM이 하면 안 되는 것:
 - 잘못된 pace 형식 제거
 - 0초 step 보정
 - 잘못된 날짜나 이름 수정
+- `workoutType`, `sessionType`, `workout.workoutName`은 훈련 카탈로그와 일치해야
+  하며, 불일치가 남으면 safety layer가 최종 방어선으로 보정
+- threshold/tempo 페이스의 단일 장시간 `Interval` step은 continuous `Run` 블록으로
+  정규화하고 `Threshold` 또는 `Tempo Run`으로 이름을 맞춤
 - 명백히 잘못된 step은 안전한 fallback으로 교체
 
 ## 왜 이런 구조인가

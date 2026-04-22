@@ -537,6 +537,8 @@ The LLM is used for:
 
 - workout descriptions
 - workout-step detail
+- canonical workout type selection (`Interval`, `Threshold`, `Tempo Run`, `Fartlek`,
+  etc.) inside the allowed `sessionType`
 - race-context explanation
 - coaching-language refinement
 
@@ -552,6 +554,10 @@ After generation, output is normalized again:
 - invalid pace formats are removed
 - zero-duration steps are fixed
 - wrong dates or workout names are corrected
+- `workoutType`, `sessionType`, and `workout.workoutName` are expected to match the
+  workout catalog; the safety layer still corrects mismatches as a final guard
+- a single long `Interval` step at threshold or tempo pace is normalized as a continuous
+  `Run` block and named `Threshold` or `Tempo Run`
 - invalid steps can be replaced by safe fallbacks
 
 ## Why This Design

@@ -8,6 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 SessionType = Literal["rest", "recovery", "base", "quality", "long_run"]
 PhaseType = Literal["base", "build", "peak", "taper", "maintenance"]
+WorkoutType = Literal[
+    "Rest Day",
+    "Recovery Run",
+    "Base Run",
+    "Interval",
+    "Threshold",
+    "Tempo Run",
+    "Fartlek",
+    "Long Run",
+]
 
 
 class WorkoutStep(BaseModel):
@@ -91,11 +101,27 @@ def infer_session_type_from_name(workout_name: str) -> SessionType:
     return "base"
 
 
+def infer_workout_type_from_name(workout_name: str) -> Optional[WorkoutType]:
+    """Canonical workoutName → workout_type 추론."""
+    canonical: tuple[WorkoutType, ...] = (
+        "Rest Day",
+        "Recovery Run",
+        "Base Run",
+        "Interval",
+        "Threshold",
+        "Tempo Run",
+        "Fartlek",
+        "Long Run",
+    )
+    return next((name for name in canonical if workout_name == name), None)
+
+
 class DailyPlan(BaseModel):
     """일일 계획"""
 
     date: date
     session_type: Optional[SessionType] = Field(default=None, alias="sessionType")
+    workout_type: Optional[WorkoutType] = Field(default=None, alias="workoutType")
     planned_minutes: Optional[int] = Field(default=None, ge=0, alias="plannedMinutes")
     workout: Workout
 
@@ -106,6 +132,8 @@ class DailyPlan(BaseModel):
         """session_type / planned_minutes 미지정 시 workout 에서 추론."""
         if self.session_type is None:
             self.session_type = infer_session_type_from_name(self.workout.workout_name)
+        if self.workout_type is None:
+            self.workout_type = infer_workout_type_from_name(self.workout.workout_name)
         if self.planned_minutes is None:
             self.planned_minutes = self.workout.total_duration_minutes
         return self

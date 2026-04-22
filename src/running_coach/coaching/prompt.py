@@ -151,6 +151,59 @@ def _pace_capability_dict(ctx: CoachingContext) -> dict[str, object]:
     return profile.to_prompt_dict()
 
 
+WORKOUT_CATALOG = {
+    "Rest Day": {
+        "sessionType": "rest",
+        "stepContract": "steps 는 비우거나 Rest step 만 사용",
+        "paceIntent": "완전 휴식",
+    },
+    "Recovery Run": {
+        "sessionType": "recovery",
+        "stepContract": "Warmup + Run + Cooldown, main Run 은 recovery pace",
+        "paceIntent": "매우 편안한 회복 주",
+    },
+    "Base Run": {
+        "sessionType": "base",
+        "stepContract": "Warmup + Run + Cooldown, main Run 은 base pace",
+        "paceIntent": "유산소 기반과 주간 볼륨",
+    },
+    "Interval": {
+        "sessionType": "quality",
+        "stepContract": (
+            "반복 Interval step + Recovery step. Interval 반복 구간은 동일 duration. "
+            "단일 10분 이상 continuous Interval step 금지"
+        ),
+        "paceIntent": "VO2max/무산소 자극, interval pace",
+    },
+    "Threshold": {
+        "sessionType": "quality",
+        "stepContract": (
+            "Warmup + Run(+Recovery+Run 가능) + Cooldown. "
+            "threshold 페이스 continuous 또는 split Run block. Interval step 금지"
+        ),
+        "paceIntent": "젖산 역치 능력, threshold pace",
+    },
+    "Tempo Run": {
+        "sessionType": "quality",
+        "stepContract": "Warmup + Run + Cooldown. tempo 페이스 continuous Run. Interval step 금지",
+        "paceIntent": "지속력과 race-supporting aerobic strength, tempo pace",
+    },
+    "Fartlek": {
+        "sessionType": "quality",
+        "stepContract": (
+            "Interval step + Recovery step 반복. Interval duration 을 불규칙하게 구성 "
+            "(가장 긴 반복이 가장 짧은 반복의 1.5배 이상)"
+        ),
+        "paceIntent": "변속 적응과 부담을 낮춘 quality",
+    },
+    "Long Run": {
+        "sessionType": "long_run",
+        "stepContract": "Warmup + Run + Cooldown, main Run 은 long_run pace",
+        "paceIntent": "지구력과 fatigue resistance",
+    },
+}
+
+
 OUTPUT_SCHEMA = {
     "weekly": {
         "summaryKo": "string (3-5문장, 한국어)",
@@ -163,9 +216,12 @@ OUTPUT_SCHEMA = {
         {
             "date": "YYYY-MM-DD",
             "sessionType": "rest|recovery|base|quality|long_run",
+            "workoutType": (
+                "Rest Day|Recovery Run|Base Run|Interval|Threshold|Tempo Run|Fartlek|" "Long Run"
+            ),
             "plannedMinutes": "integer >= 0",
             "workout": {
-                "workoutName": "string",
+                "workoutName": "must exactly equal workoutType",
                 "description": "string (한국어)",
                 "sportType": "RUNNING",
                 "steps": [
@@ -242,22 +298,20 @@ class LLMPromptTemplate:
         sections.append("[반드시 지켜야 할 안전 원칙]\n" + rules_block)
 
         sections.append(
-            "[훈련 카탈로그 — 선수 수준/회복 상태에 맞춰 선택]\n"
-            "- Interval: VO2max/무산소 자극. 반복 구간 동일 duration. (e.g. 400m/800m/1km 반복)\n"
-            "- Threshold: 젖산 역치 페이스로 10~30분 continuous. lactate threshold 능력 강화.\n"
-            "- Tempo Run: tempo 페이스(LT+15~30초)로 20~40분 continuous. 지속력 강화.\n"
-            "- Fartlek: Interval duration 을 불규칙하게 (1.5배 이상 편차). 변속 적응.\n"
-            "- Long Run: long_run 페이스로 장시간 지속. 지구력/fatigue resistance.\n"
-            "- Base Run: base 페이스 aerobic 주행. 주간 볼륨의 척추.\n"
-            "- Recovery Run: recovery 페이스 매우 편안한 회복 주.\n"
-            "- Rest Day: 완전 휴식.\n"
+            "[훈련 카탈로그 — 선수 수준/회복 상태에 맞춰 선택]\n" + _as_json(WORKOUT_CATALOG) + "\n"
             "세션 선택 가이드:\n"
+            "- 각 날짜는 먼저 workoutType 을 위 카탈로그의 8개 canonical name 중 "
+            "하나로 선택하세요.\n"
+            "- workout.workoutName 은 반드시 workoutType 과 정확히 같은 문자열이어야 합니다.\n"
+            "- sessionType 은 선택한 workoutType 의 sessionType 과 정확히 일치해야 합니다.\n"
             "- readiness 가 높고 chronic load 충분: Interval 또는 Threshold 로 능력 자극.\n"
             "- 피로/부상 지표 경계선: Tempo Run 또는 Fartlek 으로 완충.\n"
             "- 최근 quality 수행력이 약했다면 이번 주는 Threshold 나 Tempo 로 base building.\n"
             "- 대회까지 남은 기간 / phase 에 맞춰 특이성(race pace 근접) 조절.\n"
-            "각 quality 세션은 step 구조와 선택한 페이스가 위 분류 기준에 맞아야 "
-            "safety validator 가 workoutName 을 올바르게 붙일 수 있습니다."
+            "- Threshold/Tempo Run 은 continuous quality 이므로 main work 에 Run step 을 쓰고 "
+            "Interval step 을 쓰지 마세요.\n"
+            "- Interval 은 반복 인터벌일 때만 사용하세요. 10분 이상 단일 continuous block 은 "
+            "Threshold 또는 Tempo Run 으로 선택하세요."
         )
 
         if include_strength:
@@ -272,7 +326,7 @@ class LLMPromptTemplate:
         sections.append(
             "[결정 과제]\n"
             "1. 이번 주 weekly_volume_target_km 를 결정하세요.\n"
-            "2. 7일 각각의 sessionType (rest/recovery/base/quality/long_run) 을 결정하세요.\n"
+            "2. 7일 각각의 workoutType 을 카탈로그에서 선택하고 sessionType 을 맞추세요.\n"
             "3. 각 일자의 plannedMinutes 를 결정하세요.\n"
             "4. 각 세션의 step 구조와 targetValue 페이스를 설계하세요. "
             "페이스는 safetyBands 안에서 선택하되 referenceCenters 를 그대로 "
@@ -337,9 +391,15 @@ class LLMPromptTemplate:
 
         sections.append("[확정된 6일 세션 — 이 세션들은 변경하지 마세요]\n" + _as_json(locked))
         sections.append(
+            "[훈련 카탈로그]\n" + _as_json(WORKOUT_CATALOG) + "\n"
+            "새 날짜는 workoutType 을 위 8개 canonical name 중 하나로 선택하고, "
+            "workout.workoutName 은 workoutType 과 정확히 같게 쓰세요. "
+            "Threshold/Tempo Run 은 main work 에 Run step 을 쓰고 Interval step 을 쓰지 마세요."
+        )
+        sections.append(
             f"[결정 과제]\n"
             f"{new_date.isoformat()} 1일치 세션만 새로 설계하세요.\n"
-            "위 확정 세션과 연결되는 흐름을 고려하여 sessionType, plannedMinutes, "
+            "위 확정 세션과 연결되는 흐름을 고려하여 sessionType, workoutType, plannedMinutes, "
             "step 구조를 결정하세요."
         )
         if include_strength:
@@ -354,6 +414,9 @@ class LLMPromptTemplate:
         single_day_schema = {
             "date": "YYYY-MM-DD",
             "sessionType": "rest|recovery|base|quality|long_run",
+            "workoutType": (
+                "Rest Day|Recovery Run|Base Run|Interval|Threshold|Tempo Run|Fartlek|" "Long Run"
+            ),
             "plannedMinutes": "integer >= 0",
             "workout": OUTPUT_SCHEMA["plan"][0]["workout"],  # type: ignore[index]
         }
@@ -370,6 +433,7 @@ class LLMPromptTemplate:
             "scores": asdict(ctx.scores),
             "paceZones": ctx.pace_zones.to_dict(),
             "paceCapability": _pace_capability_dict(ctx),
+            "workoutCatalog": WORKOUT_CATALOG,
             "availability": _availability_rows(ctx),
             "executionHistory14d": _execution_rows(ctx),
             "activeInjury": _active_injury_dict(ctx),
