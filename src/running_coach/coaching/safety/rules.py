@@ -892,11 +892,16 @@ class PaceZoneIntegrity:
                         day_index=i,
                     ))
                     break
-                if not any(abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a):
+                if not any(
+                    abs(parsed - a) <= self.TOLERANCE_SECONDS for a in allowed_seconds if a
+                ):
                     out.append(Violation(
                         rule_id=self.rule_id,
                         severity=self.severity,
-                        message=f"day {i} step {j} ({s.type}) pace {s.target_value} outside zone system",
+                        message=(
+                            f"day {i} step {j} ({s.type}) pace "
+                            f"{s.target_value} outside zone system"
+                        ),
                         day_index=i,
                     ))
                     break
@@ -932,7 +937,9 @@ class PaceZoneIntegrity:
                     description = description.replace(old_pace, fallback_pace)
                 new_steps.append(_build_step(s.type, s.duration_value, fallback_pace))
 
-            new_workout = day.workout.model_copy(update={"steps": new_steps, "description": description})
+            new_workout = day.workout.model_copy(
+                update={"steps": new_steps, "description": description}
+            )
             new_day = day.model_copy(update={"workout": new_workout})
             plan = _replace_day(plan, v.day_index, new_day)
         return plan

@@ -222,7 +222,6 @@ def validator():
 @pytest.fixture
 def legacy_fallback():
     inner = MagicMock()
-    inner._parse_response = lambda text: json.loads(text)
     inner.generate_plan.return_value = None
     return inner
 

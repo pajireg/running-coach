@@ -168,7 +168,6 @@ def integration_planner(history_mock):
     validator = SafetyValidator(rules=list(DEFAULT_SAFETY_RULES))
     gemini = MagicMock()
     legacy = MagicMock()
-    legacy._parse_response = lambda text: json.loads(text)
     legacy.generate_plan.return_value = None
     return (
         LLMDrivenPlanner(

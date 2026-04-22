@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING, Any, Optional, cast
 
+from ...clients.gemini.response_parser import parse_gemini_json
 from ...exceptions import GeminiQuotaExceededError, GeminiResponseParseError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
@@ -19,8 +20,8 @@ from ..safety.metrics import emit_plan_generated
 from ..safety.validator import SafetyValidator
 
 if TYPE_CHECKING:
-    from ...clients.gemini.planner import TrainingPlanner
     from ..context import CoachingContextBuilder
+    from .legacy import LegacySkeletonPlanner
 
 
 logger = get_logger(__name__)
@@ -34,7 +35,7 @@ class LLMDrivenPlanner:
         gemini_client: Any,
         context_builder: "CoachingContextBuilder",
         safety_validator: SafetyValidator,
-        legacy_fallback: "TrainingPlanner",
+        legacy_fallback: "LegacySkeletonPlanner",
     ):
         self._client = gemini_client
         self._context_builder = context_builder
@@ -223,7 +224,7 @@ class LLMDrivenPlanner:
         raw_text = response.text or ""
         if not raw_text:
             raise GeminiResponseParseError("Empty response from Gemini")
-        return self._fallback._parse_response(raw_text)  # noqa: SLF001 — 재사용
+        return parse_gemini_json(raw_text)
 
     def _legacy_fallback(
         self,

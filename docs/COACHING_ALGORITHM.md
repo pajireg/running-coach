@@ -3,18 +3,18 @@
 English | [한국어](COACHING_ALGORITHM.ko.md)
 
 > **Note:** Two planner modes coexist, selected by `COACH_PLANNER_MODE`.
-> - `legacy` (default, stable) — algorithm builds a weekly skeleton, LLM fills step detail.
+> - `legacy` (default, free tier) — algorithm builds a weekly skeleton, deterministic templates fill workout steps and Korean descriptions.
 > - `llm_driven` (in burn-in) — LLM decides session placement/volume/duration, algorithm enforces safety via `SafetyValidator`.
 >
 > This document describes the `legacy` path. For the `llm_driven` split, see [Coaching Architecture](COACHING_ARCHITECTURE.md) §Planning Boundary.
 
 ## Purpose
 
-Running Coach is not designed as an LLM-only workout generator. The coaching engine is a hybrid system that combines persistent athlete history, rule-based safety logic, and bounded LLM refinement.
+Running Coach is not designed as an LLM-only workout generator. The coaching engine combines persistent athlete history, rule-based safety logic, deterministic legacy planning, and an optional bounded LLM-driven planner.
 
 The design principle is:
 
-`Code owns safety and structure. The LLM owns bounded interpretation and explanation.`
+`Code owns safety. In llm_driven mode, the LLM owns coaching judgment inside hard bounds.`
 
 Under `llm_driven` mode, the split shifts: code owns only hard safety bounds (scoring, pace zones, 15 safety rules), and the LLM owns coaching judgment (session placement, weekly volume, phase interpretation).
 
@@ -31,8 +31,8 @@ The system works in four layers:
 3. **Rule-based planning** (`legacy`) or **context assembly + safety validation** (`llm_driven`)
    Legacy: a weekly skeleton is generated from recovery, load, execution history, and constraints.
    LLM-driven: a `CoachingContext` is assembled and the LLM produces the plan; `SafetyValidator` auto-corrects violations.
-4. **LLM refinement**
-   Legacy: LLM fills workout descriptions and step detail inside fixed boundaries.
+4. **Workout assembly and validation**
+   Legacy: deterministic step templates and Korean description templates fill the skeleton.
    LLM-driven: LLM output is parsed, validated, and corrected against the 15 safety rules.
 
 ## Data Inputs
@@ -87,7 +87,7 @@ The system works in four layers:
 4. Summarize recent load, long-term background, and current coaching state
 5. Estimate `readinessScore`, `fatigueScore`, and `injuryRiskScore`
 6. Build a rule-based 7-day weekly skeleton
-7. Ask the LLM to refine session descriptions and workout steps without breaking the skeleton
+7. Build workout steps and descriptions with deterministic legacy templates
 8. Save plan rows and explainable decision rationale
 9. Sync Garmin workouts and Google Calendar
 
@@ -328,7 +328,7 @@ This means a base run might gradually move from `6:30/km` to `6:00/km` or faster
 
 ### Personalized pace-zone engine
 
-Workout pace targets are no longer fixed constants. The planner builds a `PaceZoneEngine` output for each weekly skeleton and passes those targets to both the LLM prompt and fallback workout steps.
+Workout pace targets are no longer fixed constants. The planner builds a `PaceZoneEngine` output for each weekly skeleton and uses those targets in deterministic workout steps. In `llm_driven` mode, the same pace-zone system is passed to the prompt and enforced by `PaceZoneIntegrity`.
 
 Priority order:
 

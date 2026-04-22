@@ -62,11 +62,12 @@ class GeminiClient:
         if mode == "llm_driven":
             from ...coaching.planners.llm_driven import LLMDrivenPlanner
 
+            assert isinstance(self._legacy, LegacySkeletonPlanner)
             self._llm = LLMDrivenPlanner(
                 gemini_client=self.client,
                 context_builder=context_builder,
                 safety_validator=safety_validator,
-                legacy_fallback=self.planner,
+                legacy_fallback=self._legacy,
             )
 
     @property

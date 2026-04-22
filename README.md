@@ -2,7 +2,7 @@
 
 English | [한국어](README.ko.md)
 
-Running Coach is an always-on adaptive running coach built around Garmin Connect data, a Postgres coaching-history database, and a hybrid planning engine that combines rule-based safety constraints with LLM-assisted session detail.
+Running Coach is an always-on adaptive running coach built around Garmin Connect data, a Postgres coaching-history database, and a planning engine that supports deterministic rule-based planning plus an optional LLM-driven planner.
 
 It is designed to do more than generate workouts. The system collects athlete history, estimates current training state, explains why a plan was chosen, uploads workouts to Garmin, and syncs both planned and completed sessions to Google Calendar.
 
@@ -27,12 +27,12 @@ The current design is:
 
 1. Garmin and user inputs provide raw state
 2. Postgres stores normalized long-term history
-3. A rule engine builds a safe weekly skeleton
-4. The LLM fills in workout detail and coaching explanation inside those constraints
+3. The active planner builds a safe 7-day plan
+4. Safety rules validate and correct the plan before Garmin and calendar sync
 
 The operating principle is:
 
-`Code owns safety and structure. The LLM owns bounded interpretation and explanation.`
+`Code owns safety. In llm_driven mode, the LLM owns coaching judgment inside hard bounds.`
 
 ## Quick Start
 

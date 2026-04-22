@@ -69,8 +69,8 @@ class LegacySkeletonPlanner:
                 replan_reasons=[],
             )
         except Exception as exc:
-            logger.exception("CoachingContext 조립 실패; skeleton fallback (%s)", exc)
-            return self._skeleton_fallback(metrics, skeleton)
+            logger.exception("CoachingContext 조립 실패 (%s)", exc)
+            return None
 
         phase: str = (ctx.training_block.phase or "base") if ctx.training_block else "base"
         quality_subtype = QualitySubtypeSelector.pick(
@@ -115,13 +115,13 @@ class LegacySkeletonPlanner:
                 )
             except Exception as exc:
                 logger.warning("DailyPlan 조립 실패 %s: %s", sk_day.get("date"), exc)
-                return self._skeleton_fallback(metrics, skeleton)
+                return None
 
         try:
             plan = TrainingPlan(plan=daily_plans)
         except Exception as exc:
             logger.exception("TrainingPlan 조립 실패: %s", exc)
-            return self._skeleton_fallback(metrics, skeleton)
+            return None
 
         # 4. SafetyValidator — llm_driven 과 동일한 15개 룰 적용
         result = self._safety.validate(plan, ctx)
@@ -142,13 +142,3 @@ class LegacySkeletonPlanner:
             len(result.violations),
         )
         return result.plan
-
-    def _skeleton_fallback(
-        self, metrics: AdvancedMetrics, skeleton: list[dict[str, Any]]
-    ) -> Optional[TrainingPlan]:
-        """skeleton 만으로 최소 plan 반환 (step 없이). 최후 수단."""
-        fallback_json = self._inner._fallback_plan_json(metrics, skeleton)
-        try:
-            return TrainingPlan(**fallback_json)
-        except Exception:
-            return None

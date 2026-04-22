@@ -29,7 +29,7 @@ The default deployment model is Docker-based and intended to run continuously.
 6. Summarize coaching state and build CoachingContext
 7. Dispatch to the active planner (`legacy` or `llm_driven` per `COACH_PLANNER_MODE`)
 8. For `llm_driven`: render prompt, call Gemini, parse JSON, run SafetyValidator auto-correction
-9. For `legacy`: build a rule-based skeleton and ask Gemini to fill step detail inside it
+9. For `legacy`: build a rule-based skeleton, deterministic steps, and deterministic descriptions
 10. Save plans and coach-decision rationale
 11. Upload workouts to Garmin (skip Rest Days) and sync Google Calendar
 
@@ -82,15 +82,15 @@ Main modules:
 - `src/running_coach/coaching/prompt.py` — `LLMPromptTemplate` renders the context as a deterministic Korean prompt (prompt-cache friendly, no threshold leakage)
 - `src/running_coach/coaching/safety/` — 15 safety rules + `SafetyValidator` with multi-pass auto-correction
 - `src/running_coach/coaching/planners/` — `Planner` protocol, `LegacySkeletonPlanner`, `LLMDrivenPlanner`
-- `src/running_coach/clients/gemini/planner.py` — legacy skeleton-based planner (preserved for fallback)
+- `src/running_coach/clients/gemini/planner.py` — legacy skeleton calculation utility
 
 Responsibilities (by path):
 
 - `context.py`: turn raw history_service output into a typed context (chronic load, raw 14-day execution rows, staleness-tagged feedback, etc.)
 - `prompt.py`: emit a structured prompt including a training catalog (Interval, Threshold, Tempo Run, Fartlek, Long Run, Base Run, Recovery Run, Rest Day)
 - `safety/`: enforce hard constraints (date starts today, max one long run, no back-to-back quality, injury blocks, ACWR cap, minimum one rest, pace zone integrity, workout name standardization, etc.) with auto-correction
-- `planners/llm_driven.py`: pipeline `CoachingContext → prompt → Gemini → Pydantic → SafetyValidator`; falls back to legacy on parse/quota/unresolvable errors
-- `clients/gemini/planner.py`: original skeleton-building path, still active when `COACH_PLANNER_MODE=legacy`
+- `planners/llm_driven.py`: pipeline `CoachingContext → prompt → Gemini → Pydantic → SafetyValidator`; falls back to `LegacySkeletonPlanner` on parse/quota/unresolvable errors
+- `clients/gemini/planner.py`: skeleton-building utility reused by `LegacySkeletonPlanner`
 
 ### 4. Orchestration layer
 
@@ -214,11 +214,11 @@ The boundary depends on `COACH_PLANNER_MODE`.
 - Korean rationale and risk acknowledgements
 - training variety selection (Interval vs Threshold vs Tempo vs Fartlek based on athlete state)
 
-When the LLM output violates a safety rule, the validator auto-corrects and logs the violation. Unresolvable plans fall back to `legacy`.
+When the LLM output violates a safety rule, the validator auto-corrects and logs the violation. Unresolvable plans fall back to `LegacySkeletonPlanner`.
 
 ### `legacy` mode (fallback, default until `llm_driven` burn-in completes)
 
-The legacy path builds a rule-based skeleton in `planner._build_weekly_skeleton` and asks the LLM to fill in step detail only.
+The legacy path builds a rule-based skeleton in `planner._build_weekly_skeleton`, then uses `StepTemplateEngine` and `DescriptionRenderer` to fill workout steps and Korean descriptions without Gemini calls.
 
 This separation keeps the system explainable and reduces unsafe plan drift.
 
