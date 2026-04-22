@@ -6,8 +6,11 @@ from typing import Literal, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..models.config import RaceConfig
+from ..models.llm_settings import LLMSettings
 from .constants import (
     DEFAULT_DB_NAME,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_PROVIDER,
     DEFAULT_SCHEDULE_HOUR,
     DEFAULT_SCHEDULE_TIMES,
     DEFAULT_SERVICE_RUN_MODE,
@@ -23,6 +26,9 @@ class Settings(BaseSettings):
 
     # Gemini 설정 (필수)
     gemini_api_key: str
+
+    # 관리자 API 설정
+    admin_api_key: Optional[str] = None
 
     # 선택적 설정
     max_heart_rate: Optional[int] = None
@@ -42,6 +48,14 @@ class Settings(BaseSettings):
 
     # Planner mode: 'legacy'(기존 skeleton) | 'llm_driven'(새 LLM 주도)
     coach_planner_mode: Literal["legacy", "llm_driven"] = "legacy"
+
+    # 배포 기본 LLM 설정. DB admin/system settings 값이 우선한다.
+    llm_provider: str = DEFAULT_LLM_PROVIDER
+    llm_model: str = DEFAULT_LLM_MODEL
+
+    # 후속 provider client 연결용 서비스 비밀값
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -99,6 +113,14 @@ class Settings(BaseSettings):
                 raise ValueError(f"Invalid schedule time: {raw_time}")
             normalized.append(f"{hour:02d}:{minute:02d}")
         return normalized
+
+    def deployment_llm_settings(self) -> LLMSettings:
+        """환경변수 기반 LLM fallback 설정."""
+        return LLMSettings(
+            planner_mode=self.coach_planner_mode,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+        )
 
 
 def get_settings() -> Settings:

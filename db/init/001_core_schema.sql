@@ -12,6 +12,20 @@ CREATE TABLE IF NOT EXISTS athletes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS system_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    athlete_id UUID PRIMARY KEY REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    planner_mode TEXT CHECK (planner_mode IN ('legacy', 'llm_driven')),
+    llm_provider TEXT CHECK (llm_provider IN ('gemini', 'openai', 'anthropic')),
+    llm_model TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,

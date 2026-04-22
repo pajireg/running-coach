@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from google import genai
 
+from ...config.constants import GEMINI_MODEL
 from ...exceptions import GeminiError
 from ...models.config import RaceConfig
 from ...models.metrics import AdvancedMetrics
@@ -33,6 +34,7 @@ class GeminiClient:
         self,
         api_key: str,
         mode: PlannerMode = "legacy",
+        model: str = GEMINI_MODEL,
         context_builder: Optional["CoachingContextBuilder"] = None,
         safety_validator: Optional["SafetyValidator"] = None,
     ):
@@ -40,6 +42,7 @@ class GeminiClient:
             raise GeminiError("Missing Gemini API key")
 
         self.api_key = api_key
+        self.model = model
         self.client = genai.Client(api_key=api_key)
         self.planner: TrainingPlanner = TrainingPlanner(self.client)
         self._mode: PlannerMode = mode
@@ -65,6 +68,7 @@ class GeminiClient:
             assert isinstance(self._legacy, LegacySkeletonPlanner)
             self._llm = LLMDrivenPlanner(
                 gemini_client=self.client,
+                model=model,
                 context_builder=context_builder,
                 safety_validator=safety_validator,
                 legacy_fallback=self._legacy,

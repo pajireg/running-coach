@@ -33,11 +33,13 @@ class LLMDrivenPlanner:
     def __init__(
         self,
         gemini_client: Any,
+        model: str,
         context_builder: "CoachingContextBuilder",
         safety_validator: SafetyValidator,
         legacy_fallback: "LegacySkeletonPlanner",
     ):
         self._client = gemini_client
+        self._model = model
         self._context_builder = context_builder
         self._safety = safety_validator
         self._fallback = legacy_fallback
@@ -228,10 +230,8 @@ class LLMDrivenPlanner:
         """Gemini structured JSON 호출. 재시도·파싱은 내부 메서드가 담당."""
         from google.genai import types  # lazy import
 
-        from ...config.constants import GEMINI_MODEL
-
         response = self._client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=self._model,
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json"),
         )

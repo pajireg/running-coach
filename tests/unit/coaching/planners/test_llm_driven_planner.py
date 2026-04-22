@@ -230,6 +230,7 @@ def legacy_fallback():
 def planner(mock_gemini, builder, validator, legacy_fallback):
     return LLMDrivenPlanner(
         gemini_client=mock_gemini,
+        model="gemini-test-model",
         context_builder=builder,
         safety_validator=validator,
         legacy_fallback=legacy_fallback,
@@ -268,6 +269,14 @@ class TestHappyPath:
         plan = planner.generate_plan(_metrics(), RaceConfig())
         assert plan is not None
         assert plan.plan[0].workout.steps[1].target_value == "6:20"
+
+    def test_configured_model_is_passed_to_gemini(self, planner, mock_gemini):
+        safe = _plan_json(["base", "quality", "base", "recovery", "base", "long_run", "rest"])
+        mock_gemini.models.generate_content.return_value = _fake_gemini_response(safe)
+
+        planner.generate_plan(_metrics(), RaceConfig(), replan_reasons=["x"])
+
+        assert mock_gemini.models.generate_content.call_args.kwargs["model"] == "gemini-test-model"
 
 
 class TestFallback:

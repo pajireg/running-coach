@@ -49,8 +49,10 @@ STEP_TYPE_MAP = {
     "Run": "run",
 }
 
-# Gemini 모델
-GEMINI_MODEL = "gemini-3-flash-preview"
+# LLM 기본값
+DEFAULT_LLM_PROVIDER = "gemini"
+DEFAULT_LLM_MODEL = "gemini-3-flash-preview"
+GEMINI_MODEL = DEFAULT_LLM_MODEL
 
 # 페이스 마진 (초)
 DEFAULT_PACE_MARGIN = 15

@@ -168,6 +168,27 @@ To use the LLM-driven planner rather than the deterministic legacy planner, set:
 COACH_PLANNER_MODE=llm_driven
 ```
 
+### Admin LLM Settings
+
+The admin surface is separate from user-facing APIs and requires a deployment
+secret:
+
+```ini
+ADMIN_API_KEY=change-me
+```
+
+Run the admin web app locally with:
+
+```bash
+uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+Open `/admin` and enter the admin key. The first page manages global LLM
+defaults and per-user overrides for planner mode, provider, and model. Gemini
+model changes are applied to the next `llm_driven` plan generation. OpenAI and
+Anthropic provider values can be stored for admin configuration, but provider
+runtime clients still need to be connected before they can generate plans.
+
 ## Quality Checks
 
 ```bash

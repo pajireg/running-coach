@@ -59,8 +59,9 @@ class TestGeminiClientDispatch:
             GeminiClient(api_key="x", mode="legacy")
 
     def test_llm_driven_mode_constructs_with_dependencies(self, fake_genai_client, deps):
-        client = GeminiClient(api_key="x", mode="llm_driven", **deps)
+        client = GeminiClient(api_key="x", mode="llm_driven", model="gemini-custom", **deps)
         assert client.mode == "llm_driven"
+        assert client.model == "gemini-custom"
 
     def test_legacy_mode_invokes_legacy_planner(self, fake_genai_client, deps):
         client = GeminiClient(api_key="x", mode="legacy", **deps)
