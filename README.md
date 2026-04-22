@@ -94,18 +94,31 @@ python -m running_coach
 running-coach
 ```
 
+Force a new 7-day plan and Garmin workout upload:
+
+```bash
+python -m running_coach run --mode plan
+```
+
 Service mode:
 
 ```bash
 python -m running_coach run --service --times 05:00,17:00 --mode auto
 ```
 
-Service schedules are configurable per user. `--times` accepts one or more `HH:MM` values, and `--mode auto` reconciles Garmin/DB/Calendar state first, then calls the LLM only when the active plan is missing or a new activity appeared after the last plan.
+Service schedules are configurable per user. `--times` accepts one or more `HH:MM` values.
+Use `--mode plan` when you intentionally want to replace the current future plan with a
+fresh 7-day plan. Use `--mode auto` for normal operation: it reconciles
+Garmin/DB/Calendar state first, then skips, extends, or replans only when triggers require it.
 
 ## CLI Commands
 
 - `python -m running_coach`
   - Collect data, generate a plan, sync Garmin, sync calendars
+- `python -m running_coach run --mode plan`
+  - Force full 7-day plan generation, delete previously generated future Garmin workouts by stored Garmin workout ID, upload new non-rest workouts, and sync calendars
+- `python -m running_coach run --mode auto`
+  - Run one reconciliation pass and generate a plan only when the active plan is stale, missing, extendable, or otherwise triggered
 - `python -m running_coach run --service --times 05:00,17:00 --mode auto`
   - Run continuously with configurable check-in times and conditional replanning
 - `python -m running_coach feedback ...`
@@ -133,6 +146,27 @@ Main services:
   - ingestion, planning, Garmin sync, and Google Calendar sync
 
 If you use Google Calendar in Docker, keep `./.google/` mounted into the container.
+
+Run a forced plan regeneration inside Docker:
+
+```bash
+docker-compose exec -T garmin-coach python -m running_coach run --mode plan
+```
+
+Run one conditional reconciliation pass inside Docker:
+
+```bash
+docker-compose exec -T garmin-coach python -m running_coach run --mode auto
+```
+
+The `python -m ...` part must stay on the same shell command line. If `python` is run by
+itself, the container opens a Python prompt instead of executing the CLI.
+
+To use the LLM-driven planner rather than the deterministic legacy planner, set:
+
+```ini
+COACH_PLANNER_MODE=llm_driven
+```
 
 ## Quality Checks
 

@@ -98,18 +98,31 @@ python -m running_coach
 running-coach
 ```
 
+새 7일 계획과 Garmin 워크아웃 업로드를 강제로 다시 생성:
+
+```bash
+python -m running_coach run --mode plan
+```
+
 서비스 모드:
 
 ```bash
 python -m running_coach run --service --times 05:00,17:00 --mode auto
 ```
 
-서비스 실행 시각은 사용자별로 조정할 수 있습니다. `--times`는 하나 이상의 `HH:MM` 값을 받고, `--mode auto`는 먼저 Garmin/DB/Calendar 상태를 대조한 뒤 활성 계획이 없거나 마지막 계획 이후 새 활동이 생긴 경우에만 LLM을 호출합니다.
+서비스 실행 시각은 사용자별로 조정할 수 있습니다. `--times`는 하나 이상의 `HH:MM` 값을 받습니다.
+현재 미래 계획을 새 7일 계획으로 교체하려면 `--mode plan`을 사용합니다.
+일반 운영에서는 `--mode auto`를 사용합니다. `auto`는 먼저 Garmin/DB/Calendar 상태를
+대조한 뒤 조건에 따라 skip, extend, replan 중 하나를 선택합니다.
 
 ## CLI 명령
 
 - `python -m running_coach`
   - 데이터 수집, 계획 생성, Garmin 동기화, 캘린더 동기화 수행
+- `python -m running_coach run --mode plan`
+  - 7일 계획을 강제로 새로 생성하고, 저장된 Garmin workout ID 기준으로 기존 미래 워크아웃을 삭제한 뒤 non-rest 워크아웃을 다시 업로드하고 캘린더 동기화
+- `python -m running_coach run --mode auto`
+  - 1회 상태 대조를 수행하고 활성 계획이 없거나 오래됐거나 연장/재계획 트리거가 있을 때만 계획 생성
 - `python -m running_coach run --service --times 05:00,17:00 --mode auto`
   - 설정 가능한 점검 시각으로 상시 실행하며 필요한 경우에만 재계획
 - `python -m running_coach feedback ...`
@@ -127,6 +140,27 @@ python -m running_coach run --service --times 05:00,17:00 --mode auto
 
 ```bash
 docker-compose up -d --build
+```
+
+Docker 컨테이너 안에서 강제 재계획:
+
+```bash
+docker-compose exec -T garmin-coach python -m running_coach run --mode plan
+```
+
+Docker 컨테이너 안에서 1회 조건부 상태 대조:
+
+```bash
+docker-compose exec -T garmin-coach python -m running_coach run --mode auto
+```
+
+`python -m ...` 부분은 반드시 같은 셸 명령 한 줄에 있어야 합니다. `python`만 먼저
+실행하면 CLI가 아니라 Python 프롬프트가 열립니다.
+
+결정론적 legacy 플래너가 아니라 LLM-driven 플래너로 생성하려면 다음 값을 설정합니다.
+
+```ini
+COACH_PLANNER_MODE=llm_driven
 ```
 
 주요 서비스:

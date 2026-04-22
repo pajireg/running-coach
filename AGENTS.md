@@ -19,6 +19,18 @@ Service mode supports configurable check-in times and conditional replanning:
 python -m running_coach run --service --times 05:00,17:00 --mode auto
 ```
 
+Force a fresh 7-day plan and Garmin workout upload with:
+
+```bash
+python -m running_coach run --mode plan
+```
+
+Inside Docker, use:
+
+```bash
+docker-compose exec -T garmin-coach python -m running_coach run --mode plan
+```
+
 Docker defaults use `COACH_SCHEDULE_TIMES=05:00,17:00` and `COACH_SERVICE_RUN_MODE=auto`.
 
 ## Coding Style & Naming Conventions
@@ -28,7 +40,7 @@ Target Python 3.10+ with 4-space indentation and a 100-character line limit. Bla
 Pytest discovers `test_*.py` under `tests/` and collects coverage for `src/running_coach`. Add focused unit tests beside the touched area, for example `tests/unit/storage/test_history_service.py` or `tests/unit/clients/test_calendar_sync.py`. Use `pytest -k "pattern"` for targeted runs and `pytest --no-cov` for faster iteration when coverage output is not needed.
 
 ## Commit & Pull Request Guidelines
-Use Conventional Commits such as `feat: ...`, `fix: ...`, or `refactor: ...`; concise Korean subjects are acceptable. Keep commits logically grouped and include a message body when the change spans runtime flow, storage, or sync behavior. PRs should summarize user-visible changes, note verification commands, and include screenshots or sample logs when Garmin/Google Calendar behavior changes.
+Use Conventional Commits such as `feat: ...`, `fix: ...`, or `refactor: ...`; concise Korean subjects are acceptable. Keep commits logically grouped and include a message body when the change spans runtime flow, storage, sync behavior, or coaching contracts. PRs should summarize user-visible changes, note verification commands, and include screenshots or sample logs when Garmin/Google Calendar behavior changes.
 
 ## Security & Configuration Tips
 Do not commit `.env`, `.garmin_tokens/`, or Google credential/token JSON files such as `.google/credentials.json` and `.google/token_google.json`. The `.google/` directory may be tracked with a placeholder such as `.gitkeep`. Treat Garmin and Google tokens as local secrets. Wire new services through `core/container.py` so orchestration, testing, and Docker behavior stay consistent.
@@ -59,20 +71,20 @@ Never commit real credentials, OAuth tokens, Garmin tokens, personal activity ex
 Two planner modes coexist and are selected by `COACH_PLANNER_MODE`:
 
 - `legacy` (default, **free tier**) — `LegacySkeletonPlanner` in `coaching/planners/legacy.py`. Uses `_build_weekly_skeleton` for session placement and volume, then `StepTemplateEngine` + `DescriptionRenderer` for deterministic step structure and Korean description. **No LLM calls.** `QualitySubtypeSelector` picks quality subtype (interval/fartlek/threshold/tempo) from phase + readiness + injury_risk. Pipeline: skeleton → steps → description → `SafetyValidator` (15 rules).
-- `llm_driven` (**paid tier**) — `coaching/planners/llm_driven.py` pipes `CoachingContext → prompt → LLM → Pydantic → SafetyValidator`. The LLM decides session placement, weekly volume, duration, and phase; the algorithm only enforces hard safety bounds and auto-corrects violations. Supports `extend_plan()` for 1-day extension without full replan.
+- `llm_driven` (**paid tier**) — `coaching/planners/llm_driven.py` pipes `CoachingContext → prompt → LLM → Pydantic → SafetyValidator`. The LLM decides session placement, weekly volume, duration, step structure, concrete target pace inside safety bands, and phase; the algorithm provides evidence normalization plus hard safety bounds and auto-corrects violations. Supports `extend_plan()` for 1-day extension without full replan.
 
 Both modes require `context_builder` and `safety_validator` at construction time. The `GeminiClient` constructor enforces this; do not make either optional.
 
 When touching coaching logic, respect the following:
 
-- **Algorithm owns**: `readiness/fatigue/injury` scoring (`storage/history_service.py`), `PaceZoneEngine`, replan-trigger detection (`summarize_plan_freshness`), and the 15 rules in `coaching/safety/rules.py` (plan_starts_today, injury blocks, max_one_long_run, no_back_to_back_quality, no_quality_after_long_run, quality_48h_spacing, weekly_hard_cap, respect_unavailability, min_one_rest_per_week, acwr_cap, max_duration_per_day, non_rest_has_steps, injury_reduce_volume, min_step_duration, pace_zone_integrity, standardize_workout_name).
-- **LLM owns (in `llm_driven`)**: session type per day, weekly volume target, planned minutes, step structure, phase interpretation (base/build/peak/taper), Korean rationale.
+- **Algorithm owns**: `readiness/fatigue/injury` scoring (`storage/history_service.py`), `PaceZoneEngine` evidence/profile generation, pace safety bands, replan-trigger detection (`summarize_plan_freshness`), and the 15 rules in `coaching/safety/rules.py` (plan_starts_today, injury blocks, max_one_long_run, no_back_to_back_quality, no_quality_after_long_run, quality_48h_spacing, weekly_hard_cap, respect_unavailability, min_one_rest_per_week, acwr_cap, max_duration_per_day, non_rest_has_steps, injury_reduce_volume, min_step_duration, pace_band_integrity, standardize_workout_name).
+- **LLM owns (in `llm_driven`)**: session type per day, weekly volume target, planned minutes, step structure, concrete target pace inside safety bands, phase interpretation (base/build/peak/taper), Korean rationale.
 - **Safety rules are hard bounds, not style preferences.** If you add a new rule, expose a `describe(ctx)` string so the LLM sees it in the prompt proactively, and ensure `correct()` converges within `SafetyValidator.max_passes`.
 - **ACWR math uses weekly units.** `chronic_ewma_load` is km/day; multiply by 7 before comparing with planned weekly km.
 - **Workout naming is enforced post-hoc.** Do not rely on LLM output for workout titles. Use the 8 canonical names: `Rest Day`, `Recovery Run`, `Base Run`, `Interval`, `Threshold`, `Tempo Run`, `Fartlek`, `Long Run`.
 - **Rest days skip both Garmin upload and Google Calendar sync.** Use `session_type == "rest"` (not workout-name match alone) to decide skipping.
-- **Do not leak algorithm thresholds into the LLM prompt.** Pass raw facts (scores, execution rows, injuries) only. Interpretation hints are fine; threshold bands are not.
-- **LLM output is never trusted for dates, session types, or paces.** `PlanStartsToday` rebases dates to today; `PaceZoneIntegrity` snaps pace to the canonical `PaceZones`; `StandardizeWorkoutName` reassigns titles from step structure.
+- **Do not leak hidden decision thresholds into the LLM prompt.** Pass raw facts (scores, execution rows, injuries) and explicit safety bounds only. Interpretation hints are fine; hidden trigger thresholds are not.
+- **LLM output is bounded, not blindly trusted.** `PlanStartsToday` rebases dates to today; structural safety rules may change unsafe session types; `PaceBandIntegrity` preserves in-band pace choices and clamps only unsafe paces to the nearest safety-band boundary; `StandardizeWorkoutName` reassigns titles from step structure.
 
 Safety metrics (`coaching/safety/metrics.py`) expose in-process counters: `violation_counter{rule_id,severity}`, `unresolvable_counter`, `plan_generated_counter{mode}`. Tests reset these via `reset_counters_for_test()`.
 
