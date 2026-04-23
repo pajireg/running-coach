@@ -1,7 +1,7 @@
 """LLMDrivenPlanner: context → prompt → LLM → Pydantic → SafetyValidator 파이프라인.
 
 알고리즘이 결정하는 것: 점수·pace safety bounds·안전 제약.
-LLM 이 결정하는 것: 세션 타입 배치·주간 볼륨·duration·step 구성·페이스·phase 해석.
+LLM 이 결정하는 것: 세션 타입 배치·7일 볼륨·duration·step 구성·페이스·phase 해석.
 """
 
 from __future__ import annotations
@@ -93,6 +93,8 @@ class LLMDrivenPlanner:
             )
 
         try:
+            if "horizon" not in raw_json:
+                raise ValueError("LLM output missing horizon rationale")
             plan = TrainingPlan.model_validate(raw_json)
         except Exception as exc:
             logger.exception("LLM 출력 Pydantic 검증 실패; legacy fallback (%s)", exc)

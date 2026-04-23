@@ -193,14 +193,14 @@ DB는 애플리케이션의 정본 상태 저장소입니다.
   - 계획 시작일은 반드시 오늘
   - 활성 부상 severity ≥ 6 → quality 제거, 볼륨 × 0.65
   - 활성 부상 severity 3–5 → 인터벌 제거, 볼륨 × 0.85
-  - 주간 long_run ≤ 1회
+  - long_run 횟수는 `CoachingContext.plan_policy` 상한 준수
   - 사용자 선호 long_run 가용 날짜가 있으면 long_run은 그 날짜 중 하나에 배치
   - 연속된 두 날 hard session 금지
   - long run 다음 날 quality 금지
   - quality 세션 사이 최소 48시간
-  - 주간 hard ≤ 2회
-  - availability / max duration / 주간 최소 1일 휴식 준수
-  - 주간 km / chronic-weekly ≤ 1.5 (ACWR 상한) — 구조적 + duration 스케일링
+  - hard session 횟수는 `CoachingContext.plan_policy` 상한 준수
+  - availability / max duration / 정책상 최소 휴식일 준수
+  - 7일 km / chronic-7d ACWR 는 `CoachingContext.plan_policy` 상한 준수
   - step pace 는 해당 pace safety band 안에 있어야 함
   - non-rest 인 날은 step 유효 (각 step ≥ 60s)
   - 세션 타입 + step 구조에 기반한 워크아웃 이름 표준화
@@ -208,7 +208,7 @@ DB는 애플리케이션의 정본 상태 저장소입니다.
 **LLM이 담당하는 것 (판단)**:
 
 - 7일 세션 타입 배치
-- 주간 볼륨 목표
+- 7일 rolling horizon 볼륨 목표
 - 일자별 plannedMinutes
 - step 구조 (warmup/run/interval/recovery/cooldown 구성)
 - safety band 안에서의 구체 target pace

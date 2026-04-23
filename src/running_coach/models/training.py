@@ -144,13 +144,13 @@ class DailyPlan(BaseModel):
         return self.session_type in ("quality", "long_run")
 
 
-class WeeklyRationale(BaseModel):
-    """주간 계획 근거 (LLM 출력용)."""
+class HorizonRationale(BaseModel):
+    """7일 rolling horizon 계획 근거 (LLM 출력용)."""
 
     summary_ko: str = Field(alias="summaryKo")
     phase: PhaseType
     phase_reason_ko: str = Field(alias="phaseReasonKo")
-    weekly_volume_target_km: float = Field(gt=0, alias="weeklyVolumeTargetKm")
+    seven_day_volume_target_km: float = Field(gt=0, alias="sevenDayVolumeTargetKm")
     risk_acknowledgements: List[str] = Field(default_factory=list, alias="riskAcknowledgements")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -160,7 +160,7 @@ class TrainingPlan(BaseModel):
     """7일 훈련 계획"""
 
     plan: List[DailyPlan] = Field(min_length=7, max_length=7)
-    weekly: Optional[WeeklyRationale] = None
+    horizon: Optional[HorizonRationale] = None
     created_at: date = Field(default_factory=date.today)
 
     @property

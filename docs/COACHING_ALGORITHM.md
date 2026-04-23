@@ -3,7 +3,7 @@
 English | [한국어](COACHING_ALGORITHM.ko.md)
 
 > **Note:** Two planner modes coexist, selected by `COACH_PLANNER_MODE`.
-> - `legacy` (default, free tier) — algorithm builds a weekly skeleton, deterministic templates fill workout steps and Korean descriptions.
+> - `legacy` (default, free tier) — algorithm builds a 7-day skeleton, deterministic templates fill workout steps and Korean descriptions.
 > - `llm_driven` (in burn-in) — LLM decides session placement/volume/duration, algorithm enforces safety via `SafetyValidator`.
 >
 > This document describes the `legacy` path. For the `llm_driven` split, see [Coaching Architecture](COACHING_ARCHITECTURE.md) §Planning Boundary.
@@ -16,7 +16,7 @@ The design principle is:
 
 `Code owns safety bounds and evidence normalization. In llm_driven mode, the LLM owns coaching prescription inside those hard bounds.`
 
-Under `llm_driven` mode, the split shifts: code owns hard safety bounds (scoring, pace capability profile, pace safety bands, 15 safety rules), and the LLM owns coaching prescription (session placement, weekly volume, concrete pace prescription, phase interpretation).
+Under `llm_driven` mode, the split shifts: code owns hard safety bounds (scoring, pace capability profile, pace safety bands, 15 safety rules), and the LLM owns coaching prescription (session placement, 7-day horizon volume, concrete pace prescription, phase interpretation).
 
 This document explains what the engine looks at, how it turns raw data into planning signals, and why the current architecture was chosen.
 
@@ -29,7 +29,7 @@ The system works in four layers:
 2. **State storage and normalization**
    Postgres stores normalized history, not only raw payloads.
 3. **Rule-based planning** (`legacy`) or **context assembly + safety validation** (`llm_driven`)
-   Legacy: a weekly skeleton is generated from recovery, load, execution history, and constraints.
+   Legacy: a 7-day skeleton is generated from recovery, load, execution history, and constraints.
    LLM-driven: a `CoachingContext` is assembled and the LLM produces the plan; `SafetyValidator` auto-corrects violations.
 4. **Workout assembly and validation**
    Legacy: deterministic step templates and Korean description templates fill the skeleton.
@@ -86,7 +86,7 @@ The system works in four layers:
 3. Rebuild planned-vs-actual execution links
 4. Summarize recent load, long-term background, and current coaching state
 5. Estimate `readinessScore`, `fatigueScore`, and `injuryRiskScore`
-6. Build a rule-based 7-day weekly skeleton
+6. Build a rule-based 7-day skeleton
 7. Build workout steps and descriptions with deterministic legacy templates
 8. Save plan rows and explainable decision rationale
 9. Sync Garmin workouts and Google Calendar
@@ -530,7 +530,11 @@ Before the LLM is called, a rule engine decides:
 - unavailable weekdays are forced to rest
 - high cross-training load reduces run days and quality count
 
-The LLM does not own the weekly structure. It operates inside this boundary.
+The LLM does not own the outer safety boundary. It operates inside the current
+athlete's 7-day plan policy. The default policy is max 1 long run, max 2 hard
+sessions, minimum 1 rest day, and ACWR cap 1.5, but these are policy values, not
+universal truths. They are carried in `CoachingContext.plan_policy`, exposed to the
+prompt, and can be supplied per athlete from `user_preferences.coaching_policy`.
 
 For `llm_driven`, the prompt includes concrete `longRunAllowedDates` derived from
 `availability_rules`, not only weekday numbers. If that list is non-empty, `Long Run`
@@ -544,7 +548,9 @@ description, or if the safety validator changes a session type, the deterministi
 description renderer rebuilds the description so Garmin and calendar text still match
 the final workout.
 
-The 7-day plan is a rolling horizon, not a fixed calendar-week story. The service
+The LLM full-plan output schema uses a `horizon` rationale block with
+`sevenDayVolumeTargetKm`; legacy `weekly` schema names are not part of the LLM
+contract. The 7-day plan is a rolling horizon, not a fixed calendar-week story. The service
 checks in every day, rereads Garmin execution, recovery metrics, and feedback, then
 keeps the next 7 days coherent. Workout descriptions are written from the role each
 session plays in the current 7-day flow. Descriptions that drift into stale

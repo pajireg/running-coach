@@ -1,16 +1,18 @@
-"""AcwrCap: 주간 볼륨이 chronic_weekly × 1.5 초과 시 duration 스케일 다운.
+"""AcwrCap: 7일 볼륨이 chronic_7d × 사용자 정책 상한 초과 시 duration 스케일 다운.
 
 chronic_ewma_load 는 하루 평균 km 이므로 테스트에서도 같은 의미로 설정한다.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from running_coach.coaching.context import (
     AvailabilitySlot,
     CoachingContext,
     CoachingScores,
+    PlanPolicy,
 )
 from running_coach.coaching.safety.rules import AcwrCap
 
@@ -88,3 +90,13 @@ class TestAcwrCap:
         assert "km" in desc
         # cap = 35 * 1.5 = 52km
         assert "52" in desc
+
+    def test_uses_policy_ratio(self):
+        ctx = replace(
+            _ctx_with_chronic_daily(5.0),
+            plan_policy=PlanPolicy(acwr_cap_ratio=1.1, acwr_target_ratio=1.0),
+        )
+        plan = make_plan(["base", "quality", "base", "base", "base", "long_run", "rest"])
+        violations = AcwrCap().check(plan, ctx)
+        assert len(violations) == 1
+        assert "1.1" in AcwrCap().describe(ctx)

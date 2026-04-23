@@ -136,6 +136,14 @@ class _SummaryHistoryService(CoachingHistoryService):
                 "focus": "10K speed",
                 "weekly_volume_target_km": 42.0,
             }
+        if "FROM user_preferences" in query:
+            return {
+                "coaching_policy": {
+                    "maxLongRuns": 2,
+                    "maxHardSessions": 3,
+                    "minRestDays": 2,
+                }
+            }
         return None
 
 
@@ -205,6 +213,8 @@ def test_summarize_training_background_returns_recent_and_lifetime_sections():
     assert summary["coachingState"]["adherence"]["matchedWorkoutCount"] == 5
     assert summary["planningConstraints"]["raceGoal"]["distance"] == "10K"
     assert summary["planningConstraints"]["trainingBlock"]["phase"] == "build"
+    assert summary["planningConstraints"]["trainingBlock"]["sevenDayVolumeTargetKm"] == 42.0
+    assert summary["planningConstraints"]["planPolicy"]["maxLongRuns"] == 2
 
 
 def test_summarize_plan_freshness_reuses_active_plan_without_new_activity():

@@ -34,6 +34,10 @@ The operating principle is:
 
 `Code owns safety bounds and evidence normalization. In llm_driven mode, the LLM owns coaching prescription inside those hard bounds.`
 
+The default 7-day plan policy caps long runs, hard sessions, rest days, and ACWR
+inside `CoachingContext.plan_policy`. Those defaults are not universal coaching
+assumptions; they can be supplied per athlete through `user_preferences.coaching_policy`.
+
 ## Quick Start
 
 ### 1. Install

@@ -183,11 +183,11 @@ def _plan_json(session_types: list[str]) -> dict:
             }
         )
     return {
-        "weekly": {
-            "summaryKo": "test week",
+        "horizon": {
+            "summaryKo": "test horizon",
             "phase": "build",
             "phaseReasonKo": "test",
-            "weeklyVolumeTargetKm": 40.0,
+            "sevenDayVolumeTargetKm": 40.0,
             "riskAcknowledgements": [],
         },
         "plan": days,
@@ -245,8 +245,8 @@ class TestHappyPath:
         assert plan is not None
         assert plan.plan[1].session_type == "quality"
         assert plan.plan[5].session_type == "long_run"
-        assert plan.weekly is not None
-        assert plan.weekly.phase == "build"
+        assert plan.horizon is not None
+        assert plan.horizon.phase == "build"
 
     def test_short_llm_description_is_expanded(self, planner, mock_gemini):
         safe = _plan_json(["base", "quality", "base", "recovery", "base", "long_run", "rest"])

@@ -88,7 +88,7 @@ Responsibilities (by path):
 
 - `context.py`: turn raw history_service output into a typed context (chronic load, raw 14-day execution rows, staleness-tagged feedback, etc.)
 - `prompt.py`: emit a structured prompt including a training catalog (Interval, Threshold, Tempo Run, Fartlek, Long Run, Base Run, Recovery Run, Rest Day)
-- `safety/`: enforce hard constraints (date starts today, max one long run, no back-to-back quality, injury blocks, ACWR cap, minimum one rest, pace safety bands, workout name standardization, etc.) with auto-correction
+- `safety/`: enforce hard constraints (date starts today, user-policy long-run cap, no back-to-back quality, injury blocks, ACWR cap, user-policy minimum rest, pace safety bands, workout name standardization, etc.) with auto-correction
 - `planners/llm_driven.py`: pipeline `CoachingContext → prompt → Gemini → Pydantic → SafetyValidator`; falls back to `LegacySkeletonPlanner` on parse/quota/unresolvable errors
 - `clients/gemini/planner.py`: skeleton-building utility reused by `LegacySkeletonPlanner`
 
@@ -193,14 +193,14 @@ The boundary depends on `COACH_PLANNER_MODE`.
   - plan starts today
   - active injury severity ≥ 6 → no quality, volume × 0.65
   - active injury severity 3–5 → no intervals, volume × 0.85
-  - max one long_run per week
+  - long_run count capped by `CoachingContext.plan_policy`
   - long_run must use user-preferred long-run availability dates when present
   - no back-to-back hard sessions
   - no quality the day after long run
   - quality sessions ≥ 48h apart
-  - weekly hard cap ≤ 2 sessions
-  - respect availability / max duration / min 1 rest
-  - weekly km / chronic-weekly ≤ 1.5 (ACWR cap) with structural + duration scaling
+  - hard-session count capped by `CoachingContext.plan_policy`
+  - respect availability / max duration / policy minimum rest days
+  - 7-day km / chronic-7d ACWR capped by `CoachingContext.plan_policy`
   - step pace must stay inside the relevant pace safety band
   - non-rest days must have valid steps with ≥ 60s per step
   - workout name standardization by session type + step structure
@@ -208,7 +208,7 @@ The boundary depends on `COACH_PLANNER_MODE`.
 **LLM owns (judgment)**:
 
 - session type placement across 7 days
-- weekly volume target
+- 7-day horizon volume target
 - planned minutes per day
 - step structure (warmup/run/interval/recovery/cooldown layout)
 - concrete target pace within the safety bands

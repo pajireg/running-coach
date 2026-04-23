@@ -96,7 +96,13 @@ FULL_BACKGROUND: dict[str, Any] = {
             "focus": "aerobic capacity",
             "startsOn": "2026-04-01",
             "endsOn": "2026-04-28",
-            "weeklyVolumeTargetKm": 55.0,
+            "sevenDayVolumeTargetKm": 55.0,
+        },
+        "planPolicy": {
+            "maxLongRuns": 2,
+            "maxHardSessions": 3,
+            "minRestDays": 2,
+            "acwrCapRatio": 1.7,
         },
         "raceGoal": {
             "goalName": "Spring Half",
@@ -221,6 +227,13 @@ class TestCoachingContextBuilder:
         assert isinstance(ctx.training_block, TrainingBlockSnapshot)
         assert ctx.training_block.phase == "build"
         assert ctx.training_block.weekly_volume_target_km == 55.0
+
+    def test_plan_policy_populated(self, builder, race):
+        ctx = builder.build(_metrics(), race)
+        assert ctx.plan_policy.max_long_runs == 2
+        assert ctx.plan_policy.max_hard_sessions == 3
+        assert ctx.plan_policy.min_rest_days == 2
+        assert ctx.plan_policy.acwr_cap_ratio == 1.7
 
     def test_race_goal_populated(self, builder, race):
         ctx = builder.build(_metrics(), race)

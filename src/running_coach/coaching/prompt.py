@@ -143,7 +143,7 @@ def _training_block_dict(ctx: CoachingContext) -> dict[str, Any] | None:
     return {
         "phase": b.phase,
         "focus": b.focus,
-        "weeklyVolumeTargetKm": b.weekly_volume_target_km,
+        "sevenDayVolumeTargetKm": b.weekly_volume_target_km,
         "startsOn": b.starts_on.isoformat() if b.starts_on else None,
         "endsOn": b.ends_on.isoformat() if b.ends_on else None,
         "weeksUntilRace": weeks_until_race,
@@ -168,6 +168,18 @@ def _training_background_dict(ctx: CoachingContext) -> dict[str, Any]:
         "recent6Weeks": ctx.training_background.recent_6_weeks,
         "recent12Months": ctx.training_background.recent_12_months,
         "lifetime": ctx.training_background.lifetime,
+    }
+
+
+def _plan_policy_dict(ctx: CoachingContext) -> dict[str, Any]:
+    policy = ctx.plan_policy
+    return {
+        "horizonDays": policy.horizon_days,
+        "maxLongRuns": policy.max_long_runs,
+        "maxHardSessions": policy.max_hard_sessions,
+        "minRestDays": policy.min_rest_days,
+        "acwrCapRatio": policy.acwr_cap_ratio,
+        "acwrTargetRatio": policy.acwr_target_ratio,
     }
 
 
@@ -230,11 +242,11 @@ WORKOUT_CATALOG = {
 
 
 OUTPUT_SCHEMA = {
-    "weekly": {
+    "horizon": {
         "summaryKo": "string (3-5문장, 한국어; 오늘부터 7일 계획 요약)",
         "phase": "base|build|peak|taper|maintenance",
         "phaseReasonKo": "string (한국어)",
-        "weeklyVolumeTargetKm": "number > 0",
+        "sevenDayVolumeTargetKm": "number > 0",
         "riskAcknowledgements": ["string"],
     },
     "plan": [
@@ -329,6 +341,7 @@ class LLMPromptTemplate:
 
         sections.append("[요일별 가용성] " + _as_json(_availability_rows(ctx)))
         sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
+        sections.append("[사용자별 7일 계획 정책] " + _as_json(_plan_policy_dict(ctx)))
 
         sections.append("[훈련 배경] " + _as_json(_training_background_dict(ctx)))
 
@@ -374,13 +387,13 @@ class LLMPromptTemplate:
 
         sections.append(
             "[결정 과제]\n"
-            "1. 오늘부터 7일 rolling horizon 의 weekly_volume_target_km 를 결정하세요.\n"
+            "1. 오늘부터 7일 rolling horizon 의 sevenDayVolumeTargetKm 를 결정하세요.\n"
             "2. 7일 각각의 workoutType 을 카탈로그에서 선택하고 sessionType 을 맞추세요.\n"
             "3. 각 일자의 plannedMinutes 를 결정하세요.\n"
             "4. 각 세션의 step 구조와 targetValue 페이스를 설계하세요. "
             "페이스는 safetyBands 안에서 선택하되 referenceCenters 를 그대로 "
             "복사할 필요는 없습니다.\n"
-            "5. weekly.summaryKo 는 오늘부터 7일 계획 요약으로 작성하고 "
+            "5. horizon.summaryKo 는 오늘부터 7일 계획 요약으로 작성하고 "
             "phase / phaseReasonKo 를 함께 작성하세요."
         )
 
@@ -441,6 +454,7 @@ class LLMPromptTemplate:
         sections.append("[활성 부상] " + _as_json(active_inj))
         sections.append("[요일별 가용성] " + _as_json(_availability_rows(ctx)))
         sections.append("[세션 배치 하드 제약] " + _as_json(_placement_constraints(ctx)))
+        sections.append("[사용자별 7일 계획 정책] " + _as_json(_plan_policy_dict(ctx)))
         sections.append("[최근 주관적 피드백] " + _as_json(_feedback_rows(ctx)))
         sections.append("[훈련 블록] " + _as_json(_training_block_dict(ctx)))
         sections.append("[대회 컨텍스트] " + _as_json(_race_goal_dict(ctx)))
@@ -501,6 +515,7 @@ class LLMPromptTemplate:
             "workoutCatalog": WORKOUT_CATALOG,
             "availability": _availability_rows(ctx),
             "placementConstraints": _placement_constraints(ctx),
+            "planPolicy": _plan_policy_dict(ctx),
             "executionHistory14d": _execution_rows(ctx),
             "activeInjury": _active_injury_dict(ctx),
             "recentFeedback": _feedback_rows(ctx),

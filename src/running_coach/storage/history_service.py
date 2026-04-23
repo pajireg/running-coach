@@ -1368,6 +1368,18 @@ class CoachingHistoryService:
             )
             or {}
         )
+        preference_row = (
+            self._fetchone(
+                """
+            SELECT coaching_policy
+            FROM user_preferences
+            WHERE athlete_id = %(athlete_id)s
+            """,
+                {"athlete_id": athlete_id},
+            )
+            or {}
+        )
+        coaching_policy = self._coaching_policy_dict(preference_row.get("coaching_policy"))
         return {
             "availability": [
                 {
@@ -1406,8 +1418,24 @@ class CoachingHistoryService:
                 "weeklyVolumeTargetKm": self._float_or_none(
                     block_row.get("weekly_volume_target_km")
                 ),
+                "sevenDayVolumeTargetKm": self._float_or_none(
+                    block_row.get("weekly_volume_target_km")
+                ),
             },
+            "planPolicy": coaching_policy,
         }
+
+    @staticmethod
+    def _coaching_policy_dict(raw: Any) -> dict[str, Any]:
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
 
     def summarize_coaching_state(self, as_of: date) -> dict[str, Any]:
         """최근 수행/주관 피드백/부상 상태를 반영한 코칭 상태 요약."""

@@ -116,11 +116,11 @@ def _plan_json(session_types: list[str]) -> dict:
             }
         )
     return {
-        "weekly": {
+        "horizon": {
             "summaryKo": "end-to-end",
             "phase": "build",
             "phaseReasonKo": "테스트",
-            "weeklyVolumeTargetKm": 42.0,
+            "sevenDayVolumeTargetKm": 42.0,
             "riskAcknowledgements": [],
         },
         "plan": days,

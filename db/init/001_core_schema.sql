@@ -23,8 +23,12 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     planner_mode TEXT CHECK (planner_mode IN ('legacy', 'llm_driven')),
     llm_provider TEXT CHECK (llm_provider IN ('gemini', 'openai', 'anthropic')),
     llm_model TEXT,
+    coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE user_preferences
+    ADD COLUMN IF NOT EXISTS coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

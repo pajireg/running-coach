@@ -307,7 +307,7 @@ def _total_planned_km(plan: "TrainingPlan", pace_zones: "PaceZones") -> float:
 
 
 class InjuryBlockQuality:
-    """활성 부상 severity ≥ 6 → quality 제거, 주간 볼륨 × 0.65."""
+    """활성 부상 severity ≥ 6 → quality 제거, 7일 볼륨 × 0.65."""
 
     rule_id = "injury_block_quality"
     severity: Severity = "block"
@@ -399,24 +399,25 @@ class InjuryReduceVolume:
         return "활성 부상 severity 3-5 시 인터벌 대신 base 러닝으로 교체합니다."
 
 
-class MaxOneLongRun:
-    """주간 long_run ≤ 1."""
+class LongRunCap:
+    """7일 계획 범위 long_run 상한."""
 
-    rule_id = "max_one_long_run"
+    rule_id = "long_run_cap"
     severity: Severity = "block"
 
     def check(self, plan, ctx):
         long_indexes = [i for i, d in enumerate(plan.plan) if d.session_type == "long_run"]
-        if len(long_indexes) <= 1:
+        max_long_runs = ctx.plan_policy.max_long_runs
+        if len(long_indexes) <= max_long_runs:
             return []
         # 첫 번째는 유지, 나머지 violation
         out: list[Violation] = []
-        for i in long_indexes[1:]:
+        for i in long_indexes[max_long_runs:]:
             out.append(
                 Violation(
                     rule_id=self.rule_id,
                     severity=self.severity,
-                    message=f"extra long_run on day {i} demoted to base",
+                    message=f"long_run count > {max_long_runs}; demoting day {i} to base",
                     day_index=i,
                 )
             )
@@ -432,7 +433,7 @@ class MaxOneLongRun:
         return plan
 
     def describe(self, ctx):
-        return "7일 계획 범위의 장거리는 정확히 1회입니다."
+        return f"7일 계획 범위의 장거리는 최대 {ctx.plan_policy.max_long_runs}회입니다."
 
 
 class PreferLongRunAvailability:
@@ -668,24 +669,24 @@ class Quality48hSpacing:
         return "quality/long_run 세션 사이 최소 48시간 간격을 보장합니다."
 
 
-class WeeklyHardCap:
-    """주간 hard (quality + long_run) ≤ 2."""
+class HardSessionCap:
+    """7일 계획 범위 hard (quality + long_run) 상한."""
 
-    rule_id = "weekly_hard_cap"
+    rule_id = "hard_session_cap"
     severity: Severity = "block"
 
     def check(self, plan, ctx):
         hard_idx = [i for i, d in enumerate(plan.plan) if _is_hard(d)]
-        if len(hard_idx) <= 2:
+        max_hard_sessions = ctx.plan_policy.max_hard_sessions
+        if len(hard_idx) <= max_hard_sessions:
             return []
-        # 3번째 이후만 violation; 2번째까지는 유지
         out: list[Violation] = []
-        for i in hard_idx[2:]:
+        for i in hard_idx[max_hard_sessions:]:
             out.append(
                 Violation(
                     rule_id=self.rule_id,
                     severity=self.severity,
-                    message=f"hard session count > 2; demoting day {i}",
+                    message=f"hard session count > {max_hard_sessions}; demoting day {i}",
                     day_index=i,
                 )
             )
@@ -701,7 +702,10 @@ class WeeklyHardCap:
         return plan
 
     def describe(self, ctx):
-        return "7일 계획 범위의 hard(quality+long_run) 세션은 최대 2회입니다."
+        return (
+            "7일 계획 범위의 hard(quality+long_run) 세션은 "
+            f"최대 {ctx.plan_policy.max_hard_sessions}회입니다."
+        )
 
 
 class RespectUnavailability:
@@ -738,55 +742,53 @@ class RespectUnavailability:
         return "불가 요일에는 rest 를 배치합니다."
 
 
-class MinOneRestPerWeek:
-    """주간 rest ≥ 1."""
+class MinRestDays:
+    """7일 계획 범위 rest 하한."""
 
-    rule_id = "min_one_rest_per_week"
+    rule_id = "min_rest_days"
     severity: Severity = "block"
 
     def check(self, plan, ctx):
         rest_count = sum(1 for d in plan.plan if d.session_type == "rest")
-        if rest_count >= 1:
+        min_rest_days = ctx.plan_policy.min_rest_days
+        if rest_count >= min_rest_days:
             return []
         return [
             Violation(
                 rule_id=self.rule_id,
                 severity=self.severity,
-                message="zero rest days in 7; inserting rest",
+                message=f"rest day count < {min_rest_days} in 7; inserting rest",
                 day_index=None,
             )
         ]
 
     def correct(self, plan, ctx, violations):
-        # 가장 쉬운 non-hard 날을 rest 로. base 우선, 그 다음 recovery.
-        candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "base"]
-        if not candidates:
-            candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "recovery"]
-        if not candidates:
-            # 전부 hard 거나 rest 인데 rest 가 0인 경우 — 중간 hard 하나 변환
-            candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "quality"]
-        if not candidates:
-            return plan
-        # long_run 에서 가장 먼 index 선택
-        long_idx = next((i for i, d in enumerate(plan.plan) if d.session_type == "long_run"), 0)
-        target = max(candidates, key=lambda i: abs(i - long_idx))
-        new_day = _rebuild_day(plan.plan[target], "rest", ctx.pace_zones, ctx=ctx)
-        return _replace_day(plan, target, new_day)
+        while sum(1 for d in plan.plan if d.session_type == "rest") < ctx.plan_policy.min_rest_days:
+            candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "base"]
+            if not candidates:
+                candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "recovery"]
+            if not candidates:
+                candidates = [i for i, d in enumerate(plan.plan) if d.session_type == "quality"]
+            if not candidates:
+                return plan
+            long_idx = next((i for i, d in enumerate(plan.plan) if d.session_type == "long_run"), 0)
+            target = max(candidates, key=lambda i: abs(i - long_idx))
+            new_day = _rebuild_day(plan.plan[target], "rest", ctx.pace_zones, ctx=ctx)
+            plan = _replace_day(plan, target, new_day)
+        return plan
 
     def describe(self, ctx):
-        return "7일 계획 범위에서 최소 1일 휴식을 보장합니다."
+        return f"7일 계획 범위에서 최소 {ctx.plan_policy.min_rest_days}일 휴식을 보장합니다."
 
 
 class AcwrCap:
-    """주간 계획 러닝 km / chronic_weekly > 1.5 → duration 균등 축소.
+    """7일 계획 러닝 km / chronic_7d > 사용자 정책 상한 → duration 균등 축소.
 
-    chronic_ewma_load 는 일일 평균(km/day)이므로 주간 비교를 위해 ×7 한다.
+    chronic_ewma_load 는 일일 평균(km/day)이므로 7일 계획 비교를 위해 ×7 한다.
     """
 
     rule_id = "acwr_cap"
     severity: Severity = "block"
-    TARGET_RATIO = 1.4
-    CAP_RATIO = 1.5
 
     @staticmethod
     def _chronic_weekly(ctx: "CoachingContext") -> float:
@@ -798,7 +800,7 @@ class AcwrCap:
             return []
         planned_km = _total_planned_km(plan, ctx.pace_zones)
         ratio = planned_km / chronic_weekly
-        if ratio <= self.CAP_RATIO:
+        if ratio <= ctx.plan_policy.acwr_cap_ratio:
             return []
         return [
             Violation(
@@ -806,7 +808,7 @@ class AcwrCap:
                 severity=self.severity,
                 message=(
                     f"ACWR {ratio:.2f} (planned {planned_km:.1f}km vs chronic "
-                    f"{chronic_weekly:.1f}km/wk) > {self.CAP_RATIO}"
+                    f"{chronic_weekly:.1f}km/7d) > {ctx.plan_policy.acwr_cap_ratio}"
                 ),
                 day_index=None,
             )
@@ -820,7 +822,7 @@ class AcwrCap:
         if planned_km <= 0:
             return plan
         current_ratio = planned_km / chronic_weekly
-        if current_ratio <= self.TARGET_RATIO:
+        if current_ratio <= ctx.plan_policy.acwr_target_ratio:
             return plan
 
         # 1단계: 필요시 구조적 축소를 반복 — 가장 긴 base/recovery 를 rest 로 전환.
@@ -828,7 +830,7 @@ class AcwrCap:
         # CAP_RATIO 안으로 들어오거나 변환 대상이 떨어질 때까지 반복.
         structural_plan = plan
         current_km = planned_km
-        while current_km / chronic_weekly > self.CAP_RATIO:
+        while current_km / chronic_weekly > ctx.plan_policy.acwr_cap_ratio:
             reduced = self._convert_longest_to_rest(structural_plan, ctx)
             if reduced is structural_plan:
                 break  # 더 줄일 대상 없음
@@ -837,9 +839,9 @@ class AcwrCap:
 
         # 2단계: 남은 날들에 대해 duration 스케일링으로 미세 조정.
         current_ratio = current_km / chronic_weekly
-        if current_ratio <= self.TARGET_RATIO:
+        if current_ratio <= ctx.plan_policy.acwr_target_ratio:
             return structural_plan
-        scale = self.TARGET_RATIO / current_ratio  # < 1
+        scale = ctx.plan_policy.acwr_target_ratio / current_ratio  # < 1
         new_days = []
         for day in structural_plan.plan:
             if day.session_type == "rest":
@@ -884,12 +886,16 @@ class AcwrCap:
     def describe(self, ctx):
         chronic_weekly = self._chronic_weekly(ctx)
         if chronic_weekly > 0:
-            cap_km = chronic_weekly * self.CAP_RATIO
+            cap_ratio = ctx.plan_policy.acwr_cap_ratio
+            cap_km = chronic_weekly * cap_ratio
             return (
                 f"7일 총 러닝량은 {cap_km:.0f}km 이하여야 합니다 "
-                f"(chronic load {chronic_weekly:.1f}km/7d 기준 ACWR ≤ {self.CAP_RATIO})."
+                f"(chronic load {chronic_weekly:.1f}km/7d 기준 ACWR ≤ {cap_ratio})."
             )
-        return "7일 러닝량의 ACWR(acute:chronic) 를 1.5 이하로 유지합니다."
+        return (
+            "7일 러닝량의 ACWR(acute:chronic) 를 "
+            f"{ctx.plan_policy.acwr_cap_ratio} 이하로 유지합니다."
+        )
 
 
 class MaxDurationPerDay:
@@ -1316,14 +1322,14 @@ class PlanStartsToday:
 DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     PlanStartsToday(),  # 날짜 정합성 먼저
     InjuryBlockQuality(),
-    MaxOneLongRun(),
+    LongRunCap(),
     PreferLongRunAvailability(),
     NoBackToBackQuality(),
     NoQualityAfterLongRun(),
     Quality48hSpacing(),
-    WeeklyHardCap(),
+    HardSessionCap(),
     RespectUnavailability(),
-    MinOneRestPerWeek(),
+    MinRestDays(),
     AcwrCap(),
     MaxDurationPerDay(),
     NonRestHasSteps(),

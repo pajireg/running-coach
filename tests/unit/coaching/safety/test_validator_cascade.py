@@ -65,7 +65,7 @@ class TestValidatorEndToEnd:
 
 class TestRuleSpecificInteraction:
     def test_quality_removed_then_rest_injected(self, injured_ctx):
-        """severe injury → quality 전환 후에도 rest 부족하면 MinOneRestPerWeek 가 마무리."""
+        """severe injury → quality 전환 후에도 rest 부족하면 MinRestDays 가 마무리."""
         validator = SafetyValidator(rules=DEFAULT_SAFETY_RULES)
         plan = make_plan(["quality", "base", "base", "base", "base", "long_run", "base"])
         result = validator.validate(plan, injured_ctx)

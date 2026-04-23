@@ -118,7 +118,7 @@ def _full_ctx() -> CoachingContext:
 
 SAFETY_RULES = [
     "quality/long_run 세션 사이 최소 1일 간격을 둡니다.",
-    "주간 최소 1일 휴식을 보장합니다.",
+    "7일 계획 범위에서 최소 1일 휴식을 보장합니다.",
     "모든 step pace 는 pace safety band 안에서 선택합니다.",
 ]
 
@@ -219,7 +219,8 @@ class TestPromptSections:
 
     def test_contains_decision_tasks(self, rendered):
         assert "결정 과제" in rendered
-        assert "weekly_volume_target_km" in rendered
+        assert "sevenDayVolumeTargetKm" in rendered
+        assert "weekly_volume_target_km" not in rendered
         assert "sessionType" in rendered
         assert "workoutType" in rendered
 
@@ -267,6 +268,8 @@ class TestContextAsDict:
         assert "paceCapability" in d
         assert "safetyBands" in d["paceCapability"]
         assert d["placementConstraints"]["longRunAllowedDates"][0]["date"] == "2026-04-25"
+        assert d["planPolicy"]["maxLongRuns"] == 1
+        assert d["planPolicy"]["maxHardSessions"] == 2
         assert d["workoutCatalog"]["Threshold"]["sessionType"] == "quality"
         assert len(d["executionHistory14d"]) == 1
         assert d["activeInjury"]["injuryArea"] == "right knee"

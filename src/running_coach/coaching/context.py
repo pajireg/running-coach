@@ -96,6 +96,18 @@ class TrainingBlockSnapshot:
 
 
 @dataclass(frozen=True)
+class PlanPolicy:
+    """사용자별로 달라질 수 있는 7일 계획 안전 정책."""
+
+    horizon_days: int = 7
+    max_long_runs: int = 1
+    max_hard_sessions: int = 2
+    min_rest_days: int = 1
+    acwr_cap_ratio: float = 1.5
+    acwr_target_ratio: float = 1.4
+
+
+@dataclass(frozen=True)
 class RaceGoalSnapshot:
     """사용자가 설정한 목표 레이스."""
 
@@ -135,6 +147,7 @@ class CoachingContext:
     race_goal: Optional[RaceGoalSnapshot] = None
     training_background: TrainingBackground = field(default_factory=TrainingBackground)
     replan_reasons: list[str] = field(default_factory=list)
+    plan_policy: PlanPolicy = field(default_factory=PlanPolicy)
 
     def availability_for(self, weekday: int) -> AvailabilitySlot:
         """해당 요일 가용성 반환 (없으면 기본값)."""
@@ -189,6 +202,7 @@ class CoachingContextBuilder:
             coaching_state.get("subjectiveFeedback") or {}, as_of
         )
         training_block = self._build_training_block(planning_constraints.get("trainingBlock") or {})
+        plan_policy = self._build_plan_policy(planning_constraints.get("planPolicy") or {})
         race_goal = self._build_race_goal(planning_constraints.get("raceGoal") or {})
         training_background = TrainingBackground(
             recent_6_weeks=list(background_raw.get("recent6Weeks") or []),
@@ -209,6 +223,7 @@ class CoachingContextBuilder:
             race_goal=race_goal,
             training_background=training_background,
             replan_reasons=list(replan_reasons or []),
+            plan_policy=plan_policy,
         )
 
     # -- field builders -----------------------------------------------------
@@ -339,13 +354,49 @@ class CoachingContextBuilder:
     ) -> Optional[TrainingBlockSnapshot]:
         if not raw or raw.get("phase") is None:
             return None
-        weekly = raw.get("weeklyVolumeTargetKm")
+        weekly = raw.get("sevenDayVolumeTargetKm", raw.get("weeklyVolumeTargetKm"))
         return TrainingBlockSnapshot(
             phase=raw.get("phase"),
             focus=raw.get("focus"),
             weekly_volume_target_km=float(weekly) if weekly is not None else None,
             starts_on=_parse_iso_date(raw.get("startsOn")),
             ends_on=_parse_iso_date(raw.get("endsOn")),
+        )
+
+    def _build_plan_policy(self, raw: dict[str, Any]) -> PlanPolicy:
+        def as_int(name: str, default: int, minimum: int = 0) -> int:
+            try:
+                value = int(raw.get(name, default))
+            except (TypeError, ValueError):
+                return default
+            return max(minimum, value)
+
+        def as_float(name: str, default: float, minimum: float = 0.0) -> float:
+            try:
+                value = float(raw.get(name, default))
+            except (TypeError, ValueError):
+                return default
+            return max(minimum, value)
+
+        horizon_days = as_int("horizonDays", PlanPolicy.horizon_days, minimum=1)
+        max_long_runs = min(as_int("maxLongRuns", PlanPolicy.max_long_runs), horizon_days)
+        max_hard_sessions = min(
+            as_int("maxHardSessions", PlanPolicy.max_hard_sessions),
+            horizon_days,
+        )
+        min_rest_days = min(as_int("minRestDays", PlanPolicy.min_rest_days), horizon_days)
+        acwr_cap_ratio = as_float("acwrCapRatio", PlanPolicy.acwr_cap_ratio, minimum=0.1)
+        acwr_target_ratio = min(
+            as_float("acwrTargetRatio", PlanPolicy.acwr_target_ratio, minimum=0.1),
+            acwr_cap_ratio,
+        )
+        return PlanPolicy(
+            horizon_days=horizon_days,
+            max_long_runs=max_long_runs,
+            max_hard_sessions=max_hard_sessions,
+            min_rest_days=min_rest_days,
+            acwr_cap_ratio=acwr_cap_ratio,
+            acwr_target_ratio=acwr_target_ratio,
         )
 
     def _build_race_goal(self, raw: dict[str, Any]) -> Optional[RaceGoalSnapshot]:
