@@ -23,12 +23,31 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     planner_mode TEXT CHECK (planner_mode IN ('legacy', 'llm_driven')),
     llm_provider TEXT CHECK (llm_provider IN ('gemini', 'openai', 'anthropic')),
     llm_model TEXT,
+    locale TEXT,
+    schedule_times TEXT,
+    include_strength BOOLEAN NOT NULL DEFAULT FALSE,
     coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE user_preferences
     ADD COLUMN IF NOT EXISTS coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE user_preferences
+    ADD COLUMN IF NOT EXISTS locale TEXT;
+ALTER TABLE user_preferences
+    ADD COLUMN IF NOT EXISTS schedule_times TEXT;
+ALTER TABLE user_preferences
+    ADD COLUMN IF NOT EXISTS include_strength BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS user_api_keys (
+    user_api_key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    key_name TEXT NOT NULL DEFAULT 'default',
+    key_hash TEXT NOT NULL UNIQUE,
+    last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,7 +1,9 @@
 # Long-Term Productization Plan
 
 This document is the implementation-facing plan for evolving Running Coach from a
-single-user CLI/service into a multi-user, mobile-friendly coaching backend.
+single-user CLI/service into a multi-user, mobile-friendly coaching backend and,
+over time, a multi-client coaching platform that supports Garmin Connect,
+Apple Watch + iPhone, and Wear OS + Android.
 
 Use **user** as the product and API term. The current code and schema still use
 `athlete` in several places; treat those names as legacy/internal compatibility
@@ -13,6 +15,18 @@ should use `user`.
 Running Coach should become an API-first backend that can serve multiple users,
 each with independent coaching history, preferences, integrations, and scheduled
 execution.
+
+Long term, the product should support multiple execution and data-ingestion
+surfaces:
+
+- Garmin Connect as an external training and workout-delivery provider;
+- Apple Watch + iPhone as a first-class mobile and wearable ecosystem;
+- Wear OS + Android as a first-class mobile and wearable ecosystem.
+
+The mobile app should eventually become the primary user-facing product surface
+for authentication, settings, feedback, notifications, workout review, and
+integration management. Watches should start as companion experiences tied to
+the phone app rather than independent product surfaces.
 
 The first production-oriented milestone is a **multi-user MVP**:
 
@@ -138,6 +152,67 @@ Google Calendar handling:
 - Store each user's authorized token JSON encrypted in Postgres.
 - Refresh tokens server-side when possible.
 - Mark the integration `reauth_required` when refresh fails.
+
+### Mobile and Wearable Product Strategy
+
+Running Coach should evolve from a Garmin-centric operator tool into a
+multi-client coaching product that supports:
+
+- `Garmin Connect`
+- `Apple Watch + iPhone`
+- `Wear OS + Android`
+
+Product direction:
+
+- Keep the coaching engine, safety rules, and planning pipeline device-agnostic.
+- Treat mobile apps as the primary user-facing product surface over time.
+- Treat watch experiences as companion surfaces for workout execution, glanceable
+  status, and notifications, not as the initial system of record for identity,
+  billing, or configuration.
+- Keep Garmin as a supported first-class provider rather than a legacy-only
+  bridge.
+- Expand to Apple and Android ecosystems as additional product channels, not as
+  a rewrite of the coaching core.
+
+Platform-specific SDK and device logic should stay inside client and integration
+boundaries. Coaching, storage, and orchestration layers should continue to work
+with provider-neutral concepts such as user, activity, recovery state, planned
+workout, and workout-delivery target.
+
+### Health Data and Workout Delivery Strategy
+
+Long-term health and workout integrations should follow a provider-neutral model
+with ecosystem-specific adapters.
+
+Apple ecosystem:
+
+- Use `HealthKit` as the primary health and workout data ingress point on
+  iPhone.
+- Support `Apple Watch` workout execution and status delivery through a watchOS
+  companion app tied to the iPhone app.
+- Allow Apple ecosystem users to receive coaching value even when they do not
+  connect Garmin.
+
+Android ecosystem:
+
+- Use `Health Connect` as the primary Android health-data platform.
+- Treat `Google Fit` as a compatibility or migration path, not as the default
+  long-term Android integration target.
+- Support `Wear OS` workout execution and status delivery through a companion
+  experience tied to the Android app.
+
+Cross-platform principles:
+
+- Normalize provider-specific raw fields into provider-neutral internal models
+  before coaching logic reads them.
+- Keep the internal source of truth in Postgres and user-scoped orchestration,
+  not in any device ecosystem.
+- Allow one user to connect multiple providers over time.
+- Define source-priority and merge rules explicitly when multi-provider conflict
+  handling is implemented, rather than hard-coding implicit precedence into the
+  coaching layer.
+- Continue treating Google Calendar as a presentation and review layer, not as
+  a health-data or execution source of truth.
 
 ### LLM Provider and Cost
 
@@ -311,6 +386,23 @@ MVP endpoints:
 - `POST /v1/goals`
 - `POST /v1/injuries`
 
+The Phase 2 API should also leave room for future native mobile ecosystems
+without forcing a redesign of user identity or integration storage. Long-term
+capability areas include:
+
+- mobile session and device registration;
+- per-ecosystem integration status;
+- workout delivery target selection;
+- push-notification preferences;
+- background sync capability reporting.
+
+The same user integration credential model should be able to accommodate future
+providers such as:
+
+- `apple_healthkit`
+- `android_health_connect`
+- `google_fit_legacy`
+
 Admin endpoints are intentionally separate from `/v1` user endpoints:
 
 - `GET /admin/llm-settings`
@@ -377,6 +469,69 @@ Safe migration path:
 Do not mix this broad rename with behavior changes in Garmin sync, scheduler
 logic, or coaching rules.
 
+### Phase 5: Mobile App Foundation
+
+Goal: make iOS and Android apps first-class product surfaces without changing
+coaching semantics.
+
+Key changes:
+
+- Add mobile-oriented auth/session flows on top of the user identity model.
+- Add device registration, notification preference, and sync-status primitives.
+- Expose plan review, feedback input, settings, and integration status in
+  mobile-ready APIs.
+- Keep the mobile app as a thin product layer over existing orchestrator and
+  storage services.
+
+Acceptance criteria:
+
+- A user can authenticate from a mobile client and read current plan data.
+- Mobile clients can update settings, submit feedback, and inspect integration
+  status without direct access to internal storage concepts.
+- Device registration and notification preferences are user-scoped and
+  independently stored.
+
+### Phase 6: Apple Ecosystem Integration
+
+Goal: support an Apple-native coaching experience through iPhone and Apple
+Watch.
+
+Key changes:
+
+- Add `HealthKit` ingestion through the iPhone app.
+- Add a watchOS companion app for workout delivery, status display, and
+  completion signaling.
+- Add Apple ecosystem integration state to the user credential and integration
+  model.
+
+Acceptance criteria:
+
+- A user can connect the Apple ecosystem without connecting Garmin.
+- HealthKit-backed runs and relevant recovery signals can enter the coaching
+  pipeline through normalized provider-neutral models.
+- Planned workouts can be delivered to the Apple Watch companion path with
+  trackable sync status.
+
+### Phase 7: Android Ecosystem Integration
+
+Goal: support an Android-native coaching experience through Android phones and
+Wear OS devices.
+
+Key changes:
+
+- Add `Health Connect` ingestion as the default Android health-data path.
+- Add a Wear OS companion experience for workout delivery, status display, and
+  completion signaling.
+- Support `Google Fit` only as a compatibility or migration layer where needed.
+
+Acceptance criteria:
+
+- A user can connect Android-native health data without Garmin.
+- Health Connect-backed runs and relevant recovery signals can enter the
+  coaching pipeline through normalized provider-neutral models.
+- Planned workouts can be delivered to the Wear OS companion path with
+  trackable sync status.
+
 ## Data and Deletion Requirements
 
 Any new user-scoped table must:
@@ -387,6 +542,13 @@ Any new user-scoped table must:
 - avoid singleton assumptions;
 - avoid storing secrets in plaintext;
 - use bounded enum-like values where labels may become metrics.
+
+New mobile and wearable integration tables must also:
+
+- store credentials or device linkage state encrypted at rest where applicable;
+- remain user-scoped rather than process-scoped;
+- avoid embedding provider-specific SDK assumptions into coaching-domain
+  tables.
 
 Do not add metrics with unbounded labels such as user ID, date, activity ID, or
 Garmin workout ID.
@@ -429,16 +591,29 @@ Integration tests:
 - Docker service startup for a target user ID.
 - A targeted `auto` run with persisted sync state.
 
+Future mobile ecosystem tests:
+
+- Apple ecosystem integration state can be stored and loaded per user.
+- Android ecosystem integration state can be stored and loaded per user.
+- Provider-normalized activity and recovery payloads can enter the same
+  coaching pipeline without Garmin-specific assumptions.
+- Workout delivery status can be tracked per provider target without mutating
+  unrelated providers.
+
 When changes affect Garmin uploads, Google Calendar sync, scheduling, or
 database persistence, verify with the Docker stack before reporting completion.
 
 ## Non-Goals for the First MVP
 
 - Building the mobile app UI.
+- Building the watchOS app or Wear OS app.
 - Full email/password account login.
 - User-owned LLM API keys.
 - External KMS integration.
+- HealthKit, Health Connect, or Google Fit ingestion in the first multi-user
+  MVP.
 - Rewriting coaching rules or planner behavior.
+- Rewriting the Garmin pipeline just to make mobile expansion possible.
 - Fully renaming every internal `athlete` symbol in one pass.
 - Multi-user DB polling scheduler in a single process.
 
@@ -454,3 +629,8 @@ Use these defaults unless a later plan explicitly overrides them:
 - Scheduler model: one user per worker container.
 - Planner behavior: preserve current `legacy` and `llm_driven` semantics.
 - Compatibility: keep existing CLI and `.env` path working during migration.
+- Android health platform default: `Health Connect`.
+- Google Fit role: compatibility and migration path, not the default Android
+  target.
+- Garmin role: supported long-term provider alongside Apple and Android native
+  ecosystems.

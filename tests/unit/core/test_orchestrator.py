@@ -51,9 +51,11 @@ class _FakeGarminClient:
 class _FakeGeminiClient:
     def __init__(self):
         self.call_count = 0
+        self.last_create_kwargs = None
 
     def create_training_plan(self, **_kwargs):
         self.call_count += 1
+        self.last_create_kwargs = _kwargs
         return TrainingPlan.model_validate(
             {
                 "plan": [
@@ -287,3 +289,33 @@ def test_auto_mode_skips_llm_when_plan_is_fresh():
     assert gemini_client.call_count == 0
     assert garmin_client.cleanup_ids is None
     assert garmin_client.workout_manager.created == []
+
+
+def test_run_once_uses_user_context_include_strength():
+    gemini_client = _FakeGeminiClient()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(
+            race=SimpleNamespace(has_goal=False),
+            persist_history=True,
+            include_strength=False,
+            garmin_email="user@example.com",
+            max_heart_rate=None,
+        ),
+        garmin_client=_FakeGarminClient(),
+        gemini_client=gemini_client,
+        calendar_client=_FakeCalendarClient(),
+        history_service=_FakeHistoryService(),
+        user_context=None,
+    )
+
+    result = TrainingOrchestrator(container).run_once(
+        user_context=SimpleNamespace(
+            user_id="user-1",
+            external_key="runner-1",
+            include_strength=True,
+            garmin_email="user@example.com",
+        )
+    )
+
+    assert result is True
+    assert gemini_client.last_create_kwargs["include_strength"] is True

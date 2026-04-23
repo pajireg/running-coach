@@ -2,7 +2,9 @@
 
 import time
 from datetime import date, datetime, timedelta
+from typing import Optional
 
+from ..models.user import UserContext
 from ..utils.logger import get_logger
 from .container import ServiceContainer
 
@@ -19,7 +21,11 @@ class TrainingOrchestrator:
         """
         self.container = container
 
-    def run_once(self, run_mode: str = "plan") -> bool:
+    def run_once(
+        self,
+        run_mode: str = "plan",
+        user_context: Optional[UserContext] = None,
+    ) -> bool:
         """전체 파이프라인 1회 실행
 
         Returns:
@@ -27,6 +33,14 @@ class TrainingOrchestrator:
         """
         logger.info(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 업데이트 시작...")
         logger.info(f"실행 모드: {run_mode}")
+        active_user = user_context or getattr(self.container, "user_context", None)
+        include_strength = (
+            active_user.include_strength
+            if active_user is not None
+            else self.container.settings.include_strength
+        )
+        if active_user is not None:
+            logger.info("대상 사용자: %s (%s)", active_user.user_id, active_user.external_key)
 
         try:
             # 대회 정보 로깅
@@ -63,7 +77,11 @@ class TrainingOrchestrator:
                     return True
                 if plan_mode == "extend":
                     logger.info("정상 이수 확인: 기존 플랜 6일 유지 + 1일 연장 모드")
-                    plan = self._extend_plan(metrics, training_background)
+                    plan = self._extend_plan(
+                        metrics,
+                        training_background,
+                        include_strength=include_strength,
+                    )
                     if not plan:
                         logger.error("계획 연장 실패")
                         return False
@@ -88,7 +106,7 @@ class TrainingOrchestrator:
             plan = self.container.gemini_client.create_training_plan(
                 metrics=metrics,
                 race_config=self.container.settings.race,
-                include_strength=self.container.settings.include_strength,
+                include_strength=include_strength,
                 training_background=training_background,
                 replan_reasons=replan_reasons,
             )
@@ -126,9 +144,14 @@ class TrainingOrchestrator:
             return
 
         try:
+            active_user = getattr(self.container, "user_context", None)
             self.container.history_service.db.ping()
             self.container.history_service.ensure_athlete(
-                garmin_email=self.container.settings.garmin_email,
+                garmin_email=(
+                    active_user.garmin_email
+                    if active_user is not None and active_user.garmin_email
+                    else self.container.settings.garmin_email
+                ),
                 max_heart_rate=self.container.settings.max_heart_rate,
             )
             self.container.history_service.record_daily_metrics(metrics)
@@ -288,7 +311,7 @@ class TrainingOrchestrator:
             return "replan", reasons
         return "skip", reasons
 
-    def _extend_plan(self, metrics, training_background):
+    def _extend_plan(self, metrics, training_background, include_strength: bool):
         """정상 이수 후 기존 6일 유지 + 1일 연장."""
         from datetime import timedelta
 
@@ -303,7 +326,7 @@ class TrainingOrchestrator:
             return self.container.gemini_client.create_training_plan(
                 metrics=metrics,
                 race_config=self.container.settings.race,
-                include_strength=self.container.settings.include_strength,
+                include_strength=include_strength,
                 training_background=training_background,
                 replan_reasons=["extend_fallback_insufficient_days"],
             )
@@ -313,7 +336,7 @@ class TrainingOrchestrator:
             new_date=new_date,
             metrics=metrics,
             race_config=self.container.settings.race,
-            include_strength=self.container.settings.include_strength,
+            include_strength=include_strength,
         )
 
     def _upload_garmin_workouts(self, plan) -> None:

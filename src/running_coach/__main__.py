@@ -4,12 +4,12 @@ import argparse
 import time
 from datetime import datetime
 
+from .application import CoachingApplicationService, UserApplicationService
 from .config.constants import APP_CLI_NAME, APP_NAME, DEFAULT_SCHEDULE_HOUR
 from .config.settings import get_settings
-from .core.container import ServiceContainer
-from .core.orchestrator import TrainingOrchestrator
 from .core.scheduler import SchedulerService
 from .models.feedback import SubjectiveFeedback
+from .storage import AdminSettingsService, DatabaseClient, UserService
 from .utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -113,16 +113,22 @@ def main():
         logger.error(f"설정 로드 실패: {e}")
         return
 
-    # 컨테이너 생성
-    container = ServiceContainer.create(settings)
+    db = DatabaseClient(settings.database_url)
+    admin_settings = AdminSettingsService(
+        db=db,
+        deployment_defaults=settings.deployment_llm_settings(),
+    )
+    coaching_app = CoachingApplicationService(settings=settings)
+    user_app = UserApplicationService(
+        user_service=UserService(db=db),
+        admin_settings=admin_settings,
+        settings=settings,
+        coaching_service=coaching_app,
+    )
 
     if args.command == "feedback":
         try:
-            container.history_service.db.ping()
-            container.history_service.ensure_athlete(
-                garmin_email=settings.garmin_email,
-                max_heart_rate=settings.max_heart_rate,
-            )
+            runtime_user = user_app.ensure_local_runtime_user_context()
             feedback = SubjectiveFeedback(
                 feedbackDate=args.feedback_date,
                 fatigueScore=args.fatigue,
@@ -133,7 +139,7 @@ def main():
                 painNotes=args.pain_notes,
                 notes=args.notes,
             )
-            container.history_service.record_subjective_feedback(feedback)
+            coaching_app.record_feedback(runtime_user, feedback)
             logger.info(f"주관 피드백 저장 완료: {feedback.feedback_date}")
         except Exception as e:
             logger.error(f"주관 피드백 저장 실패: {e}")
@@ -141,12 +147,9 @@ def main():
 
     if args.command == "availability":
         try:
-            container.history_service.db.ping()
-            container.history_service.ensure_athlete(
-                garmin_email=settings.garmin_email,
-                max_heart_rate=settings.max_heart_rate,
-            )
-            container.history_service.upsert_availability_rule(
+            runtime_user = user_app.ensure_local_runtime_user_context()
+            coaching_app.update_availability(
+                runtime_user,
                 weekday=args.weekday,
                 is_available=args.is_available == "true",
                 max_duration_minutes=args.max_minutes,
@@ -159,12 +162,9 @@ def main():
 
     if args.command == "goal":
         try:
-            container.history_service.db.ping()
-            container.history_service.ensure_athlete(
-                garmin_email=settings.garmin_email,
-                max_heart_rate=settings.max_heart_rate,
-            )
-            container.history_service.upsert_race_goal(
+            runtime_user = user_app.ensure_local_runtime_user_context()
+            coaching_app.upsert_race_goal(
+                runtime_user,
                 goal_name=args.name,
                 race_date=datetime.fromisoformat(args.race_date).date() if args.race_date else None,
                 distance=args.distance,
@@ -179,12 +179,9 @@ def main():
 
     if args.command == "block":
         try:
-            container.history_service.db.ping()
-            container.history_service.ensure_athlete(
-                garmin_email=settings.garmin_email,
-                max_heart_rate=settings.max_heart_rate,
-            )
-            container.history_service.upsert_training_block(
+            runtime_user = user_app.ensure_local_runtime_user_context()
+            coaching_app.upsert_training_block(
+                runtime_user,
                 phase=args.phase,
                 starts_on=datetime.fromisoformat(args.starts_on).date(),
                 ends_on=datetime.fromisoformat(args.ends_on).date(),
@@ -198,12 +195,9 @@ def main():
 
     if args.command == "injury":
         try:
-            container.history_service.db.ping()
-            container.history_service.ensure_athlete(
-                garmin_email=settings.garmin_email,
-                max_heart_rate=settings.max_heart_rate,
-            )
-            container.history_service.upsert_injury_status(
+            runtime_user = user_app.ensure_local_runtime_user_context()
+            coaching_app.upsert_injury_status(
+                runtime_user,
                 status_date=datetime.fromisoformat(args.date).date(),
                 injury_area=args.area,
                 severity=args.severity,
@@ -224,16 +218,21 @@ def main():
     if args.mode:
         settings.service_run_mode = args.mode
     settings.include_strength = args.include_strength
-    orchestrator = TrainingOrchestrator(container)
+    runtime_user = user_app.ensure_local_runtime_user_context()
 
     # 실행 모드 분기
     if args.service:
         # 서비스 모드
-        scheduler = SchedulerService(orchestrator, settings)
+        scheduler = SchedulerService(
+            lambda: coaching_app.run_for_user_context(runtime_user, settings.service_run_mode),
+            schedule_times=settings.parsed_schedule_times(),
+            run_mode=settings.service_run_mode,
+            include_strength=runtime_user.include_strength,
+        )
         scheduler.run()
     else:
         # 1회 실행 모드
-        orchestrator.run_once(run_mode=args.mode or "plan")
+        coaching_app.run_for_user_context(runtime_user, run_mode=args.mode or "plan")
 
 
 if __name__ == "__main__":

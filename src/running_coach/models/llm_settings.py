@@ -13,9 +13,9 @@ LLMProvider = Literal["gemini", "openai", "anthropic"]
 class LLMSettings(BaseModel):
     """실제 planner 호출에 적용되는 LLM 설정."""
 
-    planner_mode: PlannerMode = "legacy"
-    llm_provider: LLMProvider = "gemini"
-    llm_model: str
+    planner_mode: PlannerMode = Field(default="legacy", alias="plannerMode")
+    llm_provider: LLMProvider = Field(default="gemini", alias="llmProvider")
+    llm_model: str = Field(alias="llmModel")
 
     model_config = ConfigDict(populate_by_name=True)
 
