@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 
 from running_coach.application.coaching_service import CoachingApplicationService
 from running_coach.application.user_service import UserApplicationService
+from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.models.llm_settings import LLMSettings, UserLLMSettings
 from running_coach.models.user import UserCreateRequest, UserPreferencesPatch, UserRecord
 from running_coach.storage.user_service import UserService
@@ -91,12 +93,19 @@ class FakeAdminSettings:
 
 class FakeCoachingService(CoachingApplicationService):
     def __init__(self):
-        super().__init__(settings=SimpleNamespace(garmin_email="runner@example.com"))  # type: ignore[arg-type]
+        super().__init__(
+            settings=SimpleNamespace(garmin_email="runner@example.com", max_heart_rate=None),  # type: ignore[arg-type]
+            user_state_service=SimpleNamespace(db=SimpleNamespace(ping=lambda: None)),  # type: ignore[arg-type]
+        )
         self.last_sync = None
+        self.feedback_calls = []
 
     def run_for_user_context(self, user_context, run_mode: str = "auto"):  # type: ignore[override]
         self.last_sync = (user_context.user_id, run_mode)
         return SimpleNamespace(status="completed", mode=run_mode)
+
+    def record_feedback(self, user_context, feedback):  # type: ignore[override]
+        self.feedback_calls.append((user_context.user_id, feedback.feedback_date))
 
 
 def _service(
@@ -155,3 +164,14 @@ def test_run_user_sync_delegates_to_coaching_service():
 
     assert response.status == "completed"
     assert coaching_service.last_sync == ("user-1", "plan")
+
+
+def test_record_feedback_delegates_to_coaching_service():
+    service, _, coaching_service = _service()
+
+    service.record_feedback(
+        "user-1",
+        SubjectiveFeedback.model_validate({"feedbackDate": "2026-04-24", "fatigueScore": 6}),
+    )
+
+    assert coaching_service.feedback_calls == [("user-1", date(2026, 4, 24))]

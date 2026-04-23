@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .llm_settings import LLMSettings, LLMProvider, PlannerMode
+from .llm_settings import LLMProvider, LLMSettings, PlannerMode
 
 
 class UserCreateRequest(BaseModel):

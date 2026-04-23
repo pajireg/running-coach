@@ -9,7 +9,7 @@ from .config.constants import APP_CLI_NAME, APP_NAME, DEFAULT_SCHEDULE_HOUR
 from .config.settings import get_settings
 from .core.scheduler import SchedulerService
 from .models.feedback import SubjectiveFeedback
-from .storage import AdminSettingsService, DatabaseClient, UserService
+from .storage import AdminSettingsService, DatabaseClient, UserCoachingStateService, UserService
 from .utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -118,7 +118,10 @@ def main():
         db=db,
         deployment_defaults=settings.deployment_llm_settings(),
     )
-    coaching_app = CoachingApplicationService(settings=settings)
+    coaching_app = CoachingApplicationService(
+        settings=settings,
+        user_state_service=UserCoachingStateService(db=db),
+    )
     user_app = UserApplicationService(
         user_service=UserService(db=db),
         admin_settings=admin_settings,
@@ -139,7 +142,7 @@ def main():
                 painNotes=args.pain_notes,
                 notes=args.notes,
             )
-            coaching_app.record_feedback(runtime_user, feedback)
+            user_app.record_feedback(runtime_user.user_id, feedback)
             logger.info(f"주관 피드백 저장 완료: {feedback.feedback_date}")
         except Exception as e:
             logger.error(f"주관 피드백 저장 실패: {e}")
@@ -148,8 +151,8 @@ def main():
     if args.command == "availability":
         try:
             runtime_user = user_app.ensure_local_runtime_user_context()
-            coaching_app.update_availability(
-                runtime_user,
+            user_app.update_availability(
+                runtime_user.user_id,
                 weekday=args.weekday,
                 is_available=args.is_available == "true",
                 max_duration_minutes=args.max_minutes,
@@ -163,8 +166,8 @@ def main():
     if args.command == "goal":
         try:
             runtime_user = user_app.ensure_local_runtime_user_context()
-            coaching_app.upsert_race_goal(
-                runtime_user,
+            user_app.upsert_race_goal(
+                runtime_user.user_id,
                 goal_name=args.name,
                 race_date=datetime.fromisoformat(args.race_date).date() if args.race_date else None,
                 distance=args.distance,
@@ -180,8 +183,8 @@ def main():
     if args.command == "block":
         try:
             runtime_user = user_app.ensure_local_runtime_user_context()
-            coaching_app.upsert_training_block(
-                runtime_user,
+            user_app.upsert_training_block(
+                runtime_user.user_id,
                 phase=args.phase,
                 starts_on=datetime.fromisoformat(args.starts_on).date(),
                 ends_on=datetime.fromisoformat(args.ends_on).date(),
@@ -196,8 +199,8 @@ def main():
     if args.command == "injury":
         try:
             runtime_user = user_app.ensure_local_runtime_user_context()
-            coaching_app.upsert_injury_status(
-                runtime_user,
+            user_app.upsert_injury_status(
+                runtime_user.user_id,
                 status_date=datetime.fromisoformat(args.date).date(),
                 injury_area=args.area,
                 severity=args.severity,
@@ -224,7 +227,7 @@ def main():
     if args.service:
         # 서비스 모드
         scheduler = SchedulerService(
-            lambda: coaching_app.run_for_user_context(runtime_user, settings.service_run_mode),
+            lambda: user_app.run_user_sync(runtime_user.user_id, settings.service_run_mode),
             schedule_times=settings.parsed_schedule_times(),
             run_mode=settings.service_run_mode,
             include_strength=runtime_user.include_strength,
@@ -232,7 +235,7 @@ def main():
         scheduler.run()
     else:
         # 1회 실행 모드
-        coaching_app.run_for_user_context(runtime_user, run_mode=args.mode or "plan")
+        user_app.run_user_sync(runtime_user.user_id, run_mode=args.mode or "plan")
 
 
 if __name__ == "__main__":

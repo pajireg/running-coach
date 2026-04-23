@@ -14,6 +14,8 @@ toward the target architecture in
 - Introduced `UserApplicationService` as the first user-scoped application layer.
 - Added `CoachingApplicationService` so CLI and future API/worker paths can call
   the same coaching workflows.
+- Added `UserCoachingStateService` to start decomposing write-side storage
+  responsibilities out of `CoachingHistoryService`.
 - Added `ServiceContainer.create_for_user(...)` and `UserContext`-aware
   orchestration.
 - Made planner execution honor resolved user LLM settings and user-scoped
@@ -27,6 +29,14 @@ toward the target architecture in
 - Split responsibility for user preference updates:
   - general user preferences stay in `UserService`;
   - LLM overrides are updated through `AdminSettingsService`.
+- Added user-scoped write endpoints under `/v1/me/*` for:
+  - feedback
+  - availability
+  - race goals
+  - training blocks
+  - injury status
+- Moved CLI write commands onto the same user-scoped application methods used by
+  the HTTP API.
 
 ### What this enables
 
@@ -34,17 +44,20 @@ toward the target architecture in
   - FastAPI user endpoints
   - the legacy CLI runtime
   - future worker entrypoints
+- The same user-scoped coaching input mutations can now be called from:
+  - FastAPI user endpoints
+  - the legacy CLI runtime
 - The codebase now has an explicit seam between:
   - identity/preferences resolution
   - coaching execution
+  - user-owned coaching state writes
   - transport surfaces such as CLI and HTTP
 
 ### Still not done
 
 - Per-user encrypted Garmin credentials in the database
 - True multi-user background workers and per-user schedules/timezones
-- Storage decomposition of `CoachingHistoryService`
-- User-scoped HTTP endpoints for feedback/goals/availability/injuries
+- Read-side and sync-side decomposition of `CoachingHistoryService`
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 

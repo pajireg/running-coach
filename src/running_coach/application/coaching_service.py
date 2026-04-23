@@ -10,6 +10,7 @@ from ..core.container import ServiceContainer
 from ..core.orchestrator import TrainingOrchestrator
 from ..models.feedback import SubjectiveFeedback
 from ..models.user import RunSyncResponse, UserContext
+from ..storage import UserCoachingStateService
 
 
 @dataclass
@@ -17,6 +18,7 @@ class CoachingApplicationService:
     """User-scoped application entrypoints for coaching workflows."""
 
     settings: Settings
+    user_state_service: UserCoachingStateService
 
     def run_for_user_context(
         self,
@@ -42,8 +44,8 @@ class CoachingApplicationService:
         )
 
     def record_feedback(self, user_context: UserContext, feedback: SubjectiveFeedback) -> None:
-        history_service = self._history_service(user_context)
-        history_service.record_subjective_feedback(feedback)
+        self._ensure_user_profile(user_context)
+        self.user_state_service.record_subjective_feedback(user_context.user_id, feedback)
 
     def update_availability(
         self,
@@ -54,8 +56,9 @@ class CoachingApplicationService:
         max_duration_minutes: int | None,
         preferred_session_type: str | None,
     ) -> None:
-        history_service = self._history_service(user_context)
-        history_service.upsert_availability_rule(
+        self._ensure_user_profile(user_context)
+        self.user_state_service.upsert_availability_rule(
+            user_context.user_id,
             weekday=weekday,
             is_available=is_available,
             max_duration_minutes=max_duration_minutes,
@@ -73,8 +76,9 @@ class CoachingApplicationService:
         target_pace: str | None,
         priority: int,
     ) -> None:
-        history_service = self._history_service(user_context)
-        history_service.upsert_race_goal(
+        self._ensure_user_profile(user_context)
+        self.user_state_service.upsert_race_goal(
+            user_context.user_id,
             goal_name=goal_name,
             race_date=race_date,
             distance=distance,
@@ -93,8 +97,9 @@ class CoachingApplicationService:
         focus: str | None,
         weekly_volume_target_km: float | None,
     ) -> None:
-        history_service = self._history_service(user_context)
-        history_service.upsert_training_block(
+        self._ensure_user_profile(user_context)
+        self.user_state_service.upsert_training_block(
+            user_context.user_id,
             phase=phase,
             starts_on=starts_on,
             ends_on=ends_on,
@@ -112,8 +117,9 @@ class CoachingApplicationService:
         notes: str | None,
         is_active: bool,
     ) -> None:
-        history_service = self._history_service(user_context)
-        history_service.upsert_injury_status(
+        self._ensure_user_profile(user_context)
+        self.user_state_service.upsert_injury_status(
+            user_context.user_id,
             status_date=status_date,
             injury_area=injury_area,
             severity=severity,
@@ -121,14 +127,11 @@ class CoachingApplicationService:
             is_active=is_active,
         )
 
-    def _history_service(self, user_context: UserContext):
-        container = ServiceContainer.create_for_user(
-            settings=self.settings,
-            user_context=user_context,
-        )
-        container.history_service.db.ping()
-        container.history_service.ensure_athlete(
+    def _ensure_user_profile(self, user_context: UserContext) -> None:
+        self.user_state_service.db.ping()
+        self.user_state_service.ensure_user_profile(
+            user_id=user_context.user_id,
             garmin_email=user_context.garmin_email or self.settings.garmin_email,
+            timezone=user_context.timezone,
             max_heart_rate=self.settings.max_heart_rate,
         )
-        return container.history_service

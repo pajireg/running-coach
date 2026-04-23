@@ -2,5 +2,6 @@
 
 from .feedback import SubjectiveFeedback
 from .user import UserContext
+from .user_coaching import MutationResponse
 
-__all__ = ["SubjectiveFeedback", "UserContext"]
+__all__ = ["MutationResponse", "SubjectiveFeedback", "UserContext"]

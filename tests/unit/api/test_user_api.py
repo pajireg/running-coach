@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -86,6 +88,27 @@ class FakeUserApplicationService:
         assert user_id == "user-1"
         return RunSyncResponse(status="completed", mode=run_mode)
 
+    def record_feedback(self, user_id: str, feedback) -> None:
+        assert user_id == "user-1"
+        assert feedback.feedback_date == date(2026, 4, 24)
+
+    def update_availability(self, user_id: str, **kwargs) -> None:
+        assert user_id == "user-1"
+        assert kwargs["weekday"] == 2
+        assert kwargs["is_available"] is True
+
+    def upsert_race_goal(self, user_id: str, **kwargs) -> None:
+        assert user_id == "user-1"
+        assert kwargs["goal_name"] == "10K PB"
+
+    def upsert_training_block(self, user_id: str, **kwargs) -> None:
+        assert user_id == "user-1"
+        assert kwargs["phase"] == "build"
+
+    def upsert_injury_status(self, user_id: str, **kwargs) -> None:
+        assert user_id == "user-1"
+        assert kwargs["injury_area"] == "calf"
+
 
 def _client() -> TestClient:
     app = FastAPI()
@@ -156,3 +179,29 @@ def test_sync_runs_uses_current_user():
 
     assert response.status_code == 200
     assert response.json() == {"status": "completed", "mode": "auto"}
+
+
+def test_feedback_endpoint_uses_current_user():
+    client = _client()
+
+    response = client.post(
+        "/v1/me/feedback",
+        headers={"Authorization": "Bearer rcu_test"},
+        json={"feedbackDate": "2026-04-24", "fatigueScore": 6},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_availability_endpoint_uses_current_user():
+    client = _client()
+
+    response = client.post(
+        "/v1/me/availability",
+        headers={"Authorization": "Bearer rcu_test"},
+        json={"weekday": 2, "isAvailable": True, "maxDurationMinutes": 45},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

@@ -6,7 +6,12 @@ from fastapi import FastAPI
 
 from ..application import CoachingApplicationService, UserApplicationService
 from ..config.settings import Settings, get_settings
-from ..storage import AdminSettingsService, DatabaseClient, UserService
+from ..storage import (
+    AdminSettingsService,
+    DatabaseClient,
+    UserCoachingStateService,
+    UserService,
+)
 from .admin import create_admin_router
 from .users import create_user_router
 
@@ -19,7 +24,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db=db,
         deployment_defaults=active_settings.deployment_llm_settings(),
     )
-    coaching_app = CoachingApplicationService(settings=active_settings)
+    coaching_app = CoachingApplicationService(
+        settings=active_settings,
+        user_state_service=UserCoachingStateService(db=db),
+    )
     user_app = UserApplicationService(
         user_service=UserService(db=db),
         admin_settings=admin_settings,

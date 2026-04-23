@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from ..config.settings import Settings
+from ..models.feedback import SubjectiveFeedback
 from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
     IntegrationStatus,
@@ -67,6 +69,87 @@ class UserApplicationService:
     def run_user_sync(self, user_id: str, run_mode: str = "auto") -> RunSyncResponse:
         context = self.get_user_context(user_id)
         return self.coaching_service.run_for_user_context(context, run_mode=run_mode)
+
+    def record_feedback(self, user_id: str, feedback: SubjectiveFeedback) -> None:
+        self.coaching_service.record_feedback(self.get_user_context(user_id), feedback)
+
+    def update_availability(
+        self,
+        user_id: str,
+        *,
+        weekday: int,
+        is_available: bool,
+        max_duration_minutes: int | None,
+        preferred_session_type: str | None,
+    ) -> None:
+        self.coaching_service.update_availability(
+            self.get_user_context(user_id),
+            weekday=weekday,
+            is_available=is_available,
+            max_duration_minutes=max_duration_minutes,
+            preferred_session_type=preferred_session_type,
+        )
+
+    def upsert_race_goal(
+        self,
+        user_id: str,
+        *,
+        goal_name: str,
+        race_date: date | None,
+        distance: str | None,
+        goal_time: str | None,
+        target_pace: str | None,
+        priority: int,
+        is_active: bool = True,
+    ) -> None:
+        self.coaching_service.upsert_race_goal(
+            self.get_user_context(user_id),
+            goal_name=goal_name,
+            race_date=race_date,
+            distance=distance,
+            goal_time=goal_time,
+            target_pace=target_pace,
+            priority=priority,
+            is_active=is_active,
+        )
+
+    def upsert_training_block(
+        self,
+        user_id: str,
+        *,
+        phase: str,
+        starts_on: date,
+        ends_on: date,
+        focus: str | None,
+        weekly_volume_target_km: float | None,
+    ) -> None:
+        self.coaching_service.upsert_training_block(
+            self.get_user_context(user_id),
+            phase=phase,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            focus=focus,
+            weekly_volume_target_km=weekly_volume_target_km,
+        )
+
+    def upsert_injury_status(
+        self,
+        user_id: str,
+        *,
+        status_date: date,
+        injury_area: str,
+        severity: int,
+        notes: str | None,
+        is_active: bool,
+    ) -> None:
+        self.coaching_service.upsert_injury_status(
+            self.get_user_context(user_id),
+            status_date=status_date,
+            injury_area=injury_area,
+            severity=severity,
+            notes=notes,
+            is_active=is_active,
+        )
 
     def _profile_from_record(self, record: UserRecord) -> UserProfile:
         llm_settings = self.admin_settings.get_user_llm_settings(record.user_id).effective
