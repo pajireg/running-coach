@@ -16,6 +16,9 @@ toward the target architecture in
   the same coaching workflows.
 - Added `UserCoachingStateService` to start decomposing write-side storage
   responsibilities out of `CoachingHistoryService`.
+- Added `HistoryReadService`, `HistoryWriteService`, and `HistorySyncService`
+  facades so orchestrator/runtime code no longer depends on the full
+  `CoachingHistoryService` surface directly.
 - Added `ServiceContainer.create_for_user(...)` and `UserContext`-aware
   orchestration.
 - Added shared runtime composition via `create_application_runtime(...)` so CLI
@@ -53,13 +56,14 @@ toward the target architecture in
   - identity/preferences resolution
   - coaching execution
   - user-owned coaching state writes
+  - history reads vs history writes vs sync-state mutations
   - transport surfaces such as CLI and HTTP
 
 ### Still not done
 
 - Per-user encrypted Garmin credentials in the database
 - True multi-user background workers and per-user schedules/timezones
-- Read-side and sync-side decomposition of `CoachingHistoryService`
+- SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 

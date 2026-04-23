@@ -223,6 +223,64 @@ class _FakeHistoryService:
         return self.freshness
 
 
+class _FakeHistoryWriteService:
+    def __init__(self, history_service):
+        self.db = history_service.db
+        self._history = history_service
+
+    def ensure_athlete(self, **kwargs):
+        return self._history.ensure_athlete(**kwargs)
+
+    def record_daily_metrics(self, metrics):
+        return self._history.record_daily_metrics(metrics)
+
+    def record_training_plan(self, plan):
+        return self._history.record_training_plan(plan)
+
+    def record_coach_decision(self, **kwargs):
+        return self._history.record_coach_decision(**kwargs)
+
+    def record_activities(self, activities):
+        return self._history.record_activities(activities)
+
+
+class _FakeHistoryReadService:
+    def __init__(self, history_service):
+        self._history = history_service
+
+    def summarize_training_background(self, as_of):
+        return {}
+
+    def list_planned_garmin_workout_ids(self, **kwargs):
+        return self._history.list_planned_garmin_workout_ids(**kwargs)
+
+    def summarize_plan_freshness(self, **kwargs):
+        return self._history.summarize_plan_freshness(**kwargs)
+
+    def fetch_future_plan(self, from_date, days=6):
+        return []
+
+    def list_recent_completed_activities(self, **kwargs):
+        return []
+
+
+class _FakeHistorySyncService:
+    def __init__(self, history_service):
+        self._history = history_service
+
+    def rebuild_recent_workout_executions(self, **kwargs):
+        return self._history.rebuild_recent_workout_executions(**kwargs)
+
+    def backfill_planned_workouts(self, scheduled_items):
+        return self._history.backfill_planned_workouts(scheduled_items)
+
+    def clear_garmin_sync_results(self, **kwargs):
+        return self._history.clear_garmin_sync_results(**kwargs)
+
+    def record_garmin_sync_result(self, **kwargs):
+        return self._history.record_garmin_sync_result(**kwargs)
+
+
 class _FakeCalendarClient:
     def authenticate(self):
         return None
@@ -231,6 +289,7 @@ class _FakeCalendarClient:
 
 
 def test_run_once_persists_garmin_sync_results():
+    history_service = _FakeHistoryService()
     container = SimpleNamespace(
         settings=SimpleNamespace(
             race=SimpleNamespace(has_goal=False),
@@ -242,7 +301,10 @@ def test_run_once_persists_garmin_sync_results():
         garmin_client=_FakeGarminClient(),
         gemini_client=_FakeGeminiClient(),
         calendar_client=_FakeCalendarClient(),
-        history_service=_FakeHistoryService(),
+        history_service=history_service,
+        history_write_service=_FakeHistoryWriteService(history_service),
+        history_read_service=_FakeHistoryReadService(history_service),
+        history_sync_service=_FakeHistorySyncService(history_service),
     )
 
     orchestrator = TrainingOrchestrator(container)
@@ -281,6 +343,9 @@ def test_auto_mode_skips_llm_when_plan_is_fresh():
         gemini_client=gemini_client,
         calendar_client=_FakeCalendarClient(),
         history_service=history_service,
+        history_write_service=_FakeHistoryWriteService(history_service),
+        history_read_service=_FakeHistoryReadService(history_service),
+        history_sync_service=_FakeHistorySyncService(history_service),
     )
 
     result = TrainingOrchestrator(container).run_once(run_mode="auto")
@@ -293,6 +358,7 @@ def test_auto_mode_skips_llm_when_plan_is_fresh():
 
 def test_run_once_uses_user_context_include_strength():
     gemini_client = _FakeGeminiClient()
+    history_service = _FakeHistoryService()
     container = SimpleNamespace(
         settings=SimpleNamespace(
             race=SimpleNamespace(has_goal=False),
@@ -304,7 +370,10 @@ def test_run_once_uses_user_context_include_strength():
         garmin_client=_FakeGarminClient(),
         gemini_client=gemini_client,
         calendar_client=_FakeCalendarClient(),
-        history_service=_FakeHistoryService(),
+        history_service=history_service,
+        history_write_service=_FakeHistoryWriteService(history_service),
+        history_read_service=_FakeHistoryReadService(history_service),
+        history_sync_service=_FakeHistorySyncService(history_service),
         user_context=None,
     )
 

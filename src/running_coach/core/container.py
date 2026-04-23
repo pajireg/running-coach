@@ -10,7 +10,14 @@ from ..coaching.context import CoachingContextBuilder
 from ..coaching.safety import DEFAULT_SAFETY_RULES, SafetyValidator
 from ..config.settings import Settings
 from ..models.user import UserContext
-from ..storage import AdminSettingsService, CoachingHistoryService, DatabaseClient
+from ..storage import (
+    AdminSettingsService,
+    CoachingHistoryService,
+    DatabaseClient,
+    HistoryReadService,
+    HistorySyncService,
+    HistoryWriteService,
+)
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,6 +33,9 @@ class ServiceContainer:
     gemini_client: GeminiClient
     calendar_client: GoogleCalendarClient
     history_service: CoachingHistoryService
+    history_read_service: HistoryReadService
+    history_write_service: HistoryWriteService
+    history_sync_service: HistorySyncService
     safety_validator: SafetyValidator
     context_builder: CoachingContextBuilder
 
@@ -55,6 +65,9 @@ class ServiceContainer:
             timezone=user_context.timezone if user_context is not None else "Asia/Seoul",
         )
         context_builder = CoachingContextBuilder(history_service=history_service)
+        history_read_service = HistoryReadService(history_service)
+        history_write_service = HistoryWriteService(history_service)
+        history_sync_service = HistorySyncService(history_service)
         safety_validator = SafetyValidator(rules=list(DEFAULT_SAFETY_RULES))
         if user_context is not None:
             llm_settings = user_context.llm_settings
@@ -107,6 +120,9 @@ class ServiceContainer:
             gemini_client=gemini_client,
             calendar_client=GoogleCalendarClient(),
             history_service=history_service,
+            history_read_service=history_read_service,
+            history_write_service=history_write_service,
+            history_sync_service=history_sync_service,
             safety_validator=safety_validator,
             context_builder=context_builder,
         )

@@ -145,8 +145,8 @@ class TrainingOrchestrator:
 
         try:
             active_user = getattr(self.container, "user_context", None)
-            self.container.history_service.db.ping()
-            self.container.history_service.ensure_athlete(
+            self.container.history_write_service.db.ping()
+            self.container.history_write_service.ensure_athlete(
                 garmin_email=(
                     active_user.garmin_email
                     if active_user is not None and active_user.garmin_email
@@ -154,7 +154,7 @@ class TrainingOrchestrator:
                 ),
                 max_heart_rate=self.container.settings.max_heart_rate,
             )
-            self.container.history_service.record_daily_metrics(metrics)
+            self.container.history_write_service.record_daily_metrics(metrics)
         except Exception as e:
             logger.warning(f"히스토리 저장 실패 (계속 진행): {e}")
 
@@ -164,12 +164,12 @@ class TrainingOrchestrator:
             return
 
         try:
-            self.container.history_service.record_training_plan(plan)
+            self.container.history_write_service.record_training_plan(plan)
             summary = (
                 f"{metrics.performance.training_load.status} 상태에서 "
                 f"{plan.total_workouts}개 세션 계획 생성"
             )
-            self.container.history_service.record_coach_decision(
+            self.container.history_write_service.record_coach_decision(
                 decision_date=metrics.date,
                 summary=summary,
                 metrics=metrics,
@@ -186,7 +186,7 @@ class TrainingOrchestrator:
 
         try:
             activities = self.container.garmin_client.get_recent_activity_history()
-            self.container.history_service.record_activities(activities)
+            self.container.history_write_service.record_activities(activities)
         except Exception as e:
             logger.warning(f"활동 히스토리 저장 실패 (계속 진행): {e}")
 
@@ -196,7 +196,9 @@ class TrainingOrchestrator:
             return
 
         try:
-            rebuilt = self.container.history_service.rebuild_recent_workout_executions(as_of=as_of)
+            rebuilt = self.container.history_sync_service.rebuild_recent_workout_executions(
+                as_of=as_of
+            )
             logger.info(f"최근 workout execution 재계산 완료: {rebuilt} 개")
         except Exception as e:
             logger.warning(f"최근 workout execution 재계산 실패 (계속 진행): {e}")
@@ -210,7 +212,9 @@ class TrainingOrchestrator:
             scheduled_items = self.container.garmin_client.get_recent_scheduled_workout_history(
                 target_date=as_of
             )
-            inserted = self.container.history_service.backfill_planned_workouts(scheduled_items)
+            inserted = self.container.history_sync_service.backfill_planned_workouts(
+                scheduled_items
+            )
             logger.info(f"과거 planned workout 백필 완료: {inserted} 개")
         except Exception as e:
             logger.warning(f"과거 planned workout 백필 실패 (계속 진행): {e}")
@@ -220,7 +224,7 @@ class TrainingOrchestrator:
         if not self.container.settings.persist_history:
             return None
         try:
-            return self.container.history_service.summarize_training_background(as_of)
+            return self.container.history_read_service.summarize_training_background(as_of)
         except Exception as e:
             logger.warning(f"훈련 배경 요약 실패 (계속 진행): {e}")
             return None
@@ -233,7 +237,7 @@ class TrainingOrchestrator:
             today = date.today()
             # 오늘 이전 미실행 과거 워크아웃도 포함 (최대 14일)
             earliest = min(plan.start_date, today - timedelta(days=14))
-            return self.container.history_service.list_planned_garmin_workout_ids(
+            return self.container.history_read_service.list_planned_garmin_workout_ids(
                 start_date=earliest,
                 end_date=plan.end_date,
             )
@@ -246,7 +250,7 @@ class TrainingOrchestrator:
         if not self.container.settings.persist_history:
             return
         try:
-            self.container.history_service.clear_garmin_sync_results(
+            self.container.history_sync_service.clear_garmin_sync_results(
                 start_date=plan.start_date,
                 end_date=plan.end_date,
             )
@@ -264,7 +268,7 @@ class TrainingOrchestrator:
             return
 
         try:
-            self.container.history_service.record_garmin_sync_result(
+            self.container.history_sync_service.record_garmin_sync_result(
                 workout_date=workout_date,
                 garmin_workout_id=garmin_workout_id,
                 garmin_schedule_status=garmin_schedule_status,
@@ -279,7 +283,7 @@ class TrainingOrchestrator:
             return "replan", ["history_disabled"]
 
         try:
-            freshness = self.container.history_service.summarize_plan_freshness(
+            freshness = self.container.history_read_service.summarize_plan_freshness(
                 as_of=self._coerce_date(as_of),
             )
         except Exception as e:
@@ -317,7 +321,7 @@ class TrainingOrchestrator:
 
         today = self._coerce_date(metrics.date)
         from_date = today + timedelta(days=1)
-        existing_days = self.container.history_service.fetch_future_plan(from_date, days=6)
+        existing_days = self.container.history_read_service.fetch_future_plan(from_date, days=6)
         if len(existing_days) != 6:
             logger.warning(
                 "extend: 기존 플랜 %d일만 존재 (6 필요) → 전체 재계획으로 fallback",
@@ -397,9 +401,11 @@ class TrainingOrchestrator:
                 return
             sync_service = self.container.calendar_client.sync_service
             assert sync_service is not None
-            completed_activities = self.container.history_service.list_recent_completed_activities(
-                as_of=self._coerce_date(as_of),
-                days=2,
+            completed_activities = (
+                self.container.history_read_service.list_recent_completed_activities(
+                    as_of=self._coerce_date(as_of),
+                    days=2,
+                )
             )
             sync_service.sync_completed_activities(
                 activities=completed_activities,
