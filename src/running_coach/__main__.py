@@ -4,12 +4,11 @@ import argparse
 import time
 from datetime import datetime
 
-from .application import CoachingApplicationService, UserApplicationService
 from .config.constants import APP_CLI_NAME, APP_NAME, DEFAULT_SCHEDULE_HOUR
 from .config.settings import get_settings
+from .core.bootstrap import create_application_runtime
 from .core.scheduler import SchedulerService
 from .models.feedback import SubjectiveFeedback
-from .storage import AdminSettingsService, DatabaseClient, UserCoachingStateService, UserService
 from .utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -113,21 +112,8 @@ def main():
         logger.error(f"설정 로드 실패: {e}")
         return
 
-    db = DatabaseClient(settings.database_url)
-    admin_settings = AdminSettingsService(
-        db=db,
-        deployment_defaults=settings.deployment_llm_settings(),
-    )
-    coaching_app = CoachingApplicationService(
-        settings=settings,
-        user_state_service=UserCoachingStateService(db=db),
-    )
-    user_app = UserApplicationService(
-        user_service=UserService(db=db),
-        admin_settings=admin_settings,
-        settings=settings,
-        coaching_service=coaching_app,
-    )
+    runtime = create_application_runtime(settings)
+    user_app = runtime.user_app
 
     if args.command == "feedback":
         try:

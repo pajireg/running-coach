@@ -18,6 +18,8 @@ toward the target architecture in
   responsibilities out of `CoachingHistoryService`.
 - Added `ServiceContainer.create_for_user(...)` and `UserContext`-aware
   orchestration.
+- Added shared runtime composition via `create_application_runtime(...)` so CLI
+  and FastAPI build the same application graph from one place.
 - Made planner execution honor resolved user LLM settings and user-scoped
   `include_strength`.
 - Reduced CLI responsibility:
