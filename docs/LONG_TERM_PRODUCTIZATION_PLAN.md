@@ -83,11 +83,20 @@ Move user-specific behavior into Postgres:
 - planner mode
 - preferred LLM model/provider
 - max heart rate
+- preferred language/locale for user-facing coaching copy
 - calendar sync preferences
 - notification preferences when introduced
 
 Use DB preferences first, falling back to `Settings` defaults only when the user
 has not configured a value.
+
+User-facing coaching copy should resolve from the user's preferred locale.
+Korean remains the compatibility default for the current single-user deployment,
+but new user-facing APIs, workout descriptions, calendar text, notifications,
+and LLM rationale fields should be designed so the output language can vary per
+user. Keep internal code, technical docs, canonical workout names, and safety
+rule identifiers language-neutral or English where possible; localize only the
+presentation text that users read.
 
 Do not add new `COACH_*` environment variables for behavior that should become
 user-specific.
@@ -287,8 +296,8 @@ MVP endpoints:
 - `GET /v1/me`
   - return current user profile, preferences, and integration status.
 - `PATCH /v1/me/preferences`
-  - update timezone, schedule times, planner mode, include strength, and similar
-    user-scoped settings.
+  - update timezone, locale/preferred language, schedule times, planner mode,
+    include strength, and similar user-scoped settings.
 - `POST /v1/integrations/garmin/session`
   - perform initial Garmin authentication and store encrypted session state.
 - `POST /v1/integrations/google/token`
@@ -389,6 +398,7 @@ Unit tests:
 - API-key hashing and lookup.
 - Secret encryption/decryption and invalid-key failure.
 - User preference fallback behavior.
+- Locale fallback and user-facing copy language selection.
 - User-scoped history queries.
 - `create_for_user()` dependency construction.
 
@@ -438,6 +448,7 @@ Use these defaults unless a later plan explicitly overrides them:
 
 - Public term: `user`.
 - Auth: per-user API key.
+- Default locale: Korean for compatibility until the user sets a preference.
 - LLM key owner: service.
 - Secret storage: encrypted Postgres payloads.
 - Scheduler model: one user per worker container.
