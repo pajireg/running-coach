@@ -13,12 +13,16 @@ from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
     DashboardActivity,
     DashboardPlannedWorkout,
+    IntegrationConnection,
+    IntegrationConnectionStatus,
+    IntegrationProviderName,
     IntegrationStatus,
     RunSyncResponse,
     UserContext,
     UserCreateRequest,
     UserCreateResponse,
     UserDashboard,
+    UserIntegrationsResponse,
     UserPreferences,
     UserPreferencesPatch,
     UserProfile,
@@ -34,6 +38,7 @@ from ..storage import (
     ScheduledUserJobService,
     UserService,
 )
+from ..storage.integration_credentials import IntegrationCredentialRecord
 from .coaching_service import CoachingApplicationService
 
 
@@ -70,6 +75,52 @@ class UserApplicationService:
             schedule=self._schedule_status(user_id),
             currentPlan=current_plan,
             recentActivities=recent_activities,
+        )
+
+    def get_integrations(self, user_id: str) -> UserIntegrationsResponse:
+        record = self.user_service.get_user_record(user_id)
+        credential_records = self._integration_credential_records(user_id)
+        return UserIntegrationsResponse(
+            integrations=[
+                self._integration_connection(
+                    record,
+                    provider="garmin",
+                    display_name="Garmin Connect",
+                    capabilities=["training_data", "workout_delivery"],
+                    credential_records=credential_records,
+                ),
+                self._integration_connection(
+                    record,
+                    provider="google_calendar",
+                    display_name="Google Calendar",
+                    capabilities=["calendar_sync"],
+                    credential_records=credential_records,
+                ),
+                self._integration_connection(
+                    record,
+                    provider="healthkit",
+                    display_name="Apple HealthKit",
+                    capabilities=["health_data", "activity_data"],
+                    credential_records=credential_records,
+                    planned=True,
+                ),
+                self._integration_connection(
+                    record,
+                    provider="health_connect",
+                    display_name="Health Connect",
+                    capabilities=["health_data", "activity_data"],
+                    credential_records=credential_records,
+                    planned=True,
+                ),
+                self._integration_connection(
+                    record,
+                    provider="google_fit",
+                    display_name="Google Fit",
+                    capabilities=["activity_data"],
+                    credential_records=credential_records,
+                    planned=True,
+                ),
+            ]
         )
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
@@ -233,6 +284,72 @@ class UserApplicationService:
         if self.scheduled_jobs is None:
             return UserScheduleStatus()
         return UserScheduleStatus.model_validate(self.scheduled_jobs.get_status(user_id) or {})
+
+    def _integration_credential_records(
+        self,
+        user_id: str,
+    ) -> dict[str, IntegrationCredentialRecord]:
+        if self.integration_credentials is None:
+            return {}
+        return {
+            str(record.provider): record
+            for record in self.integration_credentials.list_credentials(user_id)
+        }
+
+    def _integration_connection(
+        self,
+        record: UserRecord,
+        *,
+        provider: IntegrationProviderName,
+        display_name: str,
+        capabilities: list[str],
+        credential_records: dict[str, IntegrationCredentialRecord],
+        planned: bool = False,
+    ) -> IntegrationConnection:
+        credential = credential_records.get(provider)
+        if credential is not None:
+            status = cast(IntegrationConnectionStatus, str(credential.status))
+            return IntegrationConnection(
+                provider=provider,
+                displayName=display_name,
+                status=status,
+                connected=status in {"active", "configured", "env_compat"},
+                source="db",
+                capabilities=capabilities,
+                lastError=credential.last_error,
+            )
+        if provider == "garmin" and record.garmin_email:
+            status = cast(
+                IntegrationConnectionStatus,
+                "env_compat"
+                if record.garmin_email == self.settings.garmin_email
+                else "configured",
+            )
+            return IntegrationConnection(
+                provider="garmin",
+                displayName=display_name,
+                status=status,
+                connected=True,
+                source="env_compat" if status == "env_compat" else "profile",
+                capabilities=capabilities,
+            )
+        if provider == "google_calendar" and record.garmin_email == self.settings.garmin_email:
+            return IntegrationConnection(
+                provider="google_calendar",
+                displayName=display_name,
+                status="env_compat",
+                connected=True,
+                source="env_compat",
+                capabilities=capabilities,
+            )
+        return IntegrationConnection(
+            provider=provider,
+            displayName=display_name,
+            status="coming_soon" if planned else "not_configured",
+            connected=False,
+            source="planned" if planned else "none",
+            capabilities=capabilities,
+        )
 
     def _dashboard_training_summary(
         self,

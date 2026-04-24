@@ -119,6 +119,14 @@ toward the target architecture in
     value in activity/integration fields;
   - dashboard reads tolerate users whose coaching history has not been
     initialized yet.
+- Added the first app-facing integration inventory contract:
+  - `/v1/me/integrations` returns provider, status, connection source,
+    capabilities, and last error without exposing credential payloads;
+  - Garmin and Google Calendar remain supported through existing env/DB
+    compatibility paths;
+  - HealthKit, Health Connect, and Google Fit appear as planned providers so
+    the mobile app can render the long-term integration model before concrete
+    provider adapters exist.
 
 ### What this enables
 
@@ -137,6 +145,7 @@ toward the target architecture in
   - provider capability interfaces vs concrete Garmin implementation
   - transport surfaces such as CLI and HTTP
   - app-facing read contracts vs background execution internals
+  - provider integration inventory vs provider credential payload storage
 
 ### Still not done
 

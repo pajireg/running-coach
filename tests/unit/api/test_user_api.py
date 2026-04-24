@@ -12,12 +12,14 @@ from running_coach.models.llm_settings import LLMSettings
 from running_coach.models.user import (
     DashboardActivity,
     DashboardPlannedWorkout,
+    IntegrationConnection,
     IntegrationStatus,
     RunSyncResponse,
     UserContext,
     UserCreateRequest,
     UserCreateResponse,
     UserDashboard,
+    UserIntegrationsResponse,
     UserPreferences,
     UserPreferencesPatch,
     UserProfile,
@@ -77,6 +79,26 @@ class FakeUserApplicationService:
                 )
             ],
         )
+        self.integrations = UserIntegrationsResponse(
+            integrations=[
+                IntegrationConnection(
+                    provider="garmin",
+                    displayName="Garmin Connect",
+                    status="configured",
+                    connected=True,
+                    source="profile",
+                    capabilities=["training_data", "workout_delivery"],
+                ),
+                IntegrationConnection(
+                    provider="healthkit",
+                    displayName="Apple HealthKit",
+                    status="coming_soon",
+                    connected=False,
+                    source="planned",
+                    capabilities=["health_data", "activity_data"],
+                ),
+            ]
+        )
         self.current_user = UserContext(
             user_id="user-1",
             external_key="runner-1",
@@ -112,6 +134,10 @@ class FakeUserApplicationService:
     def get_dashboard(self, user_id: str) -> UserDashboard:
         assert user_id == "user-1"
         return self.dashboard
+
+    def get_integrations(self, user_id: str) -> UserIntegrationsResponse:
+        assert user_id == "user-1"
+        return self.integrations
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
         assert user_id == "user-1"
@@ -207,6 +233,18 @@ def test_get_me_dashboard_returns_app_home_summary():
     assert response.json()["schedule"]["nextRunAt"] == "2026-04-24T20:00:00Z"
     assert response.json()["currentPlan"][0]["workoutName"] == "Base Run"
     assert response.json()["recentActivities"][0]["provider"] == "garmin"
+
+
+def test_get_me_integrations_returns_provider_inventory():
+    client = _client()
+
+    response = client.get("/v1/me/integrations", headers={"Authorization": "Bearer rcu_test"})
+
+    assert response.status_code == 200
+    assert response.json()["integrations"][0]["provider"] == "garmin"
+    assert response.json()["integrations"][0]["connected"] is True
+    assert response.json()["integrations"][1]["provider"] == "healthkit"
+    assert response.json()["integrations"][1]["status"] == "coming_soon"
 
 
 def test_patch_me_preferences_updates_profile():

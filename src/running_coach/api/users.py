@@ -12,6 +12,7 @@ from ..models.user import (
     UserCreateRequest,
     UserCreateResponse,
     UserDashboard,
+    UserIntegrationsResponse,
     UserPreferencesPatch,
     UserProfile,
 )
@@ -60,6 +61,12 @@ def create_user_router(user_app: UserApplicationService) -> APIRouter:
         current_user: UserContext = Depends(require_current_user),
     ) -> UserDashboard:
         return user_app.get_dashboard(current_user.user_id)
+
+    @router.get("/me/integrations", response_model=UserIntegrationsResponse)
+    async def get_me_integrations(
+        current_user: UserContext = Depends(require_current_user),
+    ) -> UserIntegrationsResponse:
+        return user_app.get_integrations(current_user.user_id)
 
     @router.patch("/me/preferences", response_model=UserProfile)
     async def patch_me_preferences(

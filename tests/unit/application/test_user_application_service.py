@@ -10,6 +10,7 @@ from running_coach.application.user_service import UserApplicationService
 from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.models.llm_settings import LLMSettings, UserLLMSettings
 from running_coach.models.user import UserCreateRequest, UserPreferencesPatch, UserRecord
+from running_coach.storage.integration_credentials import IntegrationCredentialRecord
 from running_coach.storage.user_service import UserService
 
 
@@ -162,11 +163,31 @@ class FakeScheduledJobs:
         }
 
 
+class FakeIntegrationCredentials:
+    def __init__(
+        self,
+        *,
+        statuses: dict[str, str] | None = None,
+        records: list[IntegrationCredentialRecord] | None = None,
+    ):
+        self.statuses = statuses or {}
+        self.records = records or []
+
+    def get_statuses(self, user_id: str):
+        assert user_id == "user-1"
+        return self.statuses
+
+    def list_credentials(self, user_id: str):
+        assert user_id == "user-1"
+        return self.records
+
+
 def _service(
     *,
     schedule_times: str = "05:00,17:00",
     include_strength: bool = False,
     integration_statuses: dict[str, str] | None = None,
+    integration_records: list[IntegrationCredentialRecord] | None = None,
 ) -> tuple[UserApplicationService, FakeAdminSettings, FakeCoachingService]:
     admin_settings = FakeAdminSettings()
     coaching_service = FakeCoachingService()
@@ -180,8 +201,9 @@ def _service(
             include_strength=include_strength,
         ),
         coaching_service=coaching_service,
-        integration_credentials=SimpleNamespace(
-            get_statuses=lambda _user_id: integration_statuses or {}
+        integration_credentials=FakeIntegrationCredentials(
+            statuses=integration_statuses,
+            records=integration_records,
         ),  # type: ignore[arg-type]
         scheduled_jobs=FakeScheduledJobs(),  # type: ignore[arg-type]
     )
@@ -253,6 +275,43 @@ def test_get_dashboard_returns_schedule_and_empty_history_when_uninitialized():
     assert dashboard.schedule.next_run_at == datetime(2026, 4, 24, 20, 0, tzinfo=timezone.utc)
     assert dashboard.current_plan == []
     assert dashboard.recent_activities == []
+
+
+def test_get_integrations_returns_provider_inventory_with_db_statuses():
+    service, _, _ = _service(
+        integration_records=[
+            IntegrationCredentialRecord(
+                user_id="user-1",
+                provider="garmin",
+                encrypted_payload="encrypted",
+                status="reauth_required",
+                last_error="expired",
+            )
+        ]
+    )
+
+    response = service.get_integrations("user-1")
+    by_provider = {item.provider: item for item in response.integrations}
+
+    assert by_provider["garmin"].status == "reauth_required"
+    assert by_provider["garmin"].connected is False
+    assert by_provider["garmin"].source == "db"
+    assert by_provider["garmin"].last_error == "expired"
+    assert by_provider["healthkit"].status == "coming_soon"
+    assert by_provider["healthkit"].source == "planned"
+
+
+def test_get_integrations_exposes_env_compat_connections_without_secrets():
+    service, _, _ = _service()
+
+    response = service.get_integrations("user-1")
+    by_provider = {item.provider: item for item in response.integrations}
+
+    assert by_provider["garmin"].status == "env_compat"
+    assert by_provider["garmin"].connected is True
+    assert by_provider["google_calendar"].status == "env_compat"
+    assert by_provider["google_calendar"].connected is True
+    assert not hasattr(by_provider["garmin"], "encrypted_payload")
 
 
 def test_run_user_sync_delegates_to_coaching_service():

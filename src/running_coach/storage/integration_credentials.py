@@ -88,6 +88,28 @@ class IntegrationCredentialService:
             for row in rows
         }
 
+    def list_credentials(self, user_id: str) -> list[IntegrationCredentialRecord]:
+        """Return metadata for all provider credentials owned by one user."""
+        rows = self._fetchall(
+            """
+            SELECT athlete_id AS user_id, provider, encrypted_payload, status, last_error
+            FROM user_integration_credentials
+            WHERE athlete_id = %(user_id)s
+            ORDER BY provider
+            """,
+            {"user_id": user_id},
+        )
+        return [
+            IntegrationCredentialRecord(
+                user_id=str(row["user_id"]),
+                provider=cast(IntegrationProvider, row["provider"]),
+                encrypted_payload=str(row.get("encrypted_payload") or ""),
+                status=cast(IntegrationStatusValue, row["status"]),
+                last_error=row.get("last_error"),
+            )
+            for row in rows
+        ]
+
     def get_credential(
         self,
         user_id: str,

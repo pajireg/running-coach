@@ -35,6 +35,8 @@ class FakeIntegrationCredentialService(IntegrationCredentialService):
                 for row in self.rows.values()
                 if row["user_id"] == user_id
             ]
+        if "ORDER BY provider" in query:
+            return [row for row in self.rows.values() if row["user_id"] == user_id]
         provider = str(params["provider"])
         row = self.rows.get((user_id, provider))
         return [row] if row else []
@@ -73,6 +75,9 @@ def test_integration_credentials_store_status_without_cipher():
     record = service.get_credential("user-1", "garmin")
     assert record is not None
     assert record.last_error == "expired"
+    records = service.list_credentials("user-1")
+    assert records[0].provider == "garmin"
+    assert records[0].last_error == "expired"
 
 
 def test_integration_credentials_encrypt_and_decrypt_payload():

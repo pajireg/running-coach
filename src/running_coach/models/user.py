@@ -89,6 +89,47 @@ class IntegrationStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+IntegrationProviderName = Literal[
+    "garmin",
+    "google_calendar",
+    "healthkit",
+    "health_connect",
+    "google_fit",
+]
+IntegrationConnectionStatus = Literal[
+    "active",
+    "configured",
+    "env_compat",
+    "reauth_required",
+    "disabled",
+    "error",
+    "not_configured",
+    "coming_soon",
+]
+
+
+class IntegrationConnection(BaseModel):
+    """App-facing provider connection summary without credential payloads."""
+
+    provider: IntegrationProviderName
+    display_name: str = Field(alias="displayName")
+    status: IntegrationConnectionStatus
+    connected: bool
+    source: Literal["db", "env_compat", "profile", "none", "planned"]
+    capabilities: list[str]
+    last_error: str | None = Field(default=None, alias="lastError")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UserIntegrationsResponse(BaseModel):
+    """Current user's integration inventory."""
+
+    integrations: list[IntegrationConnection]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class UserProfile(BaseModel):
     """User-facing profile payload."""
 
