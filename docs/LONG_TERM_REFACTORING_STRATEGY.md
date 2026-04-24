@@ -126,6 +126,9 @@ Current state:
   timezone-adjusted local time matches `schedule_times`.
 - scheduled execution uses each user's `run_mode` preference before falling
   back to the deployment default.
+- Google Calendar client construction is resolved by the user runtime factory:
+  env-compatible users can use the local token file, while non-env users need an
+  active DB credential row or calendar sync is disabled.
 
 Required behavior:
 
@@ -137,8 +140,8 @@ Required behavior:
 1. Extract `PlanFreshnessService` and wire read-side callers to it.
 2. Extract `TrainingBackgroundService` and migrate context-builder reads.
 3. Migrate Garmin and Google credential flows into `user_integration_credentials`.
-4. Move Google Calendar construction behind the user runtime factory.
-5. Add provider capability protocols and migrate Garmin behind them.
+4. Add provider capability protocols and migrate Garmin behind them.
+5. Persist refreshed per-user Google OAuth tokens back into the credential store.
 6. Add Apple/Android adapter skeletons only after the above runtime path is
    user-scoped end to end.
 

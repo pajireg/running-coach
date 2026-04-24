@@ -55,6 +55,7 @@ class ServiceContainer:
         user_context: Optional[UserContext],
         garmin_email: str | None = None,
         garmin_password: str | None = None,
+        calendar_client: GoogleCalendarClient | None = None,
     ) -> "ServiceContainer":
         """배포 설정 + 사용자 컨텍스트로 컨테이너 생성."""
         db = DatabaseClient(settings.database_url)
@@ -130,7 +131,7 @@ class ServiceContainer:
                 settings=settings,
             ),
             gemini_client=gemini_client,
-            calendar_client=GoogleCalendarClient(),
+            calendar_client=calendar_client or GoogleCalendarClient(),
             history_service=history_service,
             history_read_service=history_read_service,
             history_write_service=history_write_service,

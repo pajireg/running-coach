@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ..clients.google_calendar import GoogleCalendarClient
 from ..config.settings import Settings
 from ..models.user import UserContext
 from ..storage import IntegrationCredentialService
@@ -33,11 +34,13 @@ class UserRuntimeFactory:
 
     def create_container(self, user_context: UserContext) -> ServiceContainer:
         garmin_credentials = self._resolve_garmin_credentials(user_context)
+        calendar_client = self._resolve_google_calendar_client(user_context)
         return ServiceContainer.create_for_user(
             settings=self.settings,
             user_context=user_context,
             garmin_email=garmin_credentials.email,
             garmin_password=garmin_credentials.password,
+            calendar_client=calendar_client,
         )
 
     def _resolve_garmin_credentials(self, user_context: UserContext) -> GarminRuntimeCredentials:
@@ -76,3 +79,26 @@ class UserRuntimeFactory:
             password=password,
             source="db",
         )
+
+    def _resolve_google_calendar_client(self, user_context: UserContext) -> GoogleCalendarClient:
+        record = self.integration_credentials.get_credential(
+            user_context.user_id,
+            "google_calendar",
+        )
+        if record is None:
+            if user_context.garmin_email == self.settings.garmin_email:
+                return GoogleCalendarClient()
+            return GoogleCalendarClient(enabled=False)
+
+        if record.status != "active":
+            return GoogleCalendarClient(enabled=False)
+
+        payload = self.integration_credentials.decrypt_payload(record)
+        token_info = self._google_calendar_token_info_from_payload(payload)
+        return GoogleCalendarClient(token_info=token_info)
+
+    def _google_calendar_token_info_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        nested = payload.get("authorized_user_info")
+        if isinstance(nested, dict):
+            return nested
+        return payload

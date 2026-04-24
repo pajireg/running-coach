@@ -77,6 +77,12 @@ toward the target architecture in
   - user API preferences expose `runMode`;
   - the multi-user worker prefers each user's run mode over the deployment
     fallback.
+- Moved Google Calendar client construction behind the user runtime factory:
+  - env-compatible users still use the local `.google/token_google.json` path;
+  - non-env users require an active `google_calendar` credential row;
+  - active DB credentials can supply an OAuth authorized-user token payload;
+  - missing or inactive non-env calendar credentials disable calendar sync
+    instead of accidentally reusing deployment tokens.
 
 ### What this enables
 
@@ -97,8 +103,7 @@ toward the target architecture in
 ### Still not done
 
 - Per-user Garmin token/session migration into the database
-- Per-user Google credential migration into the database
-- Google Calendar construction still uses the deployment-compatible path
+- Persist refreshed per-user Google OAuth tokens back into the credential store
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
@@ -110,5 +115,5 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
-- Next slice should move Google Calendar construction behind the user runtime
-  factory; do not add more user API endpoints first.
+- Next slice should add provider capability protocols and migrate Garmin behind
+  them; do not add more user API endpoints first.

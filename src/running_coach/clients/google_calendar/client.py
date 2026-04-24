@@ -17,14 +17,24 @@ logger = get_logger(__name__)
 class GoogleCalendarClient:
     """Google Calendar 클라이언트"""
 
-    def __init__(self, credentials_path: Optional[Path] = None, token_path: Optional[Path] = None):
+    def __init__(
+        self,
+        credentials_path: Optional[Path] = None,
+        token_path: Optional[Path] = None,
+        token_info: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ):
         """
         Args:
             credentials_path: credentials.json 파일 경로
             token_path: token_google.json 파일 경로
+            token_info: DB에서 복호화한 OAuth authorized-user payload
+            enabled: False면 인증을 시도하지 않고 동기화를 건너뜀
         """
         self.credentials_path = credentials_path or GOOGLE_CREDENTIALS_FILE
         self.token_path = token_path or GOOGLE_TOKEN_FILE
+        self.token_info = token_info
+        self.enabled = enabled
         self._service = None
         self.sync_service: Optional[CalendarSyncService] = None
 
@@ -34,16 +44,27 @@ class GoogleCalendarClient:
         Returns:
             Google Calendar API 서비스 객체 또는 None
         """
+        if not self.enabled:
+            logger.info("Google Calendar 연동이 비활성화되어 동기화를 건너뜁니다.")
+            return None
+
         creds = None
 
+        if self.token_info is not None:
+            try:
+                creds = Credentials.from_authorized_user_info(self.token_info, GOOGLE_SCOPES)
+                logger.info("DB Google Calendar 토큰 로드 완료")
+            except Exception as e:
+                logger.warning(f"DB Google Calendar 토큰 로드 실패: {e}")
+
         # 저장된 토큰이 있으면 로드
-        if self.token_path.exists() and self.token_path.is_file():
+        if creds is None and self.token_path.exists() and self.token_path.is_file():
             try:
                 creds = Credentials.from_authorized_user_file(str(self.token_path), GOOGLE_SCOPES)
                 logger.info("기존 토큰 로드 완료")
             except Exception as e:
                 logger.warning(f"토큰 로드 실패: {e}")
-        elif self.token_path.exists() and self.token_path.is_dir():
+        elif creds is None and self.token_path.exists() and self.token_path.is_dir():
             logger.warning(
                 "구글 토큰 경로가 파일이 아니라 디렉터리입니다. 토큰 로드를 건너뜁니다: %s",
                 self.token_path,
@@ -83,9 +104,10 @@ class GoogleCalendarClient:
             # 토큰 저장
             try:
                 self.token_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.token_path, "w") as token:
-                    token.write(creds.to_json())
-                logger.info(f"토큰 저장 완료: {self.token_path}")
+                if self.token_info is None:
+                    with open(self.token_path, "w") as token:
+                        token.write(creds.to_json())
+                    logger.info(f"토큰 저장 완료: {self.token_path}")
             except Exception as e:
                 logger.warning(f"토큰 저장 실패: {e}")
 
