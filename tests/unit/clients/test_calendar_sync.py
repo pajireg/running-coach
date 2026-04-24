@@ -74,7 +74,8 @@ def test_sync_completed_activities_creates_workout_events():
     sync.sync_completed_activities(
         activities=[
             {
-                "garminActivityId": 123,
+                "provider": "garmin",
+                "providerActivityId": "123",
                 "activityDate": "2026-04-17",
                 "startedAt": "2026-04-17T06:00:00+09:00",
                 "title": "러닝",
@@ -104,6 +105,8 @@ def test_sync_completed_activities_creates_workout_events():
     event = service._events.inserted[0]["body"]
     assert event["summary"] == "러닝 5.11km"
     assert event["extendedProperties"]["private"]["source"] == "running_coach_activity"
+    assert event["extendedProperties"]["private"]["activityProvider"] == "garmin"
+    assert event["extendedProperties"]["private"]["providerActivityId"] == "123"
     assert event["start"]["dateTime"] == "2026-04-17T06:00:00+09:00"
     assert "상태: 비계획 수행" in event["description"]
     assert "비계획 easy/base 러닝" in event["description"]
@@ -117,7 +120,8 @@ def test_sync_completed_activities_includes_plan_comparison_lines():
     sync.sync_completed_activities(
         activities=[
             {
-                "garminActivityId": 123,
+                "provider": "garmin",
+                "providerActivityId": "123",
                 "activityDate": "2026-04-17",
                 "startedAt": "2026-04-17T06:00:00+09:00",
                 "title": "러닝",
@@ -154,13 +158,15 @@ def test_sync_completed_activities_cleans_up_full_activity_range():
     sync.sync_completed_activities(
         activities=[
             {
-                "garminActivityId": 1,
+                "provider": "garmin",
+                "providerActivityId": "1",
                 "activityDate": "2025-01-03",
                 "title": "러닝",
                 "sportType": "러닝",
             },
             {
-                "garminActivityId": 2,
+                "provider": "garmin",
+                "providerActivityId": "2",
                 "activityDate": "2026-04-17",
                 "title": "러닝",
                 "sportType": "러닝",
@@ -174,14 +180,15 @@ def test_sync_completed_activities_cleans_up_full_activity_range():
     assert list_call["timeMax"].startswith("2026-04-17T23:59:59")
 
 
-def test_sync_completed_activities_updates_existing_event_by_garmin_activity_id():
+def test_sync_completed_activities_updates_existing_event_by_provider_activity_id():
     service = _FakeService()
     service._events.list_response_items = [
         {
             "id": "event-1",
             "extendedProperties": {
                 "private": {
-                    "garminActivityId": "123",
+                    "activityProvider": "garmin",
+                    "providerActivityId": "123",
                 }
             },
         }
@@ -191,7 +198,8 @@ def test_sync_completed_activities_updates_existing_event_by_garmin_activity_id(
     sync.sync_completed_activities(
         activities=[
             {
-                "garminActivityId": 123,
+                "provider": "garmin",
+                "providerActivityId": "123",
                 "activityDate": "2026-04-17",
                 "startedAt": "2026-04-17T06:00:00+09:00",
                 "title": "러닝",

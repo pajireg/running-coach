@@ -185,7 +185,8 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
 CREATE TABLE IF NOT EXISTS activities (
     activity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
-    garmin_activity_id BIGINT,
+    provider TEXT NOT NULL DEFAULT 'garmin',
+    provider_activity_id TEXT,
     activity_date DATE NOT NULL,
     started_at TIMESTAMPTZ,
     name TEXT,
@@ -199,8 +200,34 @@ CREATE TABLE IF NOT EXISTS activities (
     calories INTEGER,
     raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (athlete_id, garmin_activity_id)
+    UNIQUE NULLS NOT DISTINCT (athlete_id, provider, provider_activity_id)
 );
+
+ALTER TABLE activities
+    ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'garmin';
+ALTER TABLE activities
+    ADD COLUMN IF NOT EXISTS provider_activity_id TEXT;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'activities'
+          AND column_name = 'garmin_activity_id'
+    ) THEN
+        EXECUTE $migrate$
+            UPDATE activities
+            SET provider = COALESCE(provider, 'garmin'),
+                provider_activity_id = COALESCE(provider_activity_id, garmin_activity_id::text)
+            WHERE provider_activity_id IS NULL
+        $migrate$;
+    END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_provider_activity
+    ON activities (athlete_id, provider, provider_activity_id)
+    NULLS NOT DISTINCT;
+ALTER TABLE activities
+    DROP COLUMN IF EXISTS garmin_activity_id;
 
 CREATE TABLE IF NOT EXISTS activity_laps (
     activity_lap_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -225,11 +252,41 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     is_rest BOOLEAN NOT NULL DEFAULT FALSE,
     total_duration_seconds INTEGER NOT NULL DEFAULT 0,
     plan_payload JSONB NOT NULL,
-    garmin_workout_id TEXT,
-    garmin_schedule_status TEXT,
+    delivery_provider TEXT,
+    external_workout_id TEXT,
+    delivery_status TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (athlete_id, workout_date, source)
 );
+
+ALTER TABLE planned_workouts
+    ADD COLUMN IF NOT EXISTS delivery_provider TEXT;
+ALTER TABLE planned_workouts
+    ADD COLUMN IF NOT EXISTS external_workout_id TEXT;
+ALTER TABLE planned_workouts
+    ADD COLUMN IF NOT EXISTS delivery_status TEXT;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'planned_workouts'
+          AND column_name = 'garmin_workout_id'
+    ) THEN
+        EXECUTE $migrate$
+            UPDATE planned_workouts
+            SET delivery_provider = COALESCE(delivery_provider, 'garmin'),
+                external_workout_id = COALESCE(external_workout_id, garmin_workout_id),
+                delivery_status = COALESCE(delivery_status, garmin_schedule_status)
+            WHERE external_workout_id IS NULL
+               OR delivery_status IS NULL
+        $migrate$;
+    END IF;
+END $$;
+ALTER TABLE planned_workouts
+    DROP COLUMN IF EXISTS garmin_workout_id;
+ALTER TABLE planned_workouts
+    DROP COLUMN IF EXISTS garmin_schedule_status;
 
 CREATE TABLE IF NOT EXISTS workout_executions (
     workout_execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

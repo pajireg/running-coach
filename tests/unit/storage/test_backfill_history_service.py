@@ -36,7 +36,8 @@ def test_backfill_planned_workouts_inserts_calendar_history():
     assert inserted == 1
     _, params = service.executed[0]
     assert params["workout_date"] == date(2026, 4, 10)
-    assert params["garmin_schedule_status"] == "scheduled_backfill"
+    assert params["delivery_provider"] == "garmin"
+    assert params["delivery_status"] == "scheduled_backfill"
 
 
 def test_is_running_sport_type_filters_non_running():

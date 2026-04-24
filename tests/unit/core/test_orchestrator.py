@@ -207,16 +207,16 @@ class _FakeHistoryService:
     def record_training_plan(self, _plan):
         return None
 
-    def list_planned_garmin_workout_ids(self, **_kwargs):
+    def list_planned_external_workout_ids(self, **_kwargs):
         return ["old-1"]
 
-    def clear_garmin_sync_results(self, **kwargs):
+    def clear_delivery_results(self, **kwargs):
         self.cleared.append(kwargs)
 
     def record_coach_decision(self, **_kwargs):
         return None
 
-    def record_garmin_sync_result(self, **kwargs):
+    def record_delivery_result(self, **kwargs):
         self.synced.append(kwargs)
 
     def summarize_plan_freshness(self, **_kwargs):
@@ -251,8 +251,8 @@ class _FakeHistoryReadService:
     def summarize_training_background(self, as_of):
         return {}
 
-    def list_planned_garmin_workout_ids(self, **kwargs):
-        return self._history.list_planned_garmin_workout_ids(**kwargs)
+    def list_planned_external_workout_ids(self, **kwargs):
+        return self._history.list_planned_external_workout_ids(**kwargs)
 
     def summarize_plan_freshness(self, **kwargs):
         return self._history.summarize_plan_freshness(**kwargs)
@@ -274,11 +274,11 @@ class _FakeHistorySyncService:
     def backfill_planned_workouts(self, scheduled_items):
         return self._history.backfill_planned_workouts(scheduled_items)
 
-    def clear_garmin_sync_results(self, **kwargs):
-        return self._history.clear_garmin_sync_results(**kwargs)
+    def clear_delivery_results(self, **kwargs):
+        return self._history.clear_delivery_results(**kwargs)
 
-    def record_garmin_sync_result(self, **kwargs):
-        return self._history.record_garmin_sync_result(**kwargs)
+    def record_delivery_result(self, **kwargs):
+        return self._history.record_delivery_result(**kwargs)
 
 
 class _FakeCalendarClient:
@@ -288,7 +288,7 @@ class _FakeCalendarClient:
     sync_service = SimpleNamespace(sync=lambda _plan: None)
 
 
-def test_run_once_persists_garmin_sync_results():
+def test_run_once_persists_provider_delivery_results():
     history_service = _FakeHistoryService()
     container = SimpleNamespace(
         settings=SimpleNamespace(
@@ -315,8 +315,9 @@ def test_run_once_persists_garmin_sync_results():
     assert container.garmin_client.cleanup_ids == ["old-1"]
     assert container.history_service.cleared[0]["start_date"].isoformat() == "2026-04-17"
     assert len(container.history_service.synced) == 6
-    assert container.history_service.synced[0]["garmin_workout_id"] == "id-1"
-    assert container.history_service.synced[0]["garmin_schedule_status"] == "scheduled"
+    assert container.history_service.synced[0]["delivery_provider"] == "garmin"
+    assert container.history_service.synced[0]["external_workout_id"] == "id-1"
+    assert container.history_service.synced[0]["delivery_status"] == "scheduled"
 
 
 def test_run_once_prefers_provider_neutral_training_data_dependency():

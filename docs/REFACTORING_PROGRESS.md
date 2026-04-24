@@ -102,6 +102,16 @@ toward the target architecture in
   - `workout_delivery_provider` is now the preferred upload dependency;
   - `garmin_client` remains as a compatibility alias and Garmin Connect remains
     the default concrete provider.
+- Started provider-neutral persistence naming:
+  - activity identity now uses `provider` + `provider_activity_id`;
+  - workout delivery state now uses `delivery_provider`,
+    `external_workout_id`, and `delivery_status`;
+  - Google Calendar activity event matching now uses provider-neutral private
+    properties while accepting legacy Garmin event ids.
+- Documented the canonical-first provider data model in
+  [`PROVIDER_DATA_MODEL.md`](./PROVIDER_DATA_MODEL.md), including the rule that
+  raw provider payloads are diagnostics/compatibility data, not the long-term
+  product model.
 
 ### What this enables
 
@@ -125,9 +135,8 @@ toward the target architecture in
 - Per-user Garmin token/session migration into the database
 - Persist refreshed per-user Google OAuth tokens back into the credential store
 - Further SQL-level decomposition behind the history facades
-- Migrate remaining orchestrator method and persistence names from
-  Garmin-specific wording to provider-neutral wording where that does not hide
-  existing Garmin sync-column compatibility.
+- Replace remaining local compatibility references to legacy Garmin DB columns
+  after active dev databases have migrated to provider-neutral columns.
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 - Replace legacy minute-match fallback once all deployments have the
@@ -140,6 +149,5 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
-- Next slice should continue provider-neutral naming for sync state and delivery
-  results, while preserving existing Garmin DB columns until a general
-  integration sync schema exists.
+- Next slice should continue reducing provider-specific storage assumptions
+  without expanding raw provider JSON usage.

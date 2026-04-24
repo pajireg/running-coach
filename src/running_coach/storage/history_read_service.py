@@ -27,15 +27,17 @@ class HistoryReadService:
     def summarize_training_background(self, as_of: date) -> dict[str, Any]:
         return self.history_service.summarize_training_background(as_of)
 
-    def list_planned_garmin_workout_ids(
+    def list_planned_external_workout_ids(
         self,
         *,
         start_date: date,
         end_date: date,
+        delivery_provider: str = "garmin",
     ) -> list[str]:
-        return self.plan_freshness_service.list_planned_garmin_workout_ids(
+        return self.plan_freshness_service.list_planned_external_workout_ids(
             start_date=start_date,
             end_date=end_date,
+            delivery_provider=delivery_provider,
         )
 
     def summarize_plan_freshness(self, *, as_of: date) -> dict[str, Any]:

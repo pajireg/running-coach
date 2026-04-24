@@ -21,8 +21,71 @@ def ensure_core_schema(db: DatabaseClient) -> None:
         return
 
     sql = schema_path.read_text(encoding="utf-8")
-    statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
+    statements = _split_sql_statements(sql)
     with db.connection() as conn:
         with conn.cursor() as cur:
             for statement in statements:
                 cur.execute(statement)
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split SQL statements while preserving PostgreSQL dollar-quoted blocks."""
+    statements: list[str] = []
+    current: list[str] = []
+    dollar_tag: str | None = None
+    in_single_quote = False
+    index = 0
+
+    while index < len(sql):
+        char = sql[index]
+
+        if dollar_tag is not None:
+            if sql.startswith(dollar_tag, index):
+                current.append(dollar_tag)
+                index += len(dollar_tag)
+                dollar_tag = None
+                continue
+            current.append(char)
+            index += 1
+            continue
+
+        if char == "'" and not in_single_quote:
+            in_single_quote = True
+            current.append(char)
+            index += 1
+            continue
+        if char == "'" and in_single_quote:
+            current.append(char)
+            if index + 1 < len(sql) and sql[index + 1] == "'":
+                current.append("'")
+                index += 2
+                continue
+            in_single_quote = False
+            index += 1
+            continue
+
+        if not in_single_quote and char == "$":
+            end = sql.find("$", index + 1)
+            if end != -1:
+                tag = sql[index : end + 1]
+                if tag == "$$" or tag[1:-1].replace("_", "").isalnum():
+                    dollar_tag = tag
+                    current.append(tag)
+                    index = end + 1
+                    continue
+
+        if char == ";" and not in_single_quote:
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+            index += 1
+            continue
+
+        current.append(char)
+        index += 1
+
+    statement = "".join(current).strip()
+    if statement:
+        statements.append(statement)
+    return statements

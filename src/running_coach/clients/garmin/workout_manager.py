@@ -95,7 +95,7 @@ class WorkoutManager:
     ) -> int:
         """현재 앱이 생성한 기존 워크아웃 삭제.
 
-        DB에 저장된 garmin_workout_id 기준으로만 삭제한다.
+        DB에 저장된 provider external workout id 기준으로만 삭제한다.
         ID 없이 이름 prefix로 탐색하는 fallback은 StandardizeWorkoutName 적용 이후
         canonical 이름('Recovery Run' 등)과 prefix가 일치하지 않아 항상 0건이며,
         사용자의 동명 워크아웃을 잘못 삭제할 위험이 있으므로 제거했다.

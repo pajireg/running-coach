@@ -88,14 +88,14 @@ class TrainingOrchestrator:
                         logger.error("계획 연장 실패")
                         return False
                     logger.info(f"\n훈련 계획 연장 완료! ({len(plan.plan)}일)")
-                    existing_workout_ids = self._existing_garmin_workout_ids(plan)
+                    existing_workout_ids = self._existing_provider_workout_ids(plan)
                     self._persist_plan_history(metrics, plan, training_background)
                     logger.info("기존 Running Coach 워크아웃 정리 중...")
                     self._training_data_provider().cleanup_existing_workouts(
                         workout_ids=existing_workout_ids or None
                     )
-                    self._clear_garmin_sync_results(plan)
-                    self._upload_garmin_workouts(plan)
+                    self._clear_delivery_results(plan)
+                    self._upload_provider_workouts(plan)
                     self._sync_google_calendar(plan, metrics.date)
                     logger.info("\n업데이트 완료")
                     return True
@@ -118,7 +118,7 @@ class TrainingOrchestrator:
                 return False
 
             logger.info(f"\n훈련 계획 생성 완료! ({len(plan.plan)}일)")
-            existing_workout_ids = self._existing_garmin_workout_ids(plan)
+            existing_workout_ids = self._existing_provider_workout_ids(plan)
             self._persist_plan_history(metrics, plan, training_background)
 
             # 4. 기존 워크아웃 정리
@@ -126,10 +126,10 @@ class TrainingOrchestrator:
             self._training_data_provider().cleanup_existing_workouts(
                 workout_ids=existing_workout_ids or None
             )
-            self._clear_garmin_sync_results(plan)
+            self._clear_delivery_results(plan)
 
-            # 5. Garmin에 업로드
-            self._upload_garmin_workouts(plan)
+            # 5. Provider에 업로드
+            self._upload_provider_workouts(plan)
 
             self._sync_google_calendar(plan, metrics.date)
 
@@ -231,52 +231,55 @@ class TrainingOrchestrator:
             logger.warning(f"훈련 배경 요약 실패 (계속 진행): {e}")
             return None
 
-    def _existing_garmin_workout_ids(self, plan) -> list[str]:
-        """새 계획 범위 + 미실행 과거 워크아웃의 Garmin workout id 조회."""
+    def _existing_provider_workout_ids(self, plan) -> list[str]:
+        """새 계획 범위 + 미실행 과거 provider workout id 조회."""
         if not self.container.settings.persist_history:
             return []
         try:
             today = date.today()
             # 오늘 이전 미실행 과거 워크아웃도 포함 (최대 14일)
             earliest = min(plan.start_date, today - timedelta(days=14))
-            return self.container.history_read_service.list_planned_garmin_workout_ids(
+            return self.container.history_read_service.list_planned_external_workout_ids(
                 start_date=earliest,
                 end_date=plan.end_date,
+                delivery_provider="garmin",
             )
         except Exception as e:
-            logger.warning(f"기존 Garmin workout id 조회 실패: {e}")
+            logger.warning(f"기존 provider workout id 조회 실패: {e}")
             return []
 
-    def _clear_garmin_sync_results(self, plan) -> None:
-        """삭제된 이전 Garmin workout id를 계획 범위에서 초기화."""
+    def _clear_delivery_results(self, plan) -> None:
+        """삭제된 이전 provider workout id를 계획 범위에서 초기화."""
         if not self.container.settings.persist_history:
             return
         try:
-            self.container.history_sync_service.clear_garmin_sync_results(
+            self.container.history_sync_service.clear_delivery_results(
                 start_date=plan.start_date,
                 end_date=plan.end_date,
+                delivery_provider="garmin",
             )
         except Exception as e:
-            logger.warning(f"Garmin sync 결과 초기화 실패 (계속 진행): {e}")
+            logger.warning(f"provider delivery 결과 초기화 실패 (계속 진행): {e}")
 
-    def _persist_garmin_sync_result(
+    def _persist_delivery_result(
         self,
         workout_date,
-        garmin_workout_id: str | None,
-        garmin_schedule_status: str,
+        external_workout_id: str | None,
+        delivery_status: str,
     ) -> None:
-        """Garmin 업로드 결과 저장."""
+        """Provider delivery result persistence."""
         if not self.container.settings.persist_history:
             return
 
         try:
-            self.container.history_sync_service.record_garmin_sync_result(
+            self.container.history_sync_service.record_delivery_result(
                 workout_date=workout_date,
-                garmin_workout_id=garmin_workout_id,
-                garmin_schedule_status=garmin_schedule_status,
+                delivery_provider="garmin",
+                external_workout_id=external_workout_id,
+                delivery_status=delivery_status,
             )
         except Exception as e:
-            logger.warning(f"Garmin 동기화 결과 저장 실패 (계속 진행): {e}")
+            logger.warning(f"provider delivery 결과 저장 실패 (계속 진행): {e}")
 
     def _should_generate_plan(self, as_of) -> tuple[str, list[str]]:
         """auto 모드에서 계획 생성 모드 판단. ("skip"|"extend"|"replan", reasons) 반환."""
@@ -345,8 +348,8 @@ class TrainingOrchestrator:
             include_strength=include_strength,
         )
 
-    def _upload_garmin_workouts(self, plan) -> None:
-        """Garmin에 워크아웃 업로드."""
+    def _upload_provider_workouts(self, plan) -> None:
+        """Provider에 워크아웃 업로드."""
         logger.info("워크아웃 provider에 업로드 중...")
         workout_manager = self._workout_delivery_provider()
         if workout_manager is None:
@@ -362,23 +365,23 @@ class TrainingOrchestrator:
                 workout_id = workout_manager.create_workout(workout)
                 if workout_id:
                     workout_manager.schedule_workout(workout_id, daily_plan.date)
-                    self._persist_garmin_sync_result(
+                    self._persist_delivery_result(
                         workout_date=daily_plan.date,
-                        garmin_workout_id=workout_id,
-                        garmin_schedule_status="scheduled",
+                        external_workout_id=workout_id,
+                        delivery_status="scheduled",
                     )
                 else:
-                    self._persist_garmin_sync_result(
+                    self._persist_delivery_result(
                         workout_date=daily_plan.date,
-                        garmin_workout_id=None,
-                        garmin_schedule_status="upload_failed",
+                        external_workout_id=None,
+                        delivery_status="upload_failed",
                     )
                 time.sleep(1)
             except Exception as e:
-                self._persist_garmin_sync_result(
+                self._persist_delivery_result(
                     workout_date=daily_plan.date,
-                    garmin_workout_id=None,
-                    garmin_schedule_status=f"error: {str(e)[:90]}",
+                    external_workout_id=None,
+                    delivery_status=f"error: {str(e)[:90]}",
                 )
                 logger.error(f"워크아웃 업로드 실패: {e}")
 

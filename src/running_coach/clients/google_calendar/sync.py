@@ -218,7 +218,7 @@ class CalendarSyncService:
         logger.info("실제 운동 기록 이벤트 증분 동기화 중...")
         created_count = 0
         updated_count = 0
-        existing_by_activity_id: dict[str, dict[str, object]] = {}
+        existing_by_activity_key: dict[str, dict[str, object]] = {}
         for event in existing_events:
             extended = event.get("extendedProperties")
             if not isinstance(extended, dict):
@@ -226,14 +226,16 @@ class CalendarSyncService:
             private = extended.get("private")
             if not isinstance(private, dict):
                 continue
-            activity_id = private.get("garminActivityId")
+            provider = str(private.get("activityProvider") or "garmin")
+            activity_id = private.get("providerActivityId") or private.get("garminActivityId")
             if activity_id:
-                existing_by_activity_id[str(activity_id)] = event
+                existing_by_activity_key[f"{provider}:{activity_id}"] = event
 
         for activity in activities:
             event = self._build_activity_event(activity)
-            activity_id = str(activity.get("garminActivityId") or "")
-            existing_event = existing_by_activity_id.get(activity_id)
+            provider = str(activity.get("provider") or "garmin")
+            activity_id = str(activity.get("providerActivityId") or "")
+            existing_event = existing_by_activity_key.get(f"{provider}:{activity_id}")
 
             if existing_event and existing_event.get("id"):
                 self.service.events().update(
@@ -333,7 +335,8 @@ class CalendarSyncService:
                 "private": {
                     "source": "running_coach_activity",
                     "activityDate": str(activity.get("activityDate")),
-                    "garminActivityId": str(activity.get("garminActivityId") or ""),
+                    "activityProvider": str(activity.get("provider") or "garmin"),
+                    "providerActivityId": str(activity.get("providerActivityId") or ""),
                 }
             },
         }

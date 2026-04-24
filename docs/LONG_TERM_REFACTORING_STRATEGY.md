@@ -28,6 +28,11 @@ Completed structural work:
 - orchestrator now reads health/activity/history data and workout delivery
   through provider-neutral container accessors, while keeping Garmin Connect as
   the default provider and preserving existing Garmin sync fields.
+- provider data storage is moving to canonical-first naming:
+  `provider` + provider-native external ids for activities, and
+  provider-neutral workout delivery fields for planned workouts.
+- raw provider payloads are treated as diagnostics/compatibility data, not the
+  long-term product model; see [`PROVIDER_DATA_MODEL.md`](./PROVIDER_DATA_MODEL.md).
 
 Remaining productization blockers:
 
@@ -37,8 +42,7 @@ Remaining productization blockers:
   migration and reauth flows are not implemented yet;
 - provider clients are partially abstracted, but runtime construction still
   resolves Garmin as the only real training data provider;
-- orchestrator persistence method names and stored sync columns still expose
-  Garmin-specific wording;
+- some compatibility migration paths still reference legacy Garmin DB columns;
 - scheduler/runtime execution is still effectively single-user;
 - mobile/watch provider strategy exists in product docs, but backend adapter
   seams are not ready.

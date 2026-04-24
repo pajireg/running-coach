@@ -20,18 +20,30 @@ class HistorySyncService:
     def backfill_planned_workouts(self, scheduled_items: list[dict[str, Any]]) -> int:
         return self.history_service.backfill_planned_workouts(scheduled_items)
 
-    def clear_garmin_sync_results(self, *, start_date: date, end_date: date) -> None:
-        self.history_service.clear_garmin_sync_results(start_date=start_date, end_date=end_date)
+    def clear_delivery_results(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        delivery_provider: str = "garmin",
+    ) -> None:
+        self.history_service.clear_delivery_results(
+            start_date=start_date,
+            end_date=end_date,
+            delivery_provider=delivery_provider,
+        )
 
-    def record_garmin_sync_result(
+    def record_delivery_result(
         self,
         *,
         workout_date: date,
-        garmin_workout_id: str | None,
-        garmin_schedule_status: str,
+        delivery_provider: str,
+        external_workout_id: str | None,
+        delivery_status: str,
     ) -> None:
-        self.history_service.record_garmin_sync_result(
+        self.history_service.record_delivery_result(
             workout_date=workout_date,
-            garmin_workout_id=garmin_workout_id,
-            garmin_schedule_status=garmin_schedule_status,
+            delivery_provider=delivery_provider,
+            external_workout_id=external_workout_id,
+            delivery_status=delivery_status,
         )

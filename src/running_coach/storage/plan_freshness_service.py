@@ -23,29 +23,36 @@ class PlanFreshnessService(AthleteScopedStore):
     def __init__(self, db: DatabaseClient, athlete_key: str, timezone: str = "Asia/Seoul"):
         super().__init__(db=db, athlete_key=athlete_key, timezone=timezone)
 
-    def list_planned_garmin_workout_ids(
+    def list_planned_external_workout_ids(
         self,
         start_date: date,
         end_date: date,
+        delivery_provider: str = "garmin",
     ) -> list[str]:
-        """List persisted Garmin workout ids for a plan window."""
+        """List persisted provider workout ids for a plan window."""
         rows = self._fetchall(
             """
-            SELECT garmin_workout_id
+            SELECT external_workout_id
             FROM planned_workouts
             WHERE athlete_id = %(athlete_id)s
               AND source = %(source)s
+              AND delivery_provider = %(delivery_provider)s
               AND workout_date BETWEEN %(start_date)s AND %(end_date)s
-              AND garmin_workout_id IS NOT NULL
+              AND external_workout_id IS NOT NULL
             """,
             {
                 "athlete_id": self._athlete_id(),
                 "source": WORKOUT_SOURCE,
+                "delivery_provider": delivery_provider,
                 "start_date": start_date,
                 "end_date": end_date,
             },
         )
-        return [str(row["garmin_workout_id"]) for row in rows if row.get("garmin_workout_id")]
+        return [
+            str(row["external_workout_id"])
+            for row in rows
+            if row.get("external_workout_id")
+        ]
 
     def summarize_plan_freshness(self, as_of: date, horizon_days: int = 7) -> dict[str, Any]:
         """Summarize whether the current plan can be reused, extended, or regenerated."""

@@ -207,15 +207,17 @@ class CoachingHistoryService:
                 },
             )
 
-    def list_planned_garmin_workout_ids(
+    def list_planned_external_workout_ids(
         self,
         start_date: date,
         end_date: date,
+        delivery_provider: str = "garmin",
     ) -> list[str]:
-        """계획 범위에 저장된 기존 Garmin workout id 목록."""
-        return self._plan_freshness_service().list_planned_garmin_workout_ids(
+        """List stored provider workout ids for the plan window."""
+        return self._plan_freshness_service().list_planned_external_workout_ids(
             start_date=start_date,
             end_date=end_date,
+            delivery_provider=delivery_provider,
         )
 
     def summarize_plan_freshness(self, as_of: date, horizon_days: int = 7) -> dict[str, Any]:
@@ -461,18 +463,20 @@ class CoachingHistoryService:
             },
         )
 
-    def record_garmin_sync_result(
+    def record_delivery_result(
         self,
         workout_date: date,
-        garmin_workout_id: Optional[str],
-        garmin_schedule_status: str,
+        delivery_provider: str,
+        external_workout_id: Optional[str],
+        delivery_status: str,
     ) -> None:
-        """Garmin 업로드/예약 결과를 planned_workouts에 기록."""
+        """Provider workout delivery result persistence."""
         query = """
             UPDATE planned_workouts
             SET
-                garmin_workout_id = %(garmin_workout_id)s,
-                garmin_schedule_status = %(garmin_schedule_status)s
+                delivery_provider = %(delivery_provider)s,
+                external_workout_id = %(external_workout_id)s,
+                delivery_status = %(delivery_status)s
             WHERE athlete_id = %(athlete_id)s
               AND workout_date = %(workout_date)s
               AND source = %(source)s
@@ -482,27 +486,35 @@ class CoachingHistoryService:
             {
                 "athlete_id": self._athlete_id(),
                 "workout_date": workout_date,
-                "garmin_workout_id": garmin_workout_id,
-                "garmin_schedule_status": garmin_schedule_status[:100],
+                "delivery_provider": delivery_provider,
+                "external_workout_id": external_workout_id,
+                "delivery_status": delivery_status[:100],
                 "source": WORKOUT_SOURCE,
             },
         )
 
-    def clear_garmin_sync_results(self, start_date: date, end_date: date) -> None:
-        """새 업로드 전 계획 범위의 이전 Garmin sync 결과를 초기화."""
+    def clear_delivery_results(
+        self,
+        start_date: date,
+        end_date: date,
+        delivery_provider: str = "garmin",
+    ) -> None:
+        """Clear previous provider delivery results before a new upload."""
         self._execute(
             """
             UPDATE planned_workouts
             SET
-                garmin_workout_id = NULL,
-                garmin_schedule_status = NULL
+                external_workout_id = NULL,
+                delivery_status = NULL
             WHERE athlete_id = %(athlete_id)s
               AND source = %(source)s
+              AND delivery_provider = %(delivery_provider)s
               AND workout_date BETWEEN %(start_date)s AND %(end_date)s
             """,
             {
                 "athlete_id": self._athlete_id(),
                 "source": WORKOUT_SOURCE,
+                "delivery_provider": delivery_provider,
                 "start_date": start_date,
                 "end_date": end_date,
             },
@@ -523,8 +535,9 @@ class CoachingHistoryService:
                 is_rest,
                 total_duration_seconds,
                 plan_payload,
-                garmin_workout_id,
-                garmin_schedule_status
+                delivery_provider,
+                external_workout_id,
+                delivery_status
             )
             VALUES (
                 %(athlete_id)s,
@@ -536,8 +549,9 @@ class CoachingHistoryService:
                 %(is_rest)s,
                 %(total_duration_seconds)s,
                 %(plan_payload)s::jsonb,
-                %(garmin_workout_id)s,
-                %(garmin_schedule_status)s
+                %(delivery_provider)s,
+                %(external_workout_id)s,
+                %(delivery_status)s
             )
             ON CONFLICT (athlete_id, workout_date, source)
             DO UPDATE SET
@@ -547,13 +561,17 @@ class CoachingHistoryService:
                     planned_workouts.total_duration_seconds,
                     EXCLUDED.total_duration_seconds
                 ),
-                garmin_workout_id = COALESCE(
-                    planned_workouts.garmin_workout_id,
-                    EXCLUDED.garmin_workout_id
+                delivery_provider = COALESCE(
+                    planned_workouts.delivery_provider,
+                    EXCLUDED.delivery_provider
                 ),
-                garmin_schedule_status = COALESCE(
-                    planned_workouts.garmin_schedule_status,
-                    EXCLUDED.garmin_schedule_status
+                external_workout_id = COALESCE(
+                    planned_workouts.external_workout_id,
+                    EXCLUDED.external_workout_id
+                ),
+                delivery_status = COALESCE(
+                    planned_workouts.delivery_status,
+                    EXCLUDED.delivery_status
                 )
         """
         for item in scheduled_items:
@@ -576,10 +594,11 @@ class CoachingHistoryService:
                     "is_rest": is_rest,
                     "total_duration_seconds": duration_seconds,
                     "plan_payload": json.dumps({"calendarItem": item}, ensure_ascii=False),
-                    "garmin_workout_id": (
+                    "delivery_provider": "garmin",
+                    "external_workout_id": (
                         str(item.get("workoutId")) if item.get("workoutId") else None
                     ),
-                    "garmin_schedule_status": "scheduled_backfill",
+                    "delivery_status": "scheduled_backfill",
                 },
             )
             inserted += 1
@@ -617,7 +636,8 @@ class CoachingHistoryService:
                 """
                 INSERT INTO activities (
                     athlete_id,
-                    garmin_activity_id,
+                    provider,
+                    provider_activity_id,
                     activity_date,
                     started_at,
                     name,
@@ -633,7 +653,8 @@ class CoachingHistoryService:
                 )
                 VALUES (
                     %(athlete_id)s,
-                    %(garmin_activity_id)s,
+                    %(provider)s,
+                    %(provider_activity_id)s,
                     %(activity_date)s,
                     %(started_at)s,
                     %(name)s,
@@ -647,7 +668,7 @@ class CoachingHistoryService:
                     %(calories)s,
                     %(raw_payload)s::jsonb
                 )
-                ON CONFLICT (athlete_id, garmin_activity_id)
+                ON CONFLICT (athlete_id, provider, provider_activity_id)
                 DO UPDATE SET
                     activity_date = EXCLUDED.activity_date,
                     started_at = EXCLUDED.started_at,
@@ -665,7 +686,10 @@ class CoachingHistoryService:
                 """,
                 {
                     "athlete_id": athlete_id,
-                    "garmin_activity_id": summary.get("activityId"),
+                    "provider": str(activity.get("provider") or "garmin"),
+                    "provider_activity_id": (
+                        str(summary.get("activityId")) if summary.get("activityId") else None
+                    ),
                     "activity_date": (
                         started_at.date() if started_at is not None else date.today()
                     ),
@@ -923,7 +947,8 @@ class CoachingHistoryService:
         rows = self._fetchall(
             """
             SELECT
-                a.garmin_activity_id,
+                a.provider,
+                a.provider_activity_id,
                 a.activity_date,
                 a.started_at,
                 a.name,
@@ -960,7 +985,8 @@ class CoachingHistoryService:
         )
         return [
             {
-                "garminActivityId": row.get("garmin_activity_id"),
+                "provider": row.get("provider"),
+                "providerActivityId": row.get("provider_activity_id"),
                 "activityDate": row["activity_date"].isoformat(),
                 "startedAt": (
                     row["started_at"].astimezone(ZoneInfo(TIMEZONE)).isoformat()

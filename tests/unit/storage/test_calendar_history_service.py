@@ -15,7 +15,8 @@ class _CalendarHistoryService(CoachingHistoryService):
         if "FROM activities" in query:
             return [
                 {
-                    "garmin_activity_id": 123,
+                    "provider": "garmin",
+                    "provider_activity_id": "123",
                     "activity_date": date(2026, 4, 17),
                     "started_at": datetime(2026, 4, 17, 6, 0, tzinfo=timezone.utc),
                     "name": "러닝",
@@ -43,7 +44,8 @@ def test_list_recent_completed_activities_returns_calendar_payload():
     activities = service.list_recent_completed_activities(as_of=date(2026, 4, 18), days=30)
 
     assert len(activities) == 1
-    assert activities[0]["garminActivityId"] == 123
+    assert activities[0]["provider"] == "garmin"
+    assert activities[0]["providerActivityId"] == "123"
     assert activities[0]["sportType"] == "러닝"
     assert activities[0]["distanceKm"] == 5.11
     assert activities[0]["executionStatus"] == "completed_substituted"
@@ -59,7 +61,8 @@ class _UnplannedCalendarHistoryService(CoachingHistoryService):
         if "FROM activities" in query:
             return [
                 {
-                    "garmin_activity_id": 456,
+                    "provider": "garmin",
+                    "provider_activity_id": "456",
                     "activity_date": date(2026, 4, 16),
                     "started_at": datetime(2026, 4, 16, 6, 0, tzinfo=timezone.utc),
                     "name": "인터벌 러닝",
