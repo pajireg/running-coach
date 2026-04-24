@@ -199,6 +199,25 @@ class ScheduledUserJobService:
             },
         )
 
+    def get_status(self, user_id: str) -> dict[str, Any] | None:
+        """Return the current schedule state for one user."""
+        return self._fetchone(
+            """
+            SELECT
+                next_run_at,
+                last_run_at,
+                last_status,
+                last_error,
+                failure_count,
+                next_retry_at,
+                disabled_at,
+                lease_until
+            FROM scheduled_user_jobs
+            WHERE athlete_id = %(user_id)s
+            """,
+            {"user_id": user_id},
+        )
+
     def compute_next_run_at(
         self,
         *,

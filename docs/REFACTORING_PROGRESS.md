@@ -112,6 +112,13 @@ toward the target architecture in
   [`PROVIDER_DATA_MODEL.md`](./PROVIDER_DATA_MODEL.md), including the rule that
   raw provider payloads are diagnostics/compatibility data, not the long-term
   product model.
+- Added the first app-home read contract:
+  - `/v1/me/dashboard` returns the current profile, scheduler state, current
+    plan summary, and recent activity summary;
+  - the response is provider-neutral and exposes Garmin only as a provider
+    value in activity/integration fields;
+  - dashboard reads tolerate users whose coaching history has not been
+    initialized yet.
 
 ### What this enables
 
@@ -129,6 +136,7 @@ toward the target architecture in
   - history reads vs history writes vs sync-state mutations
   - provider capability interfaces vs concrete Garmin implementation
   - transport surfaces such as CLI and HTTP
+  - app-facing read contracts vs background execution internals
 
 ### Still not done
 
@@ -141,6 +149,8 @@ toward the target architecture in
 - Docker end-to-end verification of the new user-facing runtime path
 - Replace legacy minute-match fallback once all deployments have the
   `scheduled_user_jobs` schema.
+- Real mobile auth/session model; current user API still uses the development
+  bearer API-key contract.
 
 ### Guardrails for the next slice
 

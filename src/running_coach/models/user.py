@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -107,6 +108,66 @@ class UserCreateResponse(BaseModel):
 
     api_key: str = Field(alias="apiKey")
     user: UserProfile
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UserScheduleStatus(BaseModel):
+    """Read model for the user's background coaching schedule."""
+
+    next_run_at: datetime | None = Field(default=None, alias="nextRunAt")
+    last_run_at: datetime | None = Field(default=None, alias="lastRunAt")
+    last_status: str | None = Field(default=None, alias="lastStatus")
+    last_error: str | None = Field(default=None, alias="lastError")
+    failure_count: int = Field(default=0, alias="failureCount")
+    next_retry_at: datetime | None = Field(default=None, alias="nextRetryAt")
+    disabled_at: datetime | None = Field(default=None, alias="disabledAt")
+    lease_until: datetime | None = Field(default=None, alias="leaseUntil")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DashboardPlannedWorkout(BaseModel):
+    """Compact planned workout summary for app home screens."""
+
+    date: date
+    workout_name: str = Field(alias="workoutName")
+    session_type: str | None = Field(default=None, alias="sessionType")
+    workout_type: str | None = Field(default=None, alias="workoutType")
+    planned_minutes: int | None = Field(default=None, alias="plannedMinutes")
+    is_rest: bool = Field(alias="isRest")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DashboardActivity(BaseModel):
+    """Compact completed activity summary for app home screens."""
+
+    provider: str | None = None
+    provider_activity_id: str | None = Field(default=None, alias="providerActivityId")
+    activity_date: date = Field(alias="activityDate")
+    started_at: datetime | None = Field(default=None, alias="startedAt")
+    title: str
+    sport_type: str | None = Field(default=None, alias="sportType")
+    distance_km: float | None = Field(default=None, alias="distanceKm")
+    duration_seconds: int | None = Field(default=None, alias="durationSeconds")
+    avg_pace: str | None = Field(default=None, alias="avgPace")
+    avg_hr: int | None = Field(default=None, alias="avgHr")
+    planned_workout_name: str | None = Field(default=None, alias="plannedWorkoutName")
+    execution_status: str | None = Field(default=None, alias="executionStatus")
+    execution_quality: str | None = Field(default=None, alias="executionQuality")
+    target_match_score: float | None = Field(default=None, alias="targetMatchScore")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UserDashboard(BaseModel):
+    """App home dashboard contract."""
+
+    user: UserProfile
+    schedule: UserScheduleStatus
+    current_plan: list[DashboardPlannedWorkout] = Field(alias="currentPlan")
+    recent_activities: list[DashboardActivity] = Field(alias="recentActivities")
 
     model_config = ConfigDict(populate_by_name=True)
 

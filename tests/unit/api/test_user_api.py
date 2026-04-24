@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,11 +10,14 @@ from fastapi.testclient import TestClient
 from running_coach.api.users import create_user_router
 from running_coach.models.llm_settings import LLMSettings
 from running_coach.models.user import (
+    DashboardActivity,
+    DashboardPlannedWorkout,
     IntegrationStatus,
     RunSyncResponse,
     UserContext,
     UserCreateRequest,
     UserCreateResponse,
+    UserDashboard,
     UserPreferences,
     UserPreferencesPatch,
     UserProfile,
@@ -44,6 +47,35 @@ class FakeUserApplicationService:
                 garmin="configured",
                 googleCalendar="env_compat",
             ),
+        )
+        self.dashboard = UserDashboard(
+            user=self.profile,
+            schedule={
+                "nextRunAt": datetime(2026, 4, 24, 20, 0, tzinfo=timezone.utc),
+                "lastStatus": "completed",
+                "failureCount": 0,
+            },
+            currentPlan=[
+                DashboardPlannedWorkout(
+                    date=date(2026, 4, 25),
+                    workoutName="Base Run",
+                    sessionType="base",
+                    workoutType="Base Run",
+                    plannedMinutes=45,
+                    isRest=False,
+                )
+            ],
+            recentActivities=[
+                DashboardActivity(
+                    provider="garmin",
+                    providerActivityId="activity-1",
+                    activityDate=date(2026, 4, 24),
+                    title="Morning Run",
+                    sportType="Running",
+                    distanceKm=8.1,
+                    durationSeconds=2700,
+                )
+            ],
         )
         self.current_user = UserContext(
             user_id="user-1",
@@ -76,6 +108,10 @@ class FakeUserApplicationService:
     def get_user_profile(self, user_id: str) -> UserProfile:
         assert user_id == "user-1"
         return self.profile
+
+    def get_dashboard(self, user_id: str) -> UserDashboard:
+        assert user_id == "user-1"
+        return self.dashboard
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
         assert user_id == "user-1"
@@ -159,6 +195,18 @@ def test_get_me_returns_current_user_profile():
     assert response.status_code == 200
     assert response.json()["userId"] == "user-1"
     assert response.json()["llmSettings"]["llmModel"] == "gemini-2.5-flash"
+
+
+def test_get_me_dashboard_returns_app_home_summary():
+    client = _client()
+
+    response = client.get("/v1/me/dashboard", headers={"Authorization": "Bearer rcu_test"})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["userId"] == "user-1"
+    assert response.json()["schedule"]["nextRunAt"] == "2026-04-24T20:00:00Z"
+    assert response.json()["currentPlan"][0]["workoutName"] == "Base Run"
+    assert response.json()["recentActivities"][0]["provider"] == "garmin"
 
 
 def test_patch_me_preferences_updates_profile():

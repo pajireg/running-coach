@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from running_coach.application.coaching_service import CoachingApplicationService
@@ -15,7 +15,7 @@ from running_coach.storage.user_service import UserService
 
 class FakeUserService(UserService):
     def __init__(self):
-        super().__init__(db=object())  # type: ignore[arg-type]
+        super().__init__(db=FakeEmptyDb())  # type: ignore[arg-type]
         self.record = UserRecord(
             user_id="user-1",
             external_key="runner-1",
@@ -72,6 +72,36 @@ class FakeUserService(UserService):
         return self.record
 
 
+class FakeCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def execute(self, query, params):
+        return None
+
+    def fetchall(self):
+        return []
+
+
+class FakeConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def cursor(self):
+        return FakeCursor()
+
+
+class FakeEmptyDb:
+    def connection(self):
+        return FakeConnection()
+
+
 class FakeAdminSettings:
     def __init__(self):
         self.global_settings = LLMSettings(
@@ -116,6 +146,22 @@ class FakeCoachingService(CoachingApplicationService):
         self.feedback_calls.append((user_context.user_id, feedback.feedback_date))
 
 
+class FakeScheduledJobs:
+    def __init__(self):
+        self.upserted_user_id = None
+
+    def upsert_for_user(self, user):
+        self.upserted_user_id = user.user_id
+
+    def get_status(self, user_id: str):
+        assert user_id == "user-1"
+        return {
+            "next_run_at": datetime(2026, 4, 24, 20, 0, tzinfo=timezone.utc),
+            "last_status": "completed",
+            "failure_count": 0,
+        }
+
+
 def _service(
     *,
     schedule_times: str = "05:00,17:00",
@@ -137,6 +183,7 @@ def _service(
         integration_credentials=SimpleNamespace(
             get_statuses=lambda _user_id: integration_statuses or {}
         ),  # type: ignore[arg-type]
+        scheduled_jobs=FakeScheduledJobs(),  # type: ignore[arg-type]
     )
     return service, admin_settings, coaching_service
 
@@ -195,6 +242,17 @@ def test_profile_integration_status_prefers_db_status_over_env_fallback():
 
     assert profile.integration_status.garmin == "reauth_required"
     assert profile.integration_status.google_calendar == "disabled"
+
+
+def test_get_dashboard_returns_schedule_and_empty_history_when_uninitialized():
+    service, _, _ = _service()
+
+    dashboard = service.get_dashboard("user-1")
+
+    assert dashboard.user.user_id == "user-1"
+    assert dashboard.schedule.next_run_at == datetime(2026, 4, 24, 20, 0, tzinfo=timezone.utc)
+    assert dashboard.current_plan == []
+    assert dashboard.recent_activities == []
 
 
 def test_run_user_sync_delegates_to_coaching_service():

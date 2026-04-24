@@ -3,26 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Literal, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..config.settings import Settings
 from ..models.feedback import SubjectiveFeedback
 from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
+    DashboardActivity,
+    DashboardPlannedWorkout,
     IntegrationStatus,
     RunSyncResponse,
     UserContext,
     UserCreateRequest,
     UserCreateResponse,
+    UserDashboard,
     UserPreferences,
     UserPreferencesPatch,
     UserProfile,
     UserRecord,
+    UserScheduleStatus,
 )
 from ..storage import (
     AdminSettingsService,
     ClaimedUserJob,
+    CoachingHistoryService,
+    HistoryReadService,
     IntegrationCredentialService,
     ScheduledUserJobService,
     UserService,
@@ -54,6 +61,16 @@ class UserApplicationService:
 
     def get_user_profile(self, user_id: str) -> UserProfile:
         return self._profile_from_record(self.user_service.get_user_record(user_id))
+
+    def get_dashboard(self, user_id: str) -> UserDashboard:
+        context = self.get_user_context(user_id)
+        current_plan, recent_activities = self._dashboard_training_summary(context)
+        return UserDashboard(
+            user=self.get_user_profile(user_id),
+            schedule=self._schedule_status(user_id),
+            currentPlan=current_plan,
+            recentActivities=recent_activities,
+        )
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
         record = self.user_service.update_user_preferences(user_id, patch)
@@ -211,6 +228,50 @@ class UserApplicationService:
                 googleCalendar=self._google_calendar_status(integration_statuses),
             ),
         )
+
+    def _schedule_status(self, user_id: str) -> UserScheduleStatus:
+        if self.scheduled_jobs is None:
+            return UserScheduleStatus()
+        return UserScheduleStatus.model_validate(self.scheduled_jobs.get_status(user_id) or {})
+
+    def _dashboard_training_summary(
+        self,
+        context: UserContext,
+    ) -> tuple[list[DashboardPlannedWorkout], list[DashboardActivity]]:
+        try:
+            reader = HistoryReadService(
+                CoachingHistoryService(
+                    db=self.user_service.db,
+                    athlete_key=context.external_key,
+                    timezone=context.timezone,
+                )
+            )
+            as_of = self._today_for_user(context)
+            planned = [
+                DashboardPlannedWorkout(
+                    date=day.date,
+                    workoutName=day.workout.workout_name,
+                    sessionType=day.session_type,
+                    workoutType=day.workout_type,
+                    plannedMinutes=day.planned_minutes,
+                    isRest=day.workout.is_rest,
+                )
+                for day in reader.fetch_future_plan(as_of, days=7)
+            ]
+            recent = [
+                DashboardActivity.model_validate(activity)
+                for activity in reader.list_recent_completed_activities(as_of=as_of, days=14)[:5]
+            ]
+            return planned, recent
+        except ValueError:
+            return [], []
+
+    def _today_for_user(self, context: UserContext) -> date:
+        try:
+            zone = ZoneInfo(context.timezone)
+        except ZoneInfoNotFoundError:
+            zone = ZoneInfo("UTC")
+        return datetime.now(zone).date()
 
     def _context_from_record(self, record: UserRecord) -> UserContext:
         llm_settings = self.admin_settings.get_user_llm_settings(record.user_id).effective

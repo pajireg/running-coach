@@ -75,3 +75,14 @@ def test_claim_due_users_uses_due_index_and_skip_locked_query():
     assert "FOR UPDATE SKIP LOCKED" in service.last_query
     assert service.last_params["worker_id"] == "worker-1"
     assert service.last_params["batch_size"] == 10
+
+
+def test_get_status_reads_one_user_schedule_state():
+    service = QueryCaptureScheduledJobs()
+
+    status = service.get_status("user-1")
+
+    assert status is not None
+    assert "FROM scheduled_user_jobs" in service.last_query
+    assert "WHERE athlete_id = %(user_id)s" in service.last_query
+    assert service.last_params == {"user_id": "user-1"}

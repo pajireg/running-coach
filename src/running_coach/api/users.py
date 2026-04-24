@@ -11,7 +11,9 @@ from ..models.user import (
     UserContext,
     UserCreateRequest,
     UserCreateResponse,
+    UserDashboard,
     UserPreferencesPatch,
+    UserProfile,
 )
 from ..models.user_coaching import (
     AvailabilityRuleRequest,
@@ -47,20 +49,24 @@ def create_user_router(user_app: UserApplicationService) -> APIRouter:
     async def create_user(payload: UserCreateRequest) -> UserCreateResponse:
         return user_app.create_user(payload)
 
-    @router.get("/me")
+    @router.get("/me", response_model=UserProfile)
     async def get_me(
         current_user: UserContext = Depends(require_current_user),
-    ) -> dict[str, object]:
-        return user_app.get_user_profile(current_user.user_id).model_dump(by_alias=True)
+    ) -> UserProfile:
+        return user_app.get_user_profile(current_user.user_id)
 
-    @router.patch("/me/preferences")
+    @router.get("/me/dashboard", response_model=UserDashboard)
+    async def get_me_dashboard(
+        current_user: UserContext = Depends(require_current_user),
+    ) -> UserDashboard:
+        return user_app.get_dashboard(current_user.user_id)
+
+    @router.patch("/me/preferences", response_model=UserProfile)
     async def patch_me_preferences(
         patch: UserPreferencesPatch,
         current_user: UserContext = Depends(require_current_user),
-    ) -> dict[str, object]:
-        return user_app.update_user_preferences(current_user.user_id, patch).model_dump(
-            by_alias=True
-        )
+    ) -> UserProfile:
+        return user_app.update_user_preferences(current_user.user_id, patch)
 
     @router.post("/runs/sync")
     async def sync_runs(
