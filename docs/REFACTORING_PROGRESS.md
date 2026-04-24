@@ -56,6 +56,11 @@ toward the target architecture in
   - added an app-key-backed local credential cipher seam;
   - made user profile integration status prefer DB status before env
     compatibility fallback.
+- Added a user runtime factory seam:
+  - env-compatible Garmin users still use deployment credentials;
+  - non-env users can resolve active Garmin credentials from the DB store;
+  - coaching execution now asks the runtime factory for a container instead of
+    directly constructing one.
 
 ### What this enables
 

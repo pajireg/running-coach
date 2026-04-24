@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from ..config.settings import Settings
-from ..core.container import ServiceContainer
 from ..core.orchestrator import TrainingOrchestrator
 from ..models.feedback import SubjectiveFeedback
 from ..models.user import RunSyncResponse, UserContext
@@ -19,23 +19,17 @@ class CoachingApplicationService:
 
     settings: Settings
     user_state_service: UserCoachingStateService
+    runtime_factory: Any | None = None
 
     def run_for_user_context(
         self,
         user_context: UserContext,
         run_mode: str = "auto",
     ) -> RunSyncResponse:
-        if not user_context.garmin_email:
-            raise ValueError("Garmin integration is not configured for this user")
-        if user_context.garmin_email != self.settings.garmin_email:
-            raise ValueError(
-                "Garmin credentials are not available for this user in this deployment"
-            )
+        if self.runtime_factory is None:
+            raise ValueError("User runtime factory is not configured")
 
-        container = ServiceContainer.create_for_user(
-            settings=self.settings,
-            user_context=user_context,
-        )
+        container = self.runtime_factory.create_container(user_context)
         orchestrator = TrainingOrchestrator(container)
         result = orchestrator.run_once(run_mode=run_mode, user_context=user_context)
         return RunSyncResponse(

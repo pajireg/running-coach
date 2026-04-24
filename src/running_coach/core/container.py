@@ -53,6 +53,8 @@ class ServiceContainer:
         cls,
         settings: Settings,
         user_context: Optional[UserContext],
+        garmin_email: str | None = None,
+        garmin_password: str | None = None,
     ) -> "ServiceContainer":
         """배포 설정 + 사용자 컨텍스트로 컨테이너 생성."""
         db = DatabaseClient(settings.database_url)
@@ -118,12 +120,13 @@ class ServiceContainer:
             settings=settings,
             user_context=user_context,
             garmin_client=GarminClient(
-                email=(
+                email=garmin_email
+                or (
                     user_context.garmin_email
                     if user_context is not None and user_context.garmin_email
                     else settings.garmin_email
                 ),
-                password=settings.garmin_password,
+                password=garmin_password or settings.garmin_password,
                 settings=settings,
             ),
             gemini_client=gemini_client,

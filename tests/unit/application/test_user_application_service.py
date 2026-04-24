@@ -184,6 +184,24 @@ def test_run_user_sync_delegates_to_coaching_service():
     assert coaching_service.last_sync == ("user-1", "plan")
 
 
+def test_coaching_service_uses_runtime_factory_for_user_run():
+    calls = []
+    runtime_factory = SimpleNamespace(
+        create_container=lambda user_context: calls.append(user_context.user_id)
+        or SimpleNamespace()
+    )
+    service = CoachingApplicationService(
+        settings=SimpleNamespace(max_heart_rate=None),  # type: ignore[arg-type]
+        user_state_service=SimpleNamespace(db=SimpleNamespace(ping=lambda: None)),  # type: ignore[arg-type]
+        runtime_factory=runtime_factory,
+    )
+
+    response = service.run_for_user_context(_service()[0].get_user_context("user-1"))
+
+    assert response.status == "failed"
+    assert calls == ["user-1"]
+
+
 def test_record_feedback_delegates_to_coaching_service():
     service, _, coaching_service = _service()
 

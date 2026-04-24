@@ -15,6 +15,7 @@ from ..storage import (
     UserService,
 )
 from ..storage.schema import ensure_core_schema
+from .runtime_factory import UserRuntimeFactory
 
 
 @dataclass
@@ -25,6 +26,7 @@ class ApplicationRuntime:
     db: DatabaseClient
     admin_settings: AdminSettingsService
     integration_credentials: IntegrationCredentialService
+    runtime_factory: UserRuntimeFactory
     coaching_app: CoachingApplicationService
     user_app: UserApplicationService
 
@@ -44,9 +46,14 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         db=db,
         deployment_defaults=settings.deployment_llm_settings(),
     )
+    runtime_factory = UserRuntimeFactory(
+        settings=settings,
+        integration_credentials=integration_credentials,
+    )
     coaching_app = CoachingApplicationService(
         settings=settings,
         user_state_service=UserCoachingStateService(db=db),
+        runtime_factory=runtime_factory,
     )
     user_app = UserApplicationService(
         user_service=UserService(db=db),
@@ -60,6 +67,7 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         db=db,
         admin_settings=admin_settings,
         integration_credentials=integration_credentials,
+        runtime_factory=runtime_factory,
         coaching_app=coaching_app,
         user_app=user_app,
     )
