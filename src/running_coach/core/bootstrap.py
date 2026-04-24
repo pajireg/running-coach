@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..application import CoachingApplicationService, UserApplicationService
+from ..application import CoachingApplicationService, MultiUserWorker, UserApplicationService
 from ..config.settings import Settings
 from ..storage import (
     AdminSettingsService,
@@ -29,6 +29,7 @@ class ApplicationRuntime:
     runtime_factory: UserRuntimeFactory
     coaching_app: CoachingApplicationService
     user_app: UserApplicationService
+    multi_user_worker: MultiUserWorker
 
 
 def create_application_runtime(settings: Settings) -> ApplicationRuntime:
@@ -62,6 +63,7 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         settings=settings,
         coaching_service=coaching_app,
     )
+    multi_user_worker = MultiUserWorker(user_app=user_app)
     return ApplicationRuntime(
         settings=settings,
         db=db,
@@ -70,4 +72,5 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         runtime_factory=runtime_factory,
         coaching_app=coaching_app,
         user_app=user_app,
+        multi_user_worker=multi_user_worker,
     )

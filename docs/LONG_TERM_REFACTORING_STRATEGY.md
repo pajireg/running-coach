@@ -113,11 +113,19 @@ Target shape:
 After credential/runtime seams are stable, replace the singleton scheduler
 model with a user worker model.
 
+Current state:
+
+- service mode schedules a `MultiUserWorker` entrypoint;
+- runnable users are discovered from DB state;
+- the legacy deployment user remains runnable via env-compatible Garmin
+  credentials;
+- additional users require an active Garmin credential row before the worker
+  picks them up;
+- failures are isolated per user and returned in an aggregate worker summary.
+
 Required behavior:
 
-- discover active users from DB;
 - use each user's timezone, schedule times, and run mode;
-- isolate failures per user;
 - call the same application service used by CLI/API;
 - keep metric labels bounded and avoid `user_id` metric labels.
 
@@ -127,7 +135,7 @@ Required behavior:
 2. Extract `TrainingBackgroundService` and migrate context-builder reads.
 3. Migrate Garmin and Google credential flows into `user_integration_credentials`.
 4. Move Google Calendar construction behind the user runtime factory.
-5. Convert scheduler execution to user discovery plus per-user jobs.
+5. Replace process-level schedule times with per-user schedule polling.
 6. Add provider capability protocols and migrate Garmin behind them.
 7. Add Apple/Android adapter skeletons only after the above runtime path is
    user-scoped end to end.

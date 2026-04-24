@@ -40,6 +40,10 @@ class FakeUserService(UserService):
         assert user_id == "user-1"
         return self.record
 
+    def list_runnable_users(self, *, deployment_garmin_email: str | None):  # type: ignore[override]
+        assert deployment_garmin_email == "runner@example.com"
+        return [self.record]
+
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserRecord:  # type: ignore[override]
         assert user_id == "user-1"
         if "display_name" in patch.model_fields_set:
@@ -182,6 +186,15 @@ def test_run_user_sync_delegates_to_coaching_service():
 
     assert response.status == "completed"
     assert coaching_service.last_sync == ("user-1", "plan")
+
+
+def test_list_runnable_user_contexts_uses_storage_discovery():
+    service, _, _ = _service()
+
+    contexts = service.list_runnable_user_contexts()
+
+    assert [context.user_id for context in contexts] == ["user-1"]
+    assert contexts[0].external_key == "runner-1"
 
 
 def test_coaching_service_uses_runtime_factory_for_user_run():

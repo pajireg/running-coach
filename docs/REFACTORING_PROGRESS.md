@@ -61,13 +61,19 @@ toward the target architecture in
   - non-env users can resolve active Garmin credentials from the DB store;
   - coaching execution now asks the runtime factory for a container instead of
     directly constructing one.
+- Added the first multi-user worker seam:
+  - `UserService` can discover runnable users from DB state;
+  - `UserApplicationService` exposes runnable `UserContext` values;
+  - `MultiUserWorker` runs users one by one and isolates per-user failures;
+  - service mode now schedules the multi-user worker while preserving the local
+    env-compatible runtime user path.
 
 ### What this enables
 
 - The same user-scoped coaching execution path can now be called from:
   - FastAPI user endpoints
   - the legacy CLI runtime
-  - future worker entrypoints
+  - the multi-user worker entrypoint
 - The same user-scoped coaching input mutations can now be called from:
   - FastAPI user endpoints
   - the legacy CLI runtime
@@ -80,8 +86,9 @@ toward the target architecture in
 
 ### Still not done
 
-- Per-user encrypted Garmin/Google credential migration into the database
-- True multi-user background workers and per-user schedules/timezones
+- Per-user Garmin token/session migration into the database
+- Per-user Google credential migration into the database
+- Per-user schedule/timezone polling rather than process-level schedule times
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
@@ -93,5 +100,6 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
-- Next persistence slice should extract `TrainingBackgroundService` or add the
-  integration credential store; do not add more user API endpoints first.
+- Next slice should either move Google Calendar construction behind the user
+  runtime factory or replace process-level schedule times with per-user schedule
+  polling; do not add more user API endpoints first.

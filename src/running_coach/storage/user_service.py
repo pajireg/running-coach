@@ -194,6 +194,46 @@ class UserService:
             return None
         return UserRecord.from_row(row)
 
+    def list_runnable_users(self, *, deployment_garmin_email: str | None) -> list[UserRecord]:
+        """Return users that can be executed by the scheduled worker.
+
+        The legacy deployment user remains runnable via env credentials. Additional
+        users must have an active Garmin credential row so the worker does not pick
+        up partially configured accounts.
+        """
+        rows = self._fetchall(
+            """
+            SELECT
+                a.athlete_id AS user_id,
+                a.external_key,
+                a.display_name,
+                a.garmin_email,
+                a.timezone,
+                up.locale,
+                up.schedule_times,
+                up.include_strength,
+                up.planner_mode,
+                up.llm_provider,
+                up.llm_model
+            FROM athletes a
+            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
+            WHERE a.garmin_email IS NOT NULL
+              AND (
+                a.garmin_email = %(deployment_garmin_email)s
+                OR EXISTS (
+                    SELECT 1
+                    FROM user_integration_credentials uic
+                    WHERE uic.athlete_id = a.athlete_id
+                      AND uic.provider = 'garmin'
+                      AND uic.status = 'active'
+                )
+              )
+            ORDER BY a.created_at ASC, a.athlete_id ASC
+            """,
+            {"deployment_garmin_email": deployment_garmin_email},
+        )
+        return [UserRecord.from_row(row) for row in rows]
+
     def upsert_runtime_user(
         self,
         *,
@@ -350,3 +390,10 @@ class UserService:
                 cur.execute(query, params)
                 row = cur.fetchone()
                 return cast(Optional[dict[str, Any]], row)
+
+    def _fetchall(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        with self.db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                rows = cur.fetchall()
+                return cast(list[dict[str, Any]], list(rows))

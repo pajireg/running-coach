@@ -115,6 +115,32 @@ class FakeUserService(UserService):
         return self.get_user_record(user_id)
 
 
+class QueryCaptureUserService(UserService):
+    def __init__(self):
+        super().__init__(db=object())  # type: ignore[arg-type]
+        self.last_query = ""
+        self.last_params: dict[str, Any] = {}
+
+    def _fetchall(self, query: str, params: dict[str, Any]):  # type: ignore[override]
+        self.last_query = query
+        self.last_params = params
+        return [
+            {
+                "user_id": "user-1",
+                "external_key": "runner-1",
+                "display_name": "Runner One",
+                "garmin_email": "runner@example.com",
+                "timezone": "Asia/Seoul",
+                "locale": "ko",
+                "schedule_times": "05:00,17:00",
+                "include_strength": False,
+                "planner_mode": None,
+                "llm_provider": None,
+                "llm_model": None,
+            }
+        ]
+
+
 def test_create_user_returns_api_key_and_record():
     service = FakeUserService()
 
@@ -186,3 +212,14 @@ def test_upsert_runtime_user_reuses_external_key():
     assert updated.locale == "en"
     assert updated.schedule_times == "06:00"
     assert updated.include_strength is True
+
+
+def test_list_runnable_users_uses_env_or_active_garmin_credential_filter():
+    service = QueryCaptureUserService()
+
+    records = service.list_runnable_users(deployment_garmin_email="runner@example.com")
+
+    assert [record.user_id for record in records] == ["user-1"]
+    assert service.last_params == {"deployment_garmin_email": "runner@example.com"}
+    assert "uic.provider = 'garmin'" in service.last_query
+    assert "uic.status = 'active'" in service.last_query

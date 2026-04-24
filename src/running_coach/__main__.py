@@ -213,7 +213,7 @@ def main():
     if args.service:
         # 서비스 모드
         scheduler = SchedulerService(
-            lambda: user_app.run_user_sync(runtime_user.user_id, settings.service_run_mode),
+            lambda: runtime.multi_user_worker.run_all(run_mode=settings.service_run_mode),
             schedule_times=settings.parsed_schedule_times(),
             run_mode=settings.service_run_mode,
             include_strength=runtime_user.include_strength,

@@ -56,6 +56,12 @@ class UserApplicationService:
     def get_user_context(self, user_id: str) -> UserContext:
         return self._context_from_record(self.user_service.get_user_record(user_id))
 
+    def list_runnable_user_contexts(self) -> list[UserContext]:
+        records = self.user_service.list_runnable_users(
+            deployment_garmin_email=self.settings.garmin_email,
+        )
+        return [self._context_from_record(record) for record in records]
+
     def ensure_local_runtime_user_context(self) -> UserContext:
         record = self.user_service.upsert_runtime_user(
             external_key=self.settings.garmin_email.lower(),
