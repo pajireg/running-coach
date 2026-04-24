@@ -122,10 +122,12 @@ Current state:
 - additional users require an active Garmin credential row before the worker
   picks them up;
 - failures are isolated per user and returned in an aggregate worker summary.
+- service mode polls every minute and each user is due only when their own
+  timezone-adjusted local time matches `schedule_times`.
 
 Required behavior:
 
-- use each user's timezone, schedule times, and run mode;
+- use each user's run mode preference;
 - call the same application service used by CLI/API;
 - keep metric labels bounded and avoid `user_id` metric labels.
 
@@ -135,7 +137,7 @@ Required behavior:
 2. Extract `TrainingBackgroundService` and migrate context-builder reads.
 3. Migrate Garmin and Google credential flows into `user_integration_credentials`.
 4. Move Google Calendar construction behind the user runtime factory.
-5. Replace process-level schedule times with per-user schedule polling.
+5. Add a per-user run mode preference.
 6. Add provider capability protocols and migrate Garmin behind them.
 7. Add Apple/Android adapter skeletons only after the above runtime path is
    user-scoped end to end.

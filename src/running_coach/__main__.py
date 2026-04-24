@@ -213,10 +213,11 @@ def main():
     if args.service:
         # 서비스 모드
         scheduler = SchedulerService(
-            lambda: runtime.multi_user_worker.run_all(run_mode=settings.service_run_mode),
+            lambda: runtime.multi_user_worker.run_due(run_mode=settings.service_run_mode),
             schedule_times=settings.parsed_schedule_times(),
             run_mode=settings.service_run_mode,
             include_strength=runtime_user.include_strength,
+            poll_interval_minutes=1,
         )
         scheduler.run()
     else:

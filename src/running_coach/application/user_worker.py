@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..models.user import RunSyncResponse, UserContext
 from ..utils.logger import get_logger
@@ -62,6 +64,47 @@ class MultiUserWorker:
             results=results,
         )
 
+    def run_due(
+        self,
+        *,
+        run_mode: str = "auto",
+        now: datetime | None = None,
+    ) -> MultiUserRunSummary:
+        contexts = self.user_app.list_runnable_user_contexts()
+        reference_time = now or datetime.now(timezone.utc)
+        results: list[UserRunResult] = []
+
+        for context in contexts:
+            if not self._is_due(context, reference_time):
+                results.append(
+                    UserRunResult(
+                        user_id=context.user_id,
+                        external_key=context.external_key,
+                        status="skipped",
+                        mode=run_mode,
+                    )
+                )
+                continue
+            results.append(self._run_one(context, run_mode=run_mode))
+
+        completed = sum(1 for result in results if result.status == "completed")
+        failed = sum(1 for result in results if result.status == "failed")
+        skipped = sum(1 for result in results if result.status == "skipped")
+        logger.info(
+            "사용자별 스케줄 확인 완료: 대상=%s, 실행=%s, 실패=%s, 건너뜀=%s",
+            len(results),
+            completed,
+            failed,
+            skipped,
+        )
+        return MultiUserRunSummary(
+            total=len(results),
+            completed=completed,
+            failed=failed,
+            skipped=skipped,
+            results=results,
+        )
+
     def _run_one(self, context: UserContext, *, run_mode: str) -> UserRunResult:
         try:
             response = self.user_app.run_user_sync(context.user_id, run_mode=run_mode)
@@ -93,3 +136,33 @@ class MultiUserWorker:
             status=response.status,
             mode=response.mode,
         )
+
+    def _is_due(self, context: UserContext, now: datetime) -> bool:
+        try:
+            local_time = now.astimezone(ZoneInfo(context.timezone))
+        except ZoneInfoNotFoundError:
+            logger.warning(
+                "알 수 없는 사용자 timezone으로 실행 건너뜀: user_id=%s timezone=%s",
+                context.user_id,
+                context.timezone,
+            )
+            return False
+        schedule_times = _parse_schedule_times(context.schedule_times)
+        return f"{local_time.hour:02d}:{local_time.minute:02d}" in schedule_times
+
+
+def _parse_schedule_times(raw_value: str) -> set[str]:
+    normalized: set[str] = set()
+    for raw_time in [item.strip() for item in raw_value.split(",") if item.strip()]:
+        if ":" in raw_time:
+            hour_text, minute_text = raw_time.split(":", 1)
+        else:
+            hour_text, minute_text = raw_time, "00"
+        try:
+            hour = int(hour_text)
+            minute = int(minute_text)
+        except ValueError:
+            continue
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            normalized.add(f"{hour:02d}:{minute:02d}")
+    return normalized

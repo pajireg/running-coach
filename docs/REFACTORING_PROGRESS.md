@@ -67,6 +67,11 @@ toward the target architecture in
   - `MultiUserWorker` runs users one by one and isolates per-user failures;
   - service mode now schedules the multi-user worker while preserving the local
     env-compatible runtime user path.
+- Replaced process-level scheduled run times with per-user schedule polling:
+  - service mode polls every minute;
+  - each user is due only when their own `timezone` and `schedule_times` match;
+  - users outside their scheduled minute are reported as skipped instead of
+    executed.
 
 ### What this enables
 
@@ -88,7 +93,7 @@ toward the target architecture in
 
 - Per-user Garmin token/session migration into the database
 - Per-user Google credential migration into the database
-- Per-user schedule/timezone polling rather than process-level schedule times
+- Per-user run mode preference instead of deployment-level service mode
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
@@ -100,6 +105,6 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
-- Next slice should either move Google Calendar construction behind the user
-  runtime factory or replace process-level schedule times with per-user schedule
-  polling; do not add more user API endpoints first.
+- Next slice should move Google Calendar construction behind the user runtime
+  factory or add a per-user run mode preference; do not add more user API
+  endpoints first.

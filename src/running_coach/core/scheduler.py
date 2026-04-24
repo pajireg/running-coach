@@ -21,6 +21,7 @@ class SchedulerService:
         schedule_times: list[str],
         run_mode: str,
         include_strength: bool,
+        poll_interval_minutes: int | None = None,
     ):
         """
         Args:
@@ -33,17 +34,22 @@ class SchedulerService:
         self.schedule_times = schedule_times
         self.run_mode = run_mode
         self.include_strength = include_strength
+        self.poll_interval_minutes = poll_interval_minutes
 
     def run(self) -> None:
         """서비스 모드 실행"""
         logger.info("--- %s: Advanced Adaptive Trainer ---", APP_NAME)
-        logger.info(f"서비스 모드 실행 중. 매일 {', '.join(self.schedule_times)}에 예약됨.")
+        if self.poll_interval_minutes is not None:
+            logger.info(
+                "서비스 모드 실행 중. %s분마다 사용자별 스케줄을 확인함.",
+                self.poll_interval_minutes,
+            )
+        else:
+            logger.info(f"서비스 모드 실행 중. 매일 {', '.join(self.schedule_times)}에 예약됨.")
         logger.info(f"실행 모드: {self.run_mode}")
         logger.info(f"근력운동 포함: {self.include_strength}")
 
-        # 스케줄 등록
-        for target_time in self.schedule_times:
-            schedule.every().day.at(target_time).do(self._run_job)
+        self._register_jobs()
 
         logger.info(f"스케줄러 시작됨. 다음 실행: {schedule.next_run()}")
 
@@ -58,3 +64,11 @@ class SchedulerService:
             self.run_job()
         except Exception as e:
             logger.error(f"스케줄된 작업 실패: {e}", exc_info=True)
+
+    def _register_jobs(self) -> None:
+        """Register schedule jobs without starting the service loop."""
+        if self.poll_interval_minutes is not None:
+            schedule.every(self.poll_interval_minutes).minutes.do(self._run_job)
+            return
+        for target_time in self.schedule_times:
+            schedule.every().day.at(target_time).do(self._run_job)
