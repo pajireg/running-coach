@@ -2,8 +2,9 @@
 
 import time
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional, cast
 
+from ..clients.providers import TrainingDataProvider, WorkoutDeliveryProvider
 from ..models.user import UserContext
 from ..utils.logger import get_logger
 from .container import ServiceContainer
@@ -55,12 +56,13 @@ class TrainingOrchestrator:
                     logger.info(f" - 타겟 페이스: {race.target_pace}")
 
             # 1. 로그인
-            logger.info("Garmin 로그인 중...")
-            self.container.garmin_client.login()
+            training_data_provider = self._training_data_provider()
+            logger.info("훈련 데이터 provider 로그인 중...")
+            training_data_provider.login()
 
             # 2. 메트릭 수집
             logger.info("건강 및 퍼포먼스 데이터 수집 중...")
-            metrics = self.container.garmin_client.get_advanced_metrics()
+            metrics = training_data_provider.get_advanced_metrics()
             self._persist_daily_history(metrics)
             self._backfill_planned_history(metrics.date)
             self._persist_activity_history()
@@ -89,7 +91,7 @@ class TrainingOrchestrator:
                     existing_workout_ids = self._existing_garmin_workout_ids(plan)
                     self._persist_plan_history(metrics, plan, training_background)
                     logger.info("기존 Running Coach 워크아웃 정리 중...")
-                    self.container.garmin_client.cleanup_existing_workouts(
+                    self._training_data_provider().cleanup_existing_workouts(
                         workout_ids=existing_workout_ids or None
                     )
                     self._clear_garmin_sync_results(plan)
@@ -121,7 +123,7 @@ class TrainingOrchestrator:
 
             # 4. 기존 워크아웃 정리
             logger.info("기존 Running Coach 워크아웃 정리 중...")
-            self.container.garmin_client.cleanup_existing_workouts(
+            self._training_data_provider().cleanup_existing_workouts(
                 workout_ids=existing_workout_ids or None
             )
             self._clear_garmin_sync_results(plan)
@@ -185,7 +187,7 @@ class TrainingOrchestrator:
             return
 
         try:
-            activities = self.container.garmin_client.get_recent_activity_history()
+            activities = self._training_data_provider().get_recent_activity_history()
             self.container.history_write_service.record_activities(activities)
         except Exception as e:
             logger.warning(f"활동 히스토리 저장 실패 (계속 진행): {e}")
@@ -209,7 +211,7 @@ class TrainingOrchestrator:
             return
 
         try:
-            scheduled_items = self.container.garmin_client.get_recent_scheduled_workout_history(
+            scheduled_items = self._training_data_provider().get_recent_scheduled_workout_history(
                 target_date=as_of
             )
             inserted = self.container.history_sync_service.backfill_planned_workouts(
@@ -345,9 +347,11 @@ class TrainingOrchestrator:
 
     def _upload_garmin_workouts(self, plan) -> None:
         """Garmin에 워크아웃 업로드."""
-        logger.info("Garmin에 워크아웃 업로드 중...")
-        workout_manager = self.container.garmin_client.workout_manager
-        assert workout_manager is not None
+        logger.info("워크아웃 provider에 업로드 중...")
+        workout_manager = self._workout_delivery_provider()
+        if workout_manager is None:
+            logger.info("워크아웃 업로드 provider가 없어 업로드를 건너뜁니다.")
+            return
         for daily_plan in plan.plan:
             workout = daily_plan.workout
             if daily_plan.session_type == "rest" or workout.is_rest:
@@ -377,6 +381,23 @@ class TrainingOrchestrator:
                     garmin_schedule_status=f"error: {str(e)[:90]}",
                 )
                 logger.error(f"워크아웃 업로드 실패: {e}")
+
+    def _training_data_provider(self) -> TrainingDataProvider:
+        """Return the provider-neutral training data capability.
+
+        `garmin_client` remains as a compatibility alias while the runtime moves
+        from Garmin-specific naming to provider capability naming.
+        """
+        provider = getattr(self.container, "training_data_provider", None)
+        if provider is not None:
+            return cast(TrainingDataProvider, provider)
+        return cast(TrainingDataProvider, self.container.garmin_client)
+
+    def _workout_delivery_provider(self) -> WorkoutDeliveryProvider | None:
+        provider = getattr(self.container, "workout_delivery_provider", None)
+        if provider is not None:
+            return cast(WorkoutDeliveryProvider, provider)
+        return self._training_data_provider().workout_manager
 
     def _sync_google_calendar(self, plan, as_of) -> None:
         """계획과 실제 운동 기록을 Google Calendar에 동기화."""

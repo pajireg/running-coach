@@ -96,6 +96,12 @@ toward the target architecture in
   - `WorkoutDeliveryProvider` describes workout create/schedule capability;
   - `ServiceContainer` can receive an injected training data provider while the
     default runtime still uses Garmin Connect.
+- Moved orchestrator data collection and workout delivery calls onto
+  provider-neutral container accessors:
+  - `training_data_provider` is now the preferred orchestration dependency;
+  - `workout_delivery_provider` is now the preferred upload dependency;
+  - `garmin_client` remains as a compatibility alias and Garmin Connect remains
+    the default concrete provider.
 
 ### What this enables
 
@@ -119,8 +125,9 @@ toward the target architecture in
 - Per-user Garmin token/session migration into the database
 - Persist refreshed per-user Google OAuth tokens back into the credential store
 - Further SQL-level decomposition behind the history facades
-- Migrate orchestrator method names from Garmin-specific wording to
-  provider-neutral wording while preserving Garmin as the default provider.
+- Migrate remaining orchestrator method and persistence names from
+  Garmin-specific wording to provider-neutral wording where that does not hide
+  existing Garmin sync-column compatibility.
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 - Replace legacy minute-match fallback once all deployments have the
@@ -133,5 +140,6 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
-- Next slice should add provider capability protocols and migrate Garmin behind
-  them; do not add more user API endpoints first.
+- Next slice should continue provider-neutral naming for sync state and delivery
+  results, while preserving existing Garmin DB columns until a general
+  integration sync schema exists.

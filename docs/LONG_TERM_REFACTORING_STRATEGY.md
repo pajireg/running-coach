@@ -25,6 +25,9 @@ Completed structural work:
   credentials before container creation.
 - initial provider capability protocols for training data and workout delivery,
   with Garmin Connect still used as the default concrete provider.
+- orchestrator now reads health/activity/history data and workout delivery
+  through provider-neutral container accessors, while keeping Garmin Connect as
+  the default provider and preserving existing Garmin sync fields.
 
 Remaining productization blockers:
 
@@ -32,9 +35,10 @@ Remaining productization blockers:
 - Google Calendar runtime is still deployment/local-file compatible;
 - Garmin DB credential storage is wired into runtime creation, but real token
   migration and reauth flows are not implemented yet;
-- provider clients are still concrete runtime dependencies;
-- orchestrator method names still expose Garmin-specific wording even after the
-  first provider protocol seam;
+- provider clients are partially abstracted, but runtime construction still
+  resolves Garmin as the only real training data provider;
+- orchestrator persistence method names and stored sync columns still expose
+  Garmin-specific wording;
 - scheduler/runtime execution is still effectively single-user;
 - mobile/watch provider strategy exists in product docs, but backend adapter
   seams are not ready.
@@ -146,7 +150,7 @@ Required behavior:
 1. Extract `PlanFreshnessService` and wire read-side callers to it.
 2. Extract `TrainingBackgroundService` and migrate context-builder reads.
 3. Migrate Garmin and Google credential flows into `user_integration_credentials`.
-4. Add provider capability protocols and migrate Garmin behind them.
+4. Add provider capability protocols and migrate orchestrator calls behind them.
 5. Persist refreshed per-user Google OAuth tokens back into the credential store.
 6. Add Apple/Android adapter skeletons only after the above runtime path is
    user-scoped end to end.

@@ -6,7 +6,7 @@ from typing import Optional, cast
 from ..clients.garmin import GarminClient
 from ..clients.gemini import GeminiClient
 from ..clients.google_calendar import GoogleCalendarClient
-from ..clients.providers import TrainingDataProvider
+from ..clients.providers import TrainingDataProvider, WorkoutDeliveryProvider
 from ..coaching.context import CoachingContextBuilder
 from ..coaching.safety import DEFAULT_SAFETY_RULES, SafetyValidator
 from ..config.settings import Settings
@@ -40,6 +40,16 @@ class ServiceContainer:
     history_sync_service: HistorySyncService
     safety_validator: SafetyValidator
     context_builder: CoachingContextBuilder
+
+    @property
+    def training_data_provider(self) -> TrainingDataProvider:
+        """Provider-neutral access to health, activity, and schedule data."""
+        return self.garmin_client
+
+    @property
+    def workout_delivery_provider(self) -> WorkoutDeliveryProvider | None:
+        """Provider-neutral access to workout creation and scheduling."""
+        return self.training_data_provider.workout_manager
 
     @classmethod
     def create(cls, settings: Settings) -> "ServiceContainer":

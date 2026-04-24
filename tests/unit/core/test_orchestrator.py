@@ -319,6 +319,35 @@ def test_run_once_persists_garmin_sync_results():
     assert container.history_service.synced[0]["garmin_schedule_status"] == "scheduled"
 
 
+def test_run_once_prefers_provider_neutral_training_data_dependency():
+    history_service = _FakeHistoryService()
+    training_data_provider = _FakeGarminClient()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(
+            race=SimpleNamespace(has_goal=False),
+            persist_history=True,
+            include_strength=False,
+            garmin_email="user@example.com",
+            max_heart_rate=None,
+        ),
+        garmin_client=SimpleNamespace(),
+        training_data_provider=training_data_provider,
+        workout_delivery_provider=training_data_provider.workout_manager,
+        gemini_client=_FakeGeminiClient(),
+        calendar_client=_FakeCalendarClient(),
+        history_service=history_service,
+        history_write_service=_FakeHistoryWriteService(history_service),
+        history_read_service=_FakeHistoryReadService(history_service),
+        history_sync_service=_FakeHistorySyncService(history_service),
+    )
+
+    result = TrainingOrchestrator(container).run_once()
+
+    assert result is True
+    assert training_data_provider.cleanup_ids == ["old-1"]
+    assert training_data_provider.workout_manager.created
+
+
 def test_auto_mode_skips_llm_when_plan_is_fresh():
     history_service = _FakeHistoryService()
     history_service.freshness = {
