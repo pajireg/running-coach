@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..models.user import RunSyncResponse, UserContext
@@ -38,8 +39,9 @@ class MultiUserRunSummary:
 class MultiUserWorker:
     """Runs scheduled coaching jobs for each runnable user."""
 
-    def __init__(self, user_app: UserApplicationService):
+    def __init__(self, user_app: UserApplicationService, worker_id: str | None = None):
         self.user_app = user_app
+        self.worker_id = worker_id or f"worker-{uuid4()}"
 
     def run_all(self, *, run_mode: str = "auto") -> MultiUserRunSummary:
         contexts = self.user_app.list_runnable_user_contexts()
@@ -72,7 +74,11 @@ class MultiUserWorker:
         *,
         run_mode: str = "auto",
         now: datetime | None = None,
+        batch_size: int = 25,
     ) -> MultiUserRunSummary:
+        if getattr(self.user_app, "scheduled_jobs", None) is not None:
+            return self._run_claimed_due(run_mode=run_mode, batch_size=batch_size)
+
         contexts = self.user_app.list_runnable_user_contexts()
         reference_time = now or datetime.now(timezone.utc)
         results: list[UserRunResult] = []
@@ -96,6 +102,40 @@ class MultiUserWorker:
         skipped = sum(1 for result in results if result.status == "skipped")
         logger.info(
             "사용자별 스케줄 확인 완료: 대상=%s, 실행=%s, 실패=%s, 건너뜀=%s",
+            len(results),
+            completed,
+            failed,
+            skipped,
+        )
+        return MultiUserRunSummary(
+            total=len(results),
+            completed=completed,
+            failed=failed,
+            skipped=skipped,
+            results=results,
+        )
+
+    def _run_claimed_due(self, *, run_mode: str, batch_size: int) -> MultiUserRunSummary:
+        contexts = self.user_app.claim_due_user_contexts(
+            worker_id=self.worker_id,
+            batch_size=batch_size,
+        )
+        results: list[UserRunResult] = []
+        for context in contexts:
+            effective_run_mode = self._effective_run_mode(context, run_mode)
+            result = self._run_one(context, run_mode=effective_run_mode)
+            self.user_app.complete_scheduled_run(
+                context,
+                status=result.status,
+                error=result.error,
+            )
+            results.append(result)
+
+        completed = sum(1 for result in results if result.status == "completed")
+        failed = sum(1 for result in results if result.status == "failed")
+        skipped = sum(1 for result in results if result.status == "skipped")
+        logger.info(
+            "due 사용자 실행 완료: 대상=%s, 완료=%s, 실패=%s, 건너뜀=%s",
             len(results),
             completed,
             failed,

@@ -11,6 +11,7 @@ from ..storage import (
     CredentialCipher,
     DatabaseClient,
     IntegrationCredentialService,
+    ScheduledUserJobService,
     UserCoachingStateService,
     UserService,
 )
@@ -26,6 +27,7 @@ class ApplicationRuntime:
     db: DatabaseClient
     admin_settings: AdminSettingsService
     integration_credentials: IntegrationCredentialService
+    scheduled_jobs: ScheduledUserJobService
     runtime_factory: UserRuntimeFactory
     coaching_app: CoachingApplicationService
     user_app: UserApplicationService
@@ -47,6 +49,7 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         db=db,
         deployment_defaults=settings.deployment_llm_settings(),
     )
+    scheduled_jobs = ScheduledUserJobService(db=db)
     runtime_factory = UserRuntimeFactory(
         settings=settings,
         integration_credentials=integration_credentials,
@@ -60,6 +63,7 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         user_service=UserService(db=db),
         admin_settings=admin_settings,
         integration_credentials=integration_credentials,
+        scheduled_jobs=scheduled_jobs,
         settings=settings,
         coaching_service=coaching_app,
     )
@@ -69,6 +73,7 @@ def create_application_runtime(settings: Settings) -> ApplicationRuntime:
         db=db,
         admin_settings=admin_settings,
         integration_credentials=integration_credentials,
+        scheduled_jobs=scheduled_jobs,
         runtime_factory=runtime_factory,
         coaching_app=coaching_app,
         user_app=user_app,

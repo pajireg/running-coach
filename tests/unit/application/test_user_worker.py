@@ -57,6 +57,24 @@ class FakeUserApp:
         return SimpleNamespace(status="completed", mode=run_mode)
 
 
+class FakeDueUserApp(FakeUserApp):
+    def __init__(self):
+        super().__init__()
+        self.scheduled_jobs = object()
+        self.completed: list[tuple[str, str, str | None]] = []
+
+    def claim_due_user_contexts(self, *, worker_id: str, batch_size: int):
+        assert worker_id == "worker-1"
+        assert batch_size == 2
+        return [
+            _context("user-1", "runner-1", run_mode="plan"),
+            _context("user-4", "runner-4", run_mode="auto"),
+        ]
+
+    def complete_scheduled_run(self, context: UserContext, *, status: str, error: str | None):
+        self.completed.append((context.user_id, status, error))
+
+
 def test_multi_user_worker_isolates_per_user_failures():
     user_app = FakeUserApp()
     worker = MultiUserWorker(user_app=user_app)  # type: ignore[arg-type]
@@ -131,3 +149,20 @@ def test_multi_user_worker_prefers_user_run_mode():
         ("user-4", "auto"),
     ]
     assert [result.mode for result in summary.results] == ["plan", "auto"]
+
+
+def test_multi_user_worker_claims_due_jobs_without_full_scan():
+    user_app = FakeDueUserApp()
+    worker = MultiUserWorker(user_app=user_app, worker_id="worker-1")  # type: ignore[arg-type]
+
+    summary = worker.run_due(run_mode="auto", batch_size=2)
+
+    assert summary.total == 2
+    assert user_app.calls == [
+        ("user-1", "plan"),
+        ("user-4", "auto"),
+    ]
+    assert user_app.completed == [
+        ("user-1", "completed", None),
+        ("user-4", "completed", None),
+    ]

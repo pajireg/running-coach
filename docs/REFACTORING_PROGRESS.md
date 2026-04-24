@@ -72,6 +72,13 @@ toward the target architecture in
   - each user is due only when their own `timezone` and `schedule_times` match;
   - users outside their scheduled minute are reported as skipped instead of
     executed.
+- Replaced full-user schedule polling with `next_run_at` due job claiming:
+  - added `scheduled_user_jobs` with `next_run_at`, lease, retry, and status
+    fields;
+  - user creation and preference changes recalculate the next due timestamp;
+  - service ticks now claim only due rows with `FOR UPDATE SKIP LOCKED`;
+  - successful runs advance to the next scheduled timestamp, while failures use
+    bounded backoff.
 - Added per-user scheduled run mode:
   - `user_preferences.run_mode` stores `plan` or `auto`;
   - user API preferences expose `runMode`;
@@ -107,6 +114,8 @@ toward the target architecture in
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
+- Replace legacy minute-match fallback once all deployments have the
+  `scheduled_user_jobs` schema.
 
 ### Guardrails for the next slice
 

@@ -19,7 +19,13 @@ from ..models.user import (
     UserProfile,
     UserRecord,
 )
-from ..storage import AdminSettingsService, IntegrationCredentialService, UserService
+from ..storage import (
+    AdminSettingsService,
+    ClaimedUserJob,
+    IntegrationCredentialService,
+    ScheduledUserJobService,
+    UserService,
+)
 from .coaching_service import CoachingApplicationService
 
 
@@ -32,9 +38,11 @@ class UserApplicationService:
     settings: Settings
     coaching_service: CoachingApplicationService
     integration_credentials: IntegrationCredentialService | None = None
+    scheduled_jobs: ScheduledUserJobService | None = None
 
     def create_user(self, payload: UserCreateRequest) -> UserCreateResponse:
         record, api_key = self.user_service.create_user(payload)
+        self._upsert_schedule(record)
         return UserCreateResponse(apiKey=api_key, user=self._profile_from_record(record))
 
     def authenticate_api_key(self, api_key: str) -> UserContext | None:
@@ -47,10 +55,12 @@ class UserApplicationService:
         return self._profile_from_record(self.user_service.get_user_record(user_id))
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
-        self.user_service.update_user_preferences(user_id, patch)
+        record = self.user_service.update_user_preferences(user_id, patch)
         llm_patch = self._llm_patch_from_preferences(patch)
         if llm_patch.model_fields_set:
             self.admin_settings.update_user_llm_settings(user_id, llm_patch)
+        if {"timezone", "schedule_times", "run_mode"} & patch.model_fields_set:
+            self._upsert_schedule(record)
         return self.get_user_profile(user_id)
 
     def get_user_context(self, user_id: str) -> UserContext:
@@ -62,6 +72,21 @@ class UserApplicationService:
         )
         return [self._context_from_record(record) for record in records]
 
+    def claim_due_user_contexts(
+        self,
+        *,
+        worker_id: str,
+        batch_size: int,
+    ) -> list[UserContext]:
+        if self.scheduled_jobs is None:
+            return self.list_runnable_user_contexts()
+        claimed_jobs = self.scheduled_jobs.claim_due_users(
+            deployment_garmin_email=self.settings.garmin_email,
+            worker_id=worker_id,
+            batch_size=batch_size,
+        )
+        return [self._context_from_claimed_job(job) for job in claimed_jobs]
+
     def ensure_local_runtime_user_context(self) -> UserContext:
         record = self.user_service.upsert_runtime_user(
             external_key=self.settings.garmin_email.lower(),
@@ -72,6 +97,7 @@ class UserApplicationService:
             run_mode=self.settings.service_run_mode,
             include_strength=self.settings.include_strength,
         )
+        self._upsert_schedule(record)
         return self._context_from_record(record)
 
     def run_user_sync(self, user_id: str, run_mode: str = "auto") -> RunSyncResponse:
@@ -203,6 +229,31 @@ class UserApplicationService:
             ),
             llm_settings=llm_settings,
         )
+
+    def _context_from_claimed_job(self, job: ClaimedUserJob) -> UserContext:
+        return self._context_from_record(job.user)
+
+    def complete_scheduled_run(
+        self,
+        context: UserContext,
+        *,
+        status: str,
+        error: str | None,
+    ) -> None:
+        if self.scheduled_jobs is None:
+            return
+        if status == "completed":
+            self.scheduled_jobs.complete_success(context)
+        else:
+            self.scheduled_jobs.complete_failure(
+                context,
+                error=error or status,
+            )
+
+    def _upsert_schedule(self, record: UserRecord) -> None:
+        if self.scheduled_jobs is None:
+            return
+        self.scheduled_jobs.upsert_for_user(self._context_from_record(record))
 
     def _integration_statuses(self, user_id: str) -> dict[str, str]:
         if self.integration_credentials is None:

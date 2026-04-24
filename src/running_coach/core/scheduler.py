@@ -41,7 +41,7 @@ class SchedulerService:
         logger.info("--- %s: Advanced Adaptive Trainer ---", APP_NAME)
         if self.poll_interval_minutes is not None:
             logger.info(
-                "서비스 모드 실행 중. %s분마다 사용자별 스케줄을 확인함.",
+                "서비스 모드 실행 중. %s분마다 due 사용자 작업을 claim함.",
                 self.poll_interval_minutes,
             )
         else:
@@ -56,7 +56,7 @@ class SchedulerService:
         # 무한 루프
         while True:
             schedule.run_pending()
-            time.sleep(60)  # 1분마다 스케줄 체크
+            time.sleep(60)  # schedule 라이브러리의 pending job 체크 주기
 
     def _run_job(self) -> None:
         """스케줄된 작업 실행"""

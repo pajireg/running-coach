@@ -8,6 +8,7 @@ from .history_sync_service import HistorySyncService
 from .history_write_service import HistoryWriteService
 from .integration_credentials import CredentialCipher, IntegrationCredentialService
 from .plan_freshness_service import PlanFreshnessService
+from .scheduled_user_jobs import ClaimedUserJob, ScheduledUserJobService
 from .user_coaching_state_service import UserCoachingStateService
 from .user_service import UserService
 
@@ -21,6 +22,8 @@ __all__ = [
     "CredentialCipher",
     "IntegrationCredentialService",
     "PlanFreshnessService",
+    "ClaimedUserJob",
+    "ScheduledUserJobService",
     "UserCoachingStateService",
     "UserService",
 ]

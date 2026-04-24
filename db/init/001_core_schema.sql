@@ -75,6 +75,25 @@ CREATE TABLE IF NOT EXISTS user_integration_credentials (
     UNIQUE (athlete_id, provider)
 );
 
+CREATE TABLE IF NOT EXISTS scheduled_user_jobs (
+    athlete_id UUID PRIMARY KEY REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    next_run_at TIMESTAMPTZ NOT NULL,
+    lease_until TIMESTAMPTZ,
+    locked_by TEXT,
+    last_run_at TIMESTAMPTZ,
+    last_status TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    last_error TEXT,
+    disabled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_user_jobs_due
+    ON scheduled_user_jobs (next_run_at)
+    WHERE disabled_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
