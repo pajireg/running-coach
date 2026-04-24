@@ -12,6 +12,7 @@ from ..storage import (
     UserCoachingStateService,
     UserService,
 )
+from ..storage.schema import ensure_core_schema
 
 
 @dataclass
@@ -28,6 +29,7 @@ class ApplicationRuntime:
 def create_application_runtime(settings: Settings) -> ApplicationRuntime:
     """Compose the shared application runtime once per process."""
     db = DatabaseClient(settings.database_url)
+    ensure_core_schema(db)
     admin_settings = AdminSettingsService(
         db=db,
         deployment_defaults=settings.deployment_llm_settings(),

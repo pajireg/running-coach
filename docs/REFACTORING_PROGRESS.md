@@ -42,6 +42,14 @@ toward the target architecture in
   - injury status
 - Moved CLI write commands onto the same user-scoped application methods used by
   the HTTP API.
+- Rewrote the long-term refactoring strategy around current productization
+  blockers instead of the original pre-refactor state.
+- Started SQL-level history decomposition:
+  - added shared athlete-scoped storage helpers;
+  - extracted `PlanFreshnessService`;
+  - moved active plan freshness, future plan reads, and stored Garmin workout id
+    reads behind the new read-side service;
+  - kept compatibility delegation on `CoachingHistoryService`.
 
 ### What this enables
 
@@ -63,7 +71,7 @@ toward the target architecture in
 
 - Per-user encrypted Garmin credentials in the database
 - True multi-user background workers and per-user schedules/timezones
-- SQL-level decomposition behind the history facades
+- Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 
@@ -74,3 +82,5 @@ toward the target architecture in
 - Do not push new provider-specific logic into coaching modules.
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
+- Next persistence slice should extract `TrainingBackgroundService` or add the
+  integration credential store; do not add more user API endpoints first.

@@ -6,6 +6,7 @@ from .history_read_service import HistoryReadService
 from .history_service import CoachingHistoryService
 from .history_sync_service import HistorySyncService
 from .history_write_service import HistoryWriteService
+from .plan_freshness_service import PlanFreshnessService
 from .user_coaching_state_service import UserCoachingStateService
 from .user_service import UserService
 
@@ -16,6 +17,7 @@ __all__ = [
     "CoachingHistoryService",
     "HistorySyncService",
     "HistoryWriteService",
+    "PlanFreshnessService",
     "UserCoachingStateService",
     "UserService",
 ]

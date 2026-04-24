@@ -17,6 +17,7 @@ from ..storage import (
     HistoryReadService,
     HistorySyncService,
     HistoryWriteService,
+    PlanFreshnessService,
 )
 from ..utils.logger import get_logger
 
@@ -65,7 +66,15 @@ class ServiceContainer:
             timezone=user_context.timezone if user_context is not None else "Asia/Seoul",
         )
         context_builder = CoachingContextBuilder(history_service=history_service)
-        history_read_service = HistoryReadService(history_service)
+        plan_freshness_service = PlanFreshnessService(
+            db=db,
+            athlete_key=history_service.athlete_key,
+            timezone=history_service.timezone,
+        )
+        history_read_service = HistoryReadService(
+            history_service,
+            plan_freshness_service=plan_freshness_service,
+        )
         history_write_service = HistoryWriteService(history_service)
         history_sync_service = HistorySyncService(history_service)
         safety_validator = SafetyValidator(rules=list(DEFAULT_SAFETY_RULES))

@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.storage.history_service import CoachingHistoryService
+from running_coach.storage.plan_freshness_service import PlanFreshnessService
 
 
 class _FakeDb:
@@ -159,7 +160,7 @@ class _RecordingHistoryService(CoachingHistoryService):
         self.executed.append((query, params))
 
 
-class _FreshnessHistoryService(CoachingHistoryService):
+class _FreshnessHistoryService(PlanFreshnessService):
     def __init__(self, rows):
         super().__init__(_FakeDb(), "user@example.com")
         self.rows = rows

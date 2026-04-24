@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 애플리케이션 소스 및 설정 파일 복사
 COPY src/ ./src/
+COPY db/ ./db/
 COPY pyproject.toml .
 COPY README.md .
 
