@@ -117,10 +117,12 @@ class Settings(BaseSettings):
 
     def deployment_llm_settings(self) -> LLMSettings:
         """환경변수 기반 LLM fallback 설정."""
-        return LLMSettings(
-            planner_mode=self.coach_planner_mode,
-            llm_provider=self.llm_provider,
-            llm_model=self.llm_model,
+        return LLMSettings.model_validate(
+            {
+                "plannerMode": self.coach_planner_mode,
+                "llmProvider": self.llm_provider,
+                "llmModel": self.llm_model,
+            }
         )
 
 

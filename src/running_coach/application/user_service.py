@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal, cast
 
 from ..config.settings import Settings
 from ..models.feedback import SubjectiveFeedback
@@ -221,7 +222,10 @@ class UserApplicationService:
             timezone=record.timezone,
             locale=record.locale or "ko",
             schedule_times=record.schedule_times or self.settings.schedule_times,
-            run_mode=record.run_mode or self.settings.service_run_mode,
+            run_mode=cast(
+                Literal["plan", "auto"],
+                record.run_mode or self.settings.service_run_mode,
+            ),
             include_strength=(
                 record.include_strength
                 if record.include_strength is not None
@@ -258,7 +262,10 @@ class UserApplicationService:
     def _integration_statuses(self, user_id: str) -> dict[str, str]:
         if self.integration_credentials is None:
             return {}
-        return dict(self.integration_credentials.get_statuses(user_id))
+        return {
+            str(provider): str(status)
+            for provider, status in self.integration_credentials.get_statuses(user_id).items()
+        }
 
     def _garmin_status(self, record: UserRecord, statuses: dict[str, str]) -> str:
         if "garmin" in statuses:
@@ -275,7 +282,7 @@ class UserApplicationService:
         return "env_compat"
 
     def _llm_patch_from_preferences(self, patch: UserPreferencesPatch) -> UserLLMSettingsPatch:
-        payload = {}
+        payload: dict[str, object] = {}
         if "planner_mode" in patch.model_fields_set:
             payload["plannerMode"] = patch.planner_mode
         if "llm_provider" in patch.model_fields_set:

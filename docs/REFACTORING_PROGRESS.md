@@ -90,6 +90,12 @@ toward the target architecture in
   - active DB credentials can supply an OAuth authorized-user token payload;
   - missing or inactive non-env calendar credentials disable calendar sync
     instead of accidentally reusing deployment tokens.
+- Added the first provider capability boundary:
+  - `TrainingDataProvider` describes the minimum health/activity/history
+    capability orchestration needs;
+  - `WorkoutDeliveryProvider` describes workout create/schedule capability;
+  - `ServiceContainer` can receive an injected training data provider while the
+    default runtime still uses Garmin Connect.
 
 ### What this enables
 
@@ -105,6 +111,7 @@ toward the target architecture in
   - coaching execution
   - user-owned coaching state writes
   - history reads vs history writes vs sync-state mutations
+  - provider capability interfaces vs concrete Garmin implementation
   - transport surfaces such as CLI and HTTP
 
 ### Still not done
@@ -112,6 +119,8 @@ toward the target architecture in
 - Per-user Garmin token/session migration into the database
 - Persist refreshed per-user Google OAuth tokens back into the credential store
 - Further SQL-level decomposition behind the history facades
+- Migrate orchestrator method names from Garmin-specific wording to
+  provider-neutral wording while preserving Garmin as the default provider.
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
 - Replace legacy minute-match fallback once all deployments have the

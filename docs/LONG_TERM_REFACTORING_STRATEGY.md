@@ -23,6 +23,8 @@ Completed structural work:
 - initial user integration credential/status table and storage service.
 - user runtime factory seam for resolving env-compatible or DB-backed Garmin
   credentials before container creation.
+- initial provider capability protocols for training data and workout delivery,
+  with Garmin Connect still used as the default concrete provider.
 
 Remaining productization blockers:
 
@@ -31,6 +33,8 @@ Remaining productization blockers:
 - Garmin DB credential storage is wired into runtime creation, but real token
   migration and reauth flows are not implemented yet;
 - provider clients are still concrete runtime dependencies;
+- orchestrator method names still expose Garmin-specific wording even after the
+  first provider protocol seam;
 - scheduler/runtime execution is still effectively single-user;
 - mobile/watch provider strategy exists in product docs, but backend adapter
   seams are not ready.
@@ -126,6 +130,8 @@ Current state:
   timezone-adjusted local time matches `schedule_times`.
 - scheduled execution uses each user's `run_mode` preference before falling
   back to the deployment default.
+- due execution uses `scheduled_user_jobs.next_run_at` claim/lease state instead
+  of scanning every runnable user on each normal service tick.
 - Google Calendar client construction is resolved by the user runtime factory:
   env-compatible users can use the local token file, while non-env users need an
   active DB credential row or calendar sync is disabled.

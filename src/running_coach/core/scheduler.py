@@ -16,7 +16,7 @@ class SchedulerService:
 
     def __init__(
         self,
-        run_job: Callable[[], None],
+        run_job: Callable[[], object],
         *,
         schedule_times: list[str],
         run_mode: str,

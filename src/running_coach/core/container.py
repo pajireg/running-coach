@@ -1,11 +1,12 @@
 """의존성 주입 컨테이너"""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, cast
 
 from ..clients.garmin import GarminClient
 from ..clients.gemini import GeminiClient
 from ..clients.google_calendar import GoogleCalendarClient
+from ..clients.providers import TrainingDataProvider
 from ..coaching.context import CoachingContextBuilder
 from ..coaching.safety import DEFAULT_SAFETY_RULES, SafetyValidator
 from ..config.settings import Settings
@@ -30,7 +31,7 @@ class ServiceContainer:
 
     settings: Settings
     user_context: Optional[UserContext]
-    garmin_client: GarminClient
+    garmin_client: TrainingDataProvider
     gemini_client: GeminiClient
     calendar_client: GoogleCalendarClient
     history_service: CoachingHistoryService
@@ -55,6 +56,7 @@ class ServiceContainer:
         user_context: Optional[UserContext],
         garmin_email: str | None = None,
         garmin_password: str | None = None,
+        training_data_provider: TrainingDataProvider | None = None,
         calendar_client: GoogleCalendarClient | None = None,
     ) -> "ServiceContainer":
         """배포 설정 + 사용자 컨텍스트로 컨테이너 생성."""
@@ -117,10 +119,9 @@ class ServiceContainer:
             context_builder=context_builder,
             safety_validator=safety_validator,
         )
-        return cls(
-            settings=settings,
-            user_context=user_context,
-            garmin_client=GarminClient(
+        resolved_training_data_provider = training_data_provider or cast(
+            TrainingDataProvider,
+            GarminClient(
                 email=garmin_email
                 or (
                     user_context.garmin_email
@@ -130,6 +131,11 @@ class ServiceContainer:
                 password=garmin_password or settings.garmin_password,
                 settings=settings,
             ),
+        )
+        return cls(
+            settings=settings,
+            user_context=user_context,
+            garmin_client=resolved_training_data_provider,
             gemini_client=gemini_client,
             calendar_client=calendar_client or GoogleCalendarClient(),
             history_service=history_service,

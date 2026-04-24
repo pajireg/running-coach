@@ -69,6 +69,7 @@ class CoachingApplicationService:
         goal_time: str | None,
         target_pace: str | None,
         priority: int,
+        is_active: bool = True,
     ) -> None:
         self._ensure_user_profile(user_context)
         self.user_state_service.upsert_race_goal(
@@ -79,6 +80,7 @@ class CoachingApplicationService:
             goal_time=goal_time,
             target_pace=target_pace,
             priority=priority,
+            is_active=is_active,
         )
 
     def upsert_training_block(
