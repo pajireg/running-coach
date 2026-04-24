@@ -20,12 +20,13 @@ Completed structural work:
 - user-scoped orchestration entrypoints;
 - initial read/write/sync history facades;
 - user coaching state writes separated from the monolithic history service.
+- initial user integration credential/status table and storage service.
 
 Remaining productization blockers:
 
 - `CoachingHistoryService` still owns too much SQL and derived state logic;
-- Garmin and Google credentials are still deployment/env compatible, not
-  user-owned encrypted records;
+- Garmin and Google runtime clients are still deployment/env compatible, even
+  though user-owned credential storage now exists;
 - provider clients are still concrete runtime dependencies;
 - scheduler/runtime execution is still effectively single-user;
 - mobile/watch provider strategy exists in product docs, but backend adapter
@@ -121,15 +122,12 @@ Required behavior:
 
 1. Extract `PlanFreshnessService` and wire read-side callers to it.
 2. Extract `TrainingBackgroundService` and migrate context-builder reads.
-3. Add `user_integration_credentials` schema and service with encryption
-   interface.
-4. Update user profile/API integration status to read DB integration status
-   before env compatibility fallback.
-5. Introduce a user runtime factory and move Garmin/Google construction behind
+3. Migrate Garmin and Google credential flows into `user_integration_credentials`.
+4. Introduce a user runtime factory and move Garmin/Google construction behind
    credential-aware seams.
-6. Convert scheduler execution to user discovery plus per-user jobs.
-7. Add provider capability protocols and migrate Garmin behind them.
-8. Add Apple/Android adapter skeletons only after the above runtime path is
+5. Convert scheduler execution to user discovery plus per-user jobs.
+6. Add provider capability protocols and migrate Garmin behind them.
+7. Add Apple/Android adapter skeletons only after the above runtime path is
    user-scoped end to end.
 
 ## Verification Requirements

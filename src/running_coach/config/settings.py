@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # 후속 provider client 연결용 서비스 비밀값
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    app_encryption_key: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

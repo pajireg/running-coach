@@ -112,6 +112,7 @@ def _service(
     *,
     schedule_times: str = "05:00,17:00",
     include_strength: bool = False,
+    integration_statuses: dict[str, str] | None = None,
 ) -> tuple[UserApplicationService, FakeAdminSettings, FakeCoachingService]:
     admin_settings = FakeAdminSettings()
     coaching_service = FakeCoachingService()
@@ -124,6 +125,9 @@ def _service(
             include_strength=include_strength,
         ),
         coaching_service=coaching_service,
+        integration_credentials=SimpleNamespace(
+            get_statuses=lambda _user_id: integration_statuses or {}
+        ),  # type: ignore[arg-type]
     )
     return service, admin_settings, coaching_service
 
@@ -155,6 +159,20 @@ def test_ensure_local_runtime_user_context_uses_current_settings_defaults():
     assert context.external_key == "runner@example.com"
     assert context.schedule_times == "06:00,18:00"
     assert context.include_strength is True
+
+
+def test_profile_integration_status_prefers_db_status_over_env_fallback():
+    service, _, _ = _service(
+        integration_statuses={
+            "garmin": "reauth_required",
+            "google_calendar": "disabled",
+        }
+    )
+
+    profile = service.get_user_profile("user-1")
+
+    assert profile.integration_status.garmin == "reauth_required"
+    assert profile.integration_status.google_calendar == "disabled"
 
 
 def test_run_user_sync_delegates_to_coaching_service():

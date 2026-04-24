@@ -49,6 +49,29 @@ CREATE TABLE IF NOT EXISTS user_api_keys (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_integration_credentials (
+    user_integration_credential_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    provider TEXT NOT NULL CHECK (
+        provider IN (
+            'garmin',
+            'google_calendar',
+            'healthkit',
+            'health_connect',
+            'google_fit'
+        )
+    ),
+    encrypted_payload TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'disabled' CHECK (
+        status IN ('active', 'reauth_required', 'disabled', 'error')
+    ),
+    last_validated_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (athlete_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
@@ -234,3 +257,6 @@ CREATE INDEX IF NOT EXISTS idx_planned_workouts_athlete_date
 
 CREATE INDEX IF NOT EXISTS idx_feedback_athlete_date
     ON subjective_feedback (athlete_id, feedback_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_integration_credentials_athlete_provider
+    ON user_integration_credentials (athlete_id, provider);

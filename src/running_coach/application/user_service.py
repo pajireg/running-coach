@@ -19,7 +19,7 @@ from ..models.user import (
     UserProfile,
     UserRecord,
 )
-from ..storage import AdminSettingsService, UserService
+from ..storage import AdminSettingsService, IntegrationCredentialService, UserService
 from .coaching_service import CoachingApplicationService
 
 
@@ -31,6 +31,7 @@ class UserApplicationService:
     admin_settings: AdminSettingsService
     settings: Settings
     coaching_service: CoachingApplicationService
+    integration_credentials: IntegrationCredentialService | None = None
 
     def create_user(self, payload: UserCreateRequest) -> UserCreateResponse:
         record, api_key = self.user_service.create_user(payload)
@@ -153,6 +154,7 @@ class UserApplicationService:
 
     def _profile_from_record(self, record: UserRecord) -> UserProfile:
         llm_settings = self.admin_settings.get_user_llm_settings(record.user_id).effective
+        integration_statuses = self._integration_statuses(record.user_id)
         return UserProfile(
             userId=record.user_id,
             externalKey=record.external_key,
@@ -170,8 +172,8 @@ class UserApplicationService:
             ),
             llmSettings=llm_settings,
             integrationStatus=IntegrationStatus(
-                garmin=self._garmin_status(record),
-                googleCalendar=self._google_calendar_status(),
+                garmin=self._garmin_status(record, integration_statuses),
+                googleCalendar=self._google_calendar_status(integration_statuses),
             ),
         )
 
@@ -193,14 +195,23 @@ class UserApplicationService:
             llm_settings=llm_settings,
         )
 
-    def _garmin_status(self, record: UserRecord) -> str:
+    def _integration_statuses(self, user_id: str) -> dict[str, str]:
+        if self.integration_credentials is None:
+            return {}
+        return dict(self.integration_credentials.get_statuses(user_id))
+
+    def _garmin_status(self, record: UserRecord, statuses: dict[str, str]) -> str:
+        if "garmin" in statuses:
+            return statuses["garmin"]
         if record.garmin_email:
             if record.garmin_email == self.settings.garmin_email:
                 return "env_compat"
             return "configured"
         return "not_configured"
 
-    def _google_calendar_status(self) -> str:
+    def _google_calendar_status(self, statuses: dict[str, str]) -> str:
+        if "google_calendar" in statuses:
+            return statuses["google_calendar"]
         return "env_compat"
 
     def _llm_patch_from_preferences(self, patch: UserPreferencesPatch) -> UserLLMSettingsPatch:

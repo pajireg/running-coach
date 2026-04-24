@@ -50,6 +50,12 @@ toward the target architecture in
   - moved active plan freshness, future plan reads, and stored Garmin workout id
     reads behind the new read-side service;
   - kept compatibility delegation on `CoachingHistoryService`.
+- Added the first user-scoped integration credential/status store:
+  - added `user_integration_credentials`;
+  - added `IntegrationCredentialService`;
+  - added an app-key-backed local credential cipher seam;
+  - made user profile integration status prefer DB status before env
+    compatibility fallback.
 
 ### What this enables
 
@@ -69,7 +75,7 @@ toward the target architecture in
 
 ### Still not done
 
-- Per-user encrypted Garmin credentials in the database
+- Per-user encrypted Garmin/Google credential migration into the database
 - True multi-user background workers and per-user schedules/timezones
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
