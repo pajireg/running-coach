@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,6 +18,7 @@ class UserCreateRequest(BaseModel):
     timezone: str = "Asia/Seoul"
     locale: str = "ko"
     schedule_times: str = Field(default="05:00,17:00", alias="scheduleTimes")
+    run_mode: Literal["plan", "auto"] = Field(default="auto", alias="runMode")
     include_strength: bool = Field(default=False, alias="includeStrength")
 
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
@@ -39,6 +40,7 @@ class UserPreferencesPatch(BaseModel):
     timezone: str | None = None
     locale: str | None = None
     schedule_times: str | None = Field(default=None, alias="scheduleTimes")
+    run_mode: Literal["plan", "auto"] | None = Field(default=None, alias="runMode")
     include_strength: bool | None = Field(default=None, alias="includeStrength")
     planner_mode: PlannerMode | None = Field(default=None, alias="plannerMode")
     llm_provider: LLMProvider | None = Field(default=None, alias="llmProvider")
@@ -71,6 +73,7 @@ class UserPreferences(BaseModel):
     timezone: str
     locale: str
     schedule_times: str = Field(alias="scheduleTimes")
+    run_mode: str = Field(alias="runMode")
     include_strength: bool = Field(alias="includeStrength")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -139,6 +142,7 @@ class UserContext(BaseModel):
     timezone: str = "Asia/Seoul"
     locale: str = "ko"
     schedule_times: str = "05:00,17:00"
+    run_mode: Literal["plan", "auto"] = "auto"
     include_strength: bool = False
     llm_settings: LLMSettings
 
@@ -155,6 +159,7 @@ class UserRecord(BaseModel):
     timezone: str = "Asia/Seoul"
     locale: str | None = None
     schedule_times: str | None = None
+    run_mode: Literal["plan", "auto"] | None = None
     include_strength: bool | None = None
     planner_mode: PlannerMode | None = None
     llm_provider: LLMProvider | None = None
@@ -170,6 +175,7 @@ class UserRecord(BaseModel):
             timezone=str(row.get("timezone") or "Asia/Seoul"),
             locale=row.get("locale"),
             schedule_times=row.get("schedule_times"),
+            run_mode=row.get("run_mode"),
             include_strength=row.get("include_strength"),
             planner_mode=row.get("planner_mode"),
             llm_provider=row.get("llm_provider"),

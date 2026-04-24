@@ -16,6 +16,7 @@ def _context(
     *,
     timezone_name: str = "Asia/Seoul",
     schedule_times: str = "05:00,17:00",
+    run_mode: str = "auto",
 ) -> UserContext:
     return UserContext(
         user_id=user_id,
@@ -25,6 +26,7 @@ def _context(
         timezone=timezone_name,
         locale="ko",
         schedule_times=schedule_times,
+        run_mode=run_mode,  # type: ignore[arg-type]
         include_strength=False,
         llm_settings=LLMSettings(
             planner_mode="legacy",
@@ -111,3 +113,21 @@ def test_multi_user_worker_skips_unknown_timezone():
     assert summary.total == 1
     assert summary.skipped == 1
     assert user_app.calls == []
+
+
+def test_multi_user_worker_prefers_user_run_mode():
+    user_app = FakeUserApp()
+    user_app.contexts = [
+        _context("user-1", "plan-runner", run_mode="plan"),
+        _context("user-4", "auto-runner", run_mode="auto"),
+    ]
+    worker = MultiUserWorker(user_app=user_app)  # type: ignore[arg-type]
+
+    summary = worker.run_all(run_mode="auto")
+
+    assert summary.completed == 2
+    assert user_app.calls == [
+        ("user-1", "plan"),
+        ("user-4", "auto"),
+    ]
+    assert [result.mode for result in summary.results] == ["plan", "auto"]

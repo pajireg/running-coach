@@ -24,6 +24,7 @@ class FakeUserService(UserService):
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times="05:00,17:00",
+            run_mode="auto",
             include_strength=False,
         )
 
@@ -52,6 +53,8 @@ class FakeUserService(UserService):
             self.record.locale = patch.locale
         if "schedule_times" in patch.model_fields_set:
             self.record.schedule_times = patch.schedule_times
+        if "run_mode" in patch.model_fields_set:
+            self.record.run_mode = patch.run_mode
         if "include_strength" in patch.model_fields_set:
             self.record.include_strength = patch.include_strength
         if "garmin_email" in patch.model_fields_set:
@@ -64,6 +67,7 @@ class FakeUserService(UserService):
         self.record.timezone = kwargs["timezone"]
         self.record.locale = kwargs["locale"]
         self.record.schedule_times = kwargs["schedule_times"]
+        self.record.run_mode = kwargs["run_mode"]
         self.record.include_strength = kwargs["include_strength"]
         return self.record
 
@@ -126,6 +130,7 @@ def _service(
         settings=SimpleNamespace(
             garmin_email="runner@example.com",
             schedule_times=schedule_times,
+            service_run_mode="auto",
             include_strength=include_strength,
         ),
         coaching_service=coaching_service,
@@ -162,7 +167,20 @@ def test_ensure_local_runtime_user_context_uses_current_settings_defaults():
 
     assert context.external_key == "runner@example.com"
     assert context.schedule_times == "06:00,18:00"
+    assert context.run_mode == "auto"
     assert context.include_strength is True
+
+
+def test_update_user_preferences_exposes_run_mode():
+    service, _, _ = _service()
+
+    profile = service.update_user_preferences(
+        "user-1",
+        UserPreferencesPatch(runMode="plan"),
+    )
+
+    assert profile.preferences.run_mode == "plan"
+    assert service.get_user_context("user-1").run_mode == "plan"
 
 
 def test_profile_integration_status_prefers_db_status_over_env_fallback():

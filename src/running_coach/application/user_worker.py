@@ -45,7 +45,10 @@ class MultiUserWorker:
         contexts = self.user_app.list_runnable_user_contexts()
         logger.info("다중 사용자 실행 시작: 대상 %s명, 모드=%s", len(contexts), run_mode)
 
-        results = [self._run_one(context, run_mode=run_mode) for context in contexts]
+        results = [
+            self._run_one(context, run_mode=self._effective_run_mode(context, run_mode))
+            for context in contexts
+        ]
         completed = sum(1 for result in results if result.status == "completed")
         failed = sum(1 for result in results if result.status == "failed")
         skipped = sum(1 for result in results if result.status == "skipped")
@@ -75,17 +78,18 @@ class MultiUserWorker:
         results: list[UserRunResult] = []
 
         for context in contexts:
+            effective_run_mode = self._effective_run_mode(context, run_mode)
             if not self._is_due(context, reference_time):
                 results.append(
                     UserRunResult(
                         user_id=context.user_id,
                         external_key=context.external_key,
                         status="skipped",
-                        mode=run_mode,
+                        mode=effective_run_mode,
                     )
                 )
                 continue
-            results.append(self._run_one(context, run_mode=run_mode))
+            results.append(self._run_one(context, run_mode=effective_run_mode))
 
         completed = sum(1 for result in results if result.status == "completed")
         failed = sum(1 for result in results if result.status == "failed")
@@ -149,6 +153,9 @@ class MultiUserWorker:
             return False
         schedule_times = _parse_schedule_times(context.schedule_times)
         return f"{local_time.hour:02d}:{local_time.minute:02d}" in schedule_times
+
+    def _effective_run_mode(self, context: UserContext, fallback: str) -> str:
+        return context.run_mode or fallback
 
 
 def _parse_schedule_times(raw_value: str) -> set[str]:

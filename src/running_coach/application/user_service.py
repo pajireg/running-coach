@@ -69,6 +69,7 @@ class UserApplicationService:
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times=self.settings.schedule_times,
+            run_mode=self.settings.service_run_mode,
             include_strength=self.settings.include_strength,
         )
         return self._context_from_record(record)
@@ -170,6 +171,7 @@ class UserApplicationService:
                 timezone=record.timezone,
                 locale=record.locale or "ko",
                 scheduleTimes=record.schedule_times or self.settings.schedule_times,
+                runMode=record.run_mode or self.settings.service_run_mode,
                 includeStrength=(
                     record.include_strength
                     if record.include_strength is not None
@@ -193,6 +195,7 @@ class UserApplicationService:
             timezone=record.timezone,
             locale=record.locale or "ko",
             schedule_times=record.schedule_times or self.settings.schedule_times,
+            run_mode=record.run_mode or self.settings.service_run_mode,
             include_strength=(
                 record.include_strength
                 if record.include_strength is not None

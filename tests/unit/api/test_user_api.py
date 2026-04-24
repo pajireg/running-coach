@@ -32,6 +32,7 @@ class FakeUserApplicationService:
                 timezone="Asia/Seoul",
                 locale="ko",
                 scheduleTimes="05:00,17:00",
+                runMode="auto",
                 includeStrength=False,
             ),
             llmSettings=LLMSettings(
@@ -52,6 +53,7 @@ class FakeUserApplicationService:
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times="05:00,17:00",
+            run_mode="auto",
             include_strength=False,
             llm_settings=self.profile.llm_settings,
         )
@@ -62,6 +64,7 @@ class FakeUserApplicationService:
         self.profile.preferences.timezone = payload.timezone
         self.profile.preferences.locale = payload.locale
         self.profile.preferences.schedule_times = payload.schedule_times
+        self.profile.preferences.run_mode = payload.run_mode
         self.profile.preferences.include_strength = payload.include_strength
         return UserCreateResponse(apiKey="rcu_test", user=self.profile)
 
@@ -82,6 +85,8 @@ class FakeUserApplicationService:
             self.profile.preferences.locale = patch.locale
         if patch.include_strength is not None:
             self.profile.preferences.include_strength = patch.include_strength
+        if patch.run_mode is not None:
+            self.profile.preferences.run_mode = patch.run_mode
         return self.profile
 
     def run_user_sync(self, user_id: str, run_mode: str = "auto") -> RunSyncResponse:
@@ -127,12 +132,14 @@ def test_create_user_returns_one_time_api_key():
             "timezone": "Asia/Seoul",
             "locale": "ko",
             "scheduleTimes": "05:00,17:00",
+            "runMode": "plan",
             "includeStrength": True,
         },
     )
 
     assert response.status_code == 201
     assert response.json()["apiKey"] == "rcu_test"
+    assert response.json()["user"]["preferences"]["runMode"] == "plan"
     assert response.json()["user"]["preferences"]["includeStrength"] is True
 
 
@@ -160,11 +167,12 @@ def test_patch_me_preferences_updates_profile():
     response = client.patch(
         "/v1/me/preferences",
         headers={"Authorization": "Bearer rcu_test"},
-        json={"displayName": "Updated Runner", "includeStrength": True},
+        json={"displayName": "Updated Runner", "includeStrength": True, "runMode": "plan"},
     )
 
     assert response.status_code == 200
     assert response.json()["displayName"] == "Updated Runner"
+    assert response.json()["preferences"]["runMode"] == "plan"
     assert response.json()["preferences"]["includeStrength"] is True
 
 

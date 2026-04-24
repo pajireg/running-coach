@@ -27,6 +27,7 @@ class FakeUserService(UserService):
             "timezone": payload.timezone,
             "locale": payload.locale,
             "schedule_times": payload.schedule_times,
+            "run_mode": payload.run_mode,
             "include_strength": payload.include_strength,
             "planner_mode": None,
             "llm_provider": None,
@@ -71,6 +72,7 @@ class FakeUserService(UserService):
         timezone: str,
         locale: str,
         schedule_times: str,
+        run_mode: str,
         include_strength: bool,
         display_name: str | None = None,
     ):
@@ -86,6 +88,7 @@ class FakeUserService(UserService):
                 "timezone": timezone,
                 "locale": locale,
                 "schedule_times": schedule_times,
+                "run_mode": run_mode,
                 "include_strength": include_strength,
                 "planner_mode": None,
                 "llm_provider": None,
@@ -99,6 +102,7 @@ class FakeUserService(UserService):
         row["timezone"] = timezone
         row["locale"] = locale
         row["schedule_times"] = schedule_times
+        row["run_mode"] = run_mode
         row["include_strength"] = include_strength
         return self.get_user_record(existing.user_id)
 
@@ -110,6 +114,8 @@ class FakeUserService(UserService):
             row["locale"] = patch.locale
         if "schedule_times" in patch.model_fields_set:
             row["schedule_times"] = patch.schedule_times
+        if "run_mode" in patch.model_fields_set:
+            row["run_mode"] = patch.run_mode
         if "include_strength" in patch.model_fields_set:
             row["include_strength"] = patch.include_strength
         return self.get_user_record(user_id)
@@ -133,6 +139,7 @@ class QueryCaptureUserService(UserService):
                 "timezone": "Asia/Seoul",
                 "locale": "ko",
                 "schedule_times": "05:00,17:00",
+                "run_mode": "auto",
                 "include_strength": False,
                 "planner_mode": None,
                 "llm_provider": None,
@@ -154,6 +161,7 @@ def test_create_user_returns_api_key_and_record():
 
     assert record.user_id == "user-1"
     assert record.external_key == "runner-1"
+    assert record.run_mode == "auto"
     assert api_key == "rcu_user-1"
 
 
@@ -180,6 +188,7 @@ def test_update_user_preferences_updates_stored_values():
     )
 
     assert record.locale == "en"
+    assert record.run_mode == "auto"
     assert record.include_strength is True
     assert record.planner_mode is None
     assert record.llm_model is None
@@ -194,6 +203,7 @@ def test_upsert_runtime_user_reuses_external_key():
         timezone="Asia/Seoul",
         locale="ko",
         schedule_times="05:00,17:00",
+        run_mode="auto",
         include_strength=False,
     )
 
@@ -204,6 +214,7 @@ def test_upsert_runtime_user_reuses_external_key():
         timezone="Asia/Seoul",
         locale="en",
         schedule_times="06:00",
+        run_mode="plan",
         include_strength=True,
     )
 
@@ -211,6 +222,7 @@ def test_upsert_runtime_user_reuses_external_key():
     assert updated.display_name == "Local Runner"
     assert updated.locale == "en"
     assert updated.schedule_times == "06:00"
+    assert updated.run_mode == "plan"
     assert updated.include_strength is True
 
 

@@ -72,6 +72,11 @@ toward the target architecture in
   - each user is due only when their own `timezone` and `schedule_times` match;
   - users outside their scheduled minute are reported as skipped instead of
     executed.
+- Added per-user scheduled run mode:
+  - `user_preferences.run_mode` stores `plan` or `auto`;
+  - user API preferences expose `runMode`;
+  - the multi-user worker prefers each user's run mode over the deployment
+    fallback.
 
 ### What this enables
 
@@ -93,7 +98,7 @@ toward the target architecture in
 
 - Per-user Garmin token/session migration into the database
 - Per-user Google credential migration into the database
-- Per-user run mode preference instead of deployment-level service mode
+- Google Calendar construction still uses the deployment-compatible path
 - Further SQL-level decomposition behind the history facades
 - Full CLI migration away from direct deployment-config assumptions
 - Docker end-to-end verification of the new user-facing runtime path
@@ -106,5 +111,4 @@ toward the target architecture in
 - Prefer additive compatibility paths over renaming every `athlete_*` concept at
   once.
 - Next slice should move Google Calendar construction behind the user runtime
-  factory or add a per-user run mode preference; do not add more user API
-  endpoints first.
+  factory; do not add more user API endpoints first.

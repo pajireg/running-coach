@@ -53,6 +53,7 @@ class UserService:
                 athlete_id,
                 locale,
                 schedule_times,
+                run_mode,
                 include_strength,
                 updated_at
             )
@@ -60,6 +61,7 @@ class UserService:
                 %(user_id)s,
                 %(locale)s,
                 %(schedule_times)s,
+                %(run_mode)s,
                 %(include_strength)s,
                 NOW()
             )
@@ -67,6 +69,7 @@ class UserService:
             DO UPDATE SET
                 locale = EXCLUDED.locale,
                 schedule_times = EXCLUDED.schedule_times,
+                run_mode = EXCLUDED.run_mode,
                 include_strength = EXCLUDED.include_strength,
                 updated_at = NOW()
             """,
@@ -74,6 +77,7 @@ class UserService:
                 "user_id": user_id,
                 "locale": payload.locale,
                 "schedule_times": payload.schedule_times,
+                "run_mode": payload.run_mode,
                 "include_strength": payload.include_strength,
             },
         )
@@ -116,6 +120,7 @@ class UserService:
                 a.timezone,
                 up.locale,
                 up.schedule_times,
+                up.run_mode,
                 up.include_strength,
                 up.planner_mode,
                 up.llm_provider,
@@ -155,6 +160,7 @@ class UserService:
                 a.timezone,
                 up.locale,
                 up.schedule_times,
+                up.run_mode,
                 up.include_strength,
                 up.planner_mode,
                 up.llm_provider,
@@ -180,6 +186,7 @@ class UserService:
                 a.timezone,
                 up.locale,
                 up.schedule_times,
+                up.run_mode,
                 up.include_strength,
                 up.planner_mode,
                 up.llm_provider,
@@ -211,6 +218,7 @@ class UserService:
                 a.timezone,
                 up.locale,
                 up.schedule_times,
+                up.run_mode,
                 up.include_strength,
                 up.planner_mode,
                 up.llm_provider,
@@ -242,6 +250,7 @@ class UserService:
         timezone: str,
         locale: str,
         schedule_times: str,
+        run_mode: str,
         include_strength: bool,
         display_name: str | None = None,
     ) -> UserRecord:
@@ -284,6 +293,7 @@ class UserService:
                 athlete_id,
                 locale,
                 schedule_times,
+                run_mode,
                 include_strength,
                 updated_at
             )
@@ -291,6 +301,7 @@ class UserService:
                 %(user_id)s,
                 %(locale)s,
                 %(schedule_times)s,
+                %(run_mode)s,
                 %(include_strength)s,
                 NOW()
             )
@@ -298,6 +309,7 @@ class UserService:
             DO UPDATE SET
                 locale = EXCLUDED.locale,
                 schedule_times = EXCLUDED.schedule_times,
+                run_mode = EXCLUDED.run_mode,
                 include_strength = EXCLUDED.include_strength,
                 updated_at = NOW()
             """,
@@ -305,6 +317,7 @@ class UserService:
                 "user_id": user_id,
                 "locale": locale,
                 "schedule_times": schedule_times,
+                "run_mode": run_mode,
                 "include_strength": include_strength,
             },
         )
@@ -321,6 +334,7 @@ class UserService:
         schedule_times = (
             patch.schedule_times if "schedule_times" in fields_set else current.schedule_times
         )
+        run_mode = patch.run_mode if "run_mode" in fields_set else current.run_mode
         include_strength = (
             patch.include_strength
             if "include_strength" in fields_set
@@ -350,6 +364,7 @@ class UserService:
                 athlete_id,
                 locale,
                 schedule_times,
+                run_mode,
                 include_strength,
                 updated_at
             )
@@ -357,6 +372,7 @@ class UserService:
                 %(user_id)s,
                 %(locale)s,
                 %(schedule_times)s,
+                %(run_mode)s,
                 %(include_strength)s,
                 NOW()
             )
@@ -364,6 +380,7 @@ class UserService:
             DO UPDATE SET
                 locale = EXCLUDED.locale,
                 schedule_times = EXCLUDED.schedule_times,
+                run_mode = EXCLUDED.run_mode,
                 include_strength = EXCLUDED.include_strength,
                 updated_at = NOW()
             """,
@@ -371,6 +388,7 @@ class UserService:
                 "user_id": user_id,
                 "locale": locale,
                 "schedule_times": schedule_times,
+                "run_mode": run_mode,
                 "include_strength": include_strength,
             },
         )

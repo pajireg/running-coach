@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     llm_model TEXT,
     locale TEXT,
     schedule_times TEXT,
+    run_mode TEXT CHECK (run_mode IN ('plan', 'auto')),
     include_strength BOOLEAN NOT NULL DEFAULT FALSE,
     coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -36,6 +37,8 @@ ALTER TABLE user_preferences
     ADD COLUMN IF NOT EXISTS locale TEXT;
 ALTER TABLE user_preferences
     ADD COLUMN IF NOT EXISTS schedule_times TEXT;
+ALTER TABLE user_preferences
+    ADD COLUMN IF NOT EXISTS run_mode TEXT CHECK (run_mode IN ('plan', 'auto'));
 ALTER TABLE user_preferences
     ADD COLUMN IF NOT EXISTS include_strength BOOLEAN NOT NULL DEFAULT FALSE;
 

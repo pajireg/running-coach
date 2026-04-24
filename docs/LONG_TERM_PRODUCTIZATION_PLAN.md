@@ -372,7 +372,7 @@ MVP endpoints:
   - return current user profile, preferences, and integration status.
 - `PATCH /v1/me/preferences`
   - update timezone, locale/preferred language, schedule times, planner mode,
-    include strength, and similar user-scoped settings.
+    scheduled run mode, include strength, and similar user-scoped settings.
 - `POST /v1/integrations/garmin/session`
   - perform initial Garmin authentication and store encrypted session state.
 - `POST /v1/integrations/google/token`
