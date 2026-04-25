@@ -529,3 +529,4 @@ After that, request backend support for:
 2. Garmin credential connect/disconnect;
 3. native health data ingestion contract for HealthKit and Health Connect;
 4. push notification preferences.
+
