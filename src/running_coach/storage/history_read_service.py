@@ -20,7 +20,7 @@ class HistoryReadService:
         self.history_service = history_service
         self.plan_freshness_service = plan_freshness_service or PlanFreshnessService(
             db=history_service.db,
-            athlete_key=history_service.athlete_key,
+            external_key=history_service.external_key,
             timezone=history_service.timezone,
         )
 

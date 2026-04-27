@@ -15,7 +15,6 @@ class UserCreateRequest(BaseModel):
 
     external_key: str | None = Field(default=None, alias="externalKey")
     display_name: str | None = Field(default=None, alias="displayName")
-    garmin_email: str | None = Field(default=None, alias="garminEmail")
     timezone: str = "Asia/Seoul"
     locale: str = "ko"
     schedule_times: str = Field(default="05:00,17:00", alias="scheduleTimes")
@@ -24,7 +23,7 @@ class UserCreateRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    @field_validator("external_key", "display_name", "garmin_email")
+    @field_validator("external_key", "display_name")
     @classmethod
     def validate_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -37,7 +36,6 @@ class UserPreferencesPatch(BaseModel):
     """Patch user-visible preferences."""
 
     display_name: str | None = Field(default=None, alias="displayName")
-    garmin_email: str | None = Field(default=None, alias="garminEmail")
     timezone: str | None = None
     locale: str | None = None
     schedule_times: str | None = Field(default=None, alias="scheduleTimes")
@@ -49,7 +47,7 @@ class UserPreferencesPatch(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    @field_validator("display_name", "garmin_email", "timezone", "locale", "schedule_times")
+    @field_validator("display_name", "timezone", "locale", "schedule_times")
     @classmethod
     def validate_patch_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -117,6 +115,7 @@ class IntegrationConnection(BaseModel):
     connected: bool
     source: Literal["db", "env_compat", "profile", "none", "planned"]
     capabilities: list[str]
+    external_account_id: str | None = Field(default=None, alias="externalAccountId")
     last_error: str | None = Field(default=None, alias="lastError")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -153,7 +152,6 @@ class UserProfile(BaseModel):
     user_id: str = Field(alias="userId")
     external_key: str = Field(alias="externalKey")
     display_name: str | None = Field(default=None, alias="displayName")
-    garmin_email: str | None = Field(default=None, alias="garminEmail")
     preferences: UserPreferences
     llm_settings: LLMSettings = Field(alias="llmSettings")
     integration_status: IntegrationStatus = Field(alias="integrationStatus")
@@ -257,7 +255,6 @@ class UserContext(BaseModel):
     user_id: str
     external_key: str
     display_name: str | None = None
-    garmin_email: str | None = None
     timezone: str = "Asia/Seoul"
     locale: str = "ko"
     schedule_times: str = "05:00,17:00"
@@ -274,7 +271,6 @@ class UserRecord(BaseModel):
     user_id: str
     external_key: str
     display_name: str | None = None
-    garmin_email: str | None = None
     timezone: str = "Asia/Seoul"
     locale: str | None = None
     schedule_times: str | None = None
@@ -290,7 +286,6 @@ class UserRecord(BaseModel):
             user_id=str(row["user_id"]),
             external_key=str(row["external_key"]),
             display_name=row.get("display_name"),
-            garmin_email=row.get("garmin_email"),
             timezone=str(row.get("timezone") or "Asia/Seoul"),
             locale=row.get("locale"),
             schedule_times=row.get("schedule_times"),

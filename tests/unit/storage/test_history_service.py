@@ -10,8 +10,8 @@ class _FakeDb:
 
 
 class _SummaryHistoryService(CoachingHistoryService):
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
         if "date_trunc('week'" in query:
@@ -153,8 +153,8 @@ class _RecordingHistoryService(CoachingHistoryService):
         super().__init__(_FakeDb(), "user@example.com")
         self.executed: list[tuple[str, dict[str, object]]] = []
 
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _execute(self, query: str, params: dict[str, object]) -> None:  # type: ignore[override]
         self.executed.append((query, params))
@@ -165,8 +165,8 @@ class _FreshnessHistoryService(PlanFreshnessService):
         super().__init__(_FakeDb(), "user@example.com")
         self.rows = rows
 
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _fetchone(self, query: str, params: dict[str, object]):  # type: ignore[override]
         if "COUNT(*) AS active_plan_days" in query:
@@ -649,7 +649,7 @@ def test_select_best_planned_workout_rejects_low_quality_category_mismatch():
     service = _SelectionHistoryService()
 
     selected = service._select_best_planned_workout(
-        athlete_id="athlete-1",
+        user_id="runner-1",
         activity_date=date(2026, 4, 16),
         actual_category="quality",
         actual_duration=1700,
@@ -681,7 +681,7 @@ def test_select_best_planned_workout_accepts_same_category_schedule_shift():
     service = _ScheduleShiftSelectionHistoryService()
 
     selected = service._select_best_planned_workout(
-        athlete_id="athlete-1",
+        user_id="runner-1",
         activity_date=date(2026, 4, 17),
         actual_category="base",
         actual_duration=2800,

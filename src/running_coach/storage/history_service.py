@@ -25,32 +25,10 @@ PLANNED_MATCH_SELECTION_THRESHOLD = 0.7
 class CoachingHistoryService:
     """전문 코치용 장기 히스토리 저장."""
 
-    def __init__(self, db: DatabaseClient, athlete_key: str, timezone: str = "Asia/Seoul"):
+    def __init__(self, db: DatabaseClient, external_key: str, timezone: str = "Asia/Seoul"):
         self.db = db
-        self.athlete_key = athlete_key
+        self.external_key = external_key
         self.timezone = timezone
-
-    def ensure_athlete(self, garmin_email: str, max_heart_rate: Optional[int]) -> None:
-        """선수 레코드 upsert."""
-        query = """
-            INSERT INTO athletes (external_key, garmin_email, timezone, max_heart_rate)
-            VALUES (%(external_key)s, %(garmin_email)s, %(timezone)s, %(max_heart_rate)s)
-            ON CONFLICT (external_key)
-            DO UPDATE SET
-                garmin_email = EXCLUDED.garmin_email,
-                timezone = EXCLUDED.timezone,
-                max_heart_rate = EXCLUDED.max_heart_rate,
-                updated_at = NOW()
-        """
-        self._execute(
-            query,
-            {
-                "external_key": self.athlete_key,
-                "garmin_email": garmin_email,
-                "timezone": self.timezone,
-                "max_heart_rate": max_heart_rate,
-            },
-        )
 
     def record_daily_metrics(self, metrics: AdvancedMetrics) -> None:
         """일일 코칭 메트릭 저장."""
@@ -87,7 +65,7 @@ class CoachingHistoryService:
 
         query = """
             INSERT INTO daily_metrics (
-                athlete_id,
+                user_id,
                 metric_date,
                 steps,
                 sleep_score,
@@ -110,7 +88,7 @@ class CoachingHistoryService:
                 context_payload
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(metric_date)s,
                 %(steps)s,
                 %(sleep_score)s,
@@ -132,7 +110,7 @@ class CoachingHistoryService:
                 %(performance_payload)s::jsonb,
                 %(context_payload)s::jsonb
             )
-            ON CONFLICT (athlete_id, metric_date)
+            ON CONFLICT (user_id, metric_date)
             DO UPDATE SET
                 steps = EXCLUDED.steps,
                 sleep_score = EXCLUDED.sleep_score,
@@ -154,14 +132,14 @@ class CoachingHistoryService:
                 performance_payload = EXCLUDED.performance_payload,
                 context_payload = EXCLUDED.context_payload
         """
-        self._execute(query, {"athlete_id": self._athlete_id(), **payload})
+        self._execute(query, {"user_id": self._user_id(), **payload})
 
     def record_training_plan(self, plan: TrainingPlan) -> None:
         """7일 계획 저장."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         insert_query = """
             INSERT INTO planned_workouts (
-                athlete_id,
+                user_id,
                 workout_date,
                 source,
                 workout_name,
@@ -172,7 +150,7 @@ class CoachingHistoryService:
                 plan_payload
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(workout_date)s,
                 %(source)s,
                 %(workout_name)s,
@@ -182,7 +160,7 @@ class CoachingHistoryService:
                 %(total_duration_seconds)s,
                 %(plan_payload)s::jsonb
             )
-            ON CONFLICT (athlete_id, workout_date, source)
+            ON CONFLICT (user_id, workout_date, source)
             DO UPDATE SET
                 workout_name = EXCLUDED.workout_name,
                 description = EXCLUDED.description,
@@ -195,7 +173,7 @@ class CoachingHistoryService:
             self._execute(
                 insert_query,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "workout_date": day.date,
                     "workout_name": day.workout.workout_name,
                     "source": WORKOUT_SOURCE,
@@ -234,7 +212,7 @@ class CoachingHistoryService:
     def _plan_freshness_service(self) -> PlanFreshnessService:
         return PlanFreshnessService(
             db=self.db,
-            athlete_key=self.athlete_key,
+            external_key=self.external_key,
             timezone=self.timezone,
         )
 
@@ -242,7 +220,7 @@ class CoachingHistoryService:
         """주관 피드백 upsert."""
         query = """
             INSERT INTO subjective_feedback (
-                athlete_id,
+                user_id,
                 feedback_date,
                 fatigue_score,
                 soreness_score,
@@ -253,7 +231,7 @@ class CoachingHistoryService:
                 notes
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(feedback_date)s,
                 %(fatigue_score)s,
                 %(soreness_score)s,
@@ -263,7 +241,7 @@ class CoachingHistoryService:
                 %(pain_notes)s,
                 %(notes)s
             )
-            ON CONFLICT (athlete_id, feedback_date)
+            ON CONFLICT (user_id, feedback_date)
             DO UPDATE SET
                 fatigue_score = EXCLUDED.fatigue_score,
                 soreness_score = EXCLUDED.soreness_score,
@@ -276,7 +254,7 @@ class CoachingHistoryService:
         self._execute(
             query,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "feedback_date": feedback.feedback_date,
                 "fatigue_score": feedback.fatigue_score,
                 "soreness_score": feedback.soreness_score,
@@ -298,20 +276,20 @@ class CoachingHistoryService:
         """요일별 훈련 가능 조건 upsert."""
         query = """
             INSERT INTO availability_rules (
-                athlete_id,
+                user_id,
                 weekday,
                 is_available,
                 max_duration_minutes,
                 preferred_session_type
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(weekday)s,
                 %(is_available)s,
                 %(max_duration_minutes)s,
                 %(preferred_session_type)s
             )
-            ON CONFLICT (athlete_id, weekday)
+            ON CONFLICT (user_id, weekday)
             DO UPDATE SET
                 is_available = EXCLUDED.is_available,
                 max_duration_minutes = EXCLUDED.max_duration_minutes,
@@ -320,7 +298,7 @@ class CoachingHistoryService:
         self._execute(
             query,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "weekday": weekday,
                 "is_available": is_available,
                 "max_duration_minutes": max_duration_minutes,
@@ -339,13 +317,13 @@ class CoachingHistoryService:
         """훈련 블록 upsert."""
         delete_query = """
             DELETE FROM training_blocks
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND starts_on = %(starts_on)s
               AND ends_on = %(ends_on)s
         """
         insert_query = """
             INSERT INTO training_blocks (
-                athlete_id,
+                user_id,
                 phase,
                 starts_on,
                 ends_on,
@@ -353,7 +331,7 @@ class CoachingHistoryService:
                 weekly_volume_target_km
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(phase)s,
                 %(starts_on)s,
                 %(ends_on)s,
@@ -362,7 +340,7 @@ class CoachingHistoryService:
             )
         """
         payload = {
-            "athlete_id": self._athlete_id(),
+            "user_id": self._user_id(),
             "phase": phase,
             "starts_on": starts_on,
             "ends_on": ends_on,
@@ -386,12 +364,12 @@ class CoachingHistoryService:
         deactivate_query = """
             UPDATE race_goals
             SET is_active = FALSE
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND priority = %(priority)s
         """
         insert_query = """
             INSERT INTO race_goals (
-                athlete_id,
+                user_id,
                 goal_name,
                 race_date,
                 distance,
@@ -401,7 +379,7 @@ class CoachingHistoryService:
                 is_active
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(goal_name)s,
                 %(race_date)s,
                 %(distance)s,
@@ -412,7 +390,7 @@ class CoachingHistoryService:
             )
         """
         payload = {
-            "athlete_id": self._athlete_id(),
+            "user_id": self._user_id(),
             "goal_name": goal_name,
             "race_date": race_date,
             "distance": distance,
@@ -435,7 +413,7 @@ class CoachingHistoryService:
         """부상 상태 upsert."""
         query = """
             INSERT INTO injury_status (
-                athlete_id,
+                user_id,
                 status_date,
                 injury_area,
                 severity,
@@ -443,7 +421,7 @@ class CoachingHistoryService:
                 is_active
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(status_date)s,
                 %(injury_area)s,
                 %(severity)s,
@@ -454,7 +432,7 @@ class CoachingHistoryService:
         self._execute(
             query,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "status_date": status_date,
                 "injury_area": injury_area,
                 "severity": severity,
@@ -477,14 +455,14 @@ class CoachingHistoryService:
                 delivery_provider = %(delivery_provider)s,
                 external_workout_id = %(external_workout_id)s,
                 delivery_status = %(delivery_status)s
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND workout_date = %(workout_date)s
               AND source = %(source)s
         """
         self._execute(
             query,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "workout_date": workout_date,
                 "delivery_provider": delivery_provider,
                 "external_workout_id": external_workout_id,
@@ -506,13 +484,13 @@ class CoachingHistoryService:
             SET
                 external_workout_id = NULL,
                 delivery_status = NULL
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND source = %(source)s
               AND delivery_provider = %(delivery_provider)s
               AND workout_date BETWEEN %(start_date)s AND %(end_date)s
             """,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "source": WORKOUT_SOURCE,
                 "delivery_provider": delivery_provider,
                 "start_date": start_date,
@@ -522,11 +500,11 @@ class CoachingHistoryService:
 
     def backfill_planned_workouts(self, scheduled_items: list[dict[str, Any]]) -> int:
         """Garmin 캘린더의 과거 Running Coach 워크아웃을 planned_workouts로 백필."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         inserted = 0
         query = """
             INSERT INTO planned_workouts (
-                athlete_id,
+                user_id,
                 workout_date,
                 source,
                 workout_name,
@@ -540,7 +518,7 @@ class CoachingHistoryService:
                 delivery_status
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(workout_date)s,
                 %(source)s,
                 %(workout_name)s,
@@ -553,7 +531,7 @@ class CoachingHistoryService:
                 %(external_workout_id)s,
                 %(delivery_status)s
             )
-            ON CONFLICT (athlete_id, workout_date, source)
+            ON CONFLICT (user_id, workout_date, source)
             DO UPDATE SET
                 workout_name = EXCLUDED.workout_name,
                 description = COALESCE(planned_workouts.description, EXCLUDED.description),
@@ -585,7 +563,7 @@ class CoachingHistoryService:
             self._execute(
                 query,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "workout_date": workout_date,
                     "source": WORKOUT_SOURCE,
                     "workout_name": workout_name,
@@ -606,7 +584,7 @@ class CoachingHistoryService:
 
     def record_activities(self, activities: list[dict[str, Any]]) -> None:
         """Garmin 활동/랩 이력 저장."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         for activity in activities:
             summary = cast(dict[str, Any], activity.get("summary", {}))
             details = cast(dict[str, Any], activity.get("details", {}))
@@ -635,7 +613,7 @@ class CoachingHistoryService:
             activity_row = self._fetchone(
                 """
                 INSERT INTO activities (
-                    athlete_id,
+                    user_id,
                     provider,
                     provider_activity_id,
                     activity_date,
@@ -652,7 +630,7 @@ class CoachingHistoryService:
                     raw_payload
                 )
                 VALUES (
-                    %(athlete_id)s,
+                    %(user_id)s,
                     %(provider)s,
                     %(provider_activity_id)s,
                     %(activity_date)s,
@@ -668,7 +646,7 @@ class CoachingHistoryService:
                     %(calories)s,
                     %(raw_payload)s::jsonb
                 )
-                ON CONFLICT (athlete_id, provider, provider_activity_id)
+                ON CONFLICT (user_id, provider, provider_activity_id)
                 DO UPDATE SET
                     activity_date = EXCLUDED.activity_date,
                     started_at = EXCLUDED.started_at,
@@ -685,7 +663,7 @@ class CoachingHistoryService:
                 RETURNING activity_id, activity_date, distance_km, duration_seconds
                 """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "provider": str(activity.get("provider") or "garmin"),
                     "provider_activity_id": (
                         str(summary.get("activityId")) if summary.get("activityId") else None
@@ -755,7 +733,7 @@ class CoachingHistoryService:
 
             if self._is_running_sport_type(summary):
                 self._upsert_workout_execution(
-                    athlete_id=athlete_id,
+                    user_id=user_id,
                     activity_id=activity_id,
                     activity_date=activity_row["activity_date"],
                     distance_km=self._float_or_none(activity_row["distance_km"]),
@@ -764,30 +742,30 @@ class CoachingHistoryService:
 
     def rebuild_recent_workout_executions(self, as_of: date, days: int = 84) -> int:
         """최근 러닝 활동 execution을 다시 계산."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         cutoff = as_of - timedelta(days=days - 1)
         self._execute(
             """
             DELETE FROM workout_executions
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND execution_date BETWEEN %(cutoff)s AND %(as_of)s
             """,
-            {"athlete_id": athlete_id, "cutoff": cutoff, "as_of": as_of},
+            {"user_id": user_id, "cutoff": cutoff, "as_of": as_of},
         )
         rows = self._fetchall(
             """
             SELECT activity_id, activity_date, distance_km, duration_seconds
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND activity_date BETWEEN %(cutoff)s AND %(as_of)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             ORDER BY activity_date
             """,
-            {"athlete_id": athlete_id, "cutoff": cutoff, "as_of": as_of},
+            {"user_id": user_id, "cutoff": cutoff, "as_of": as_of},
         )
         for row in rows:
             self._upsert_workout_execution(
-                athlete_id=athlete_id,
+                user_id=user_id,
                 activity_id=str(row["activity_id"]),
                 activity_date=row["activity_date"],
                 distance_km=self._float_or_none(row["distance_km"]),
@@ -817,7 +795,7 @@ class CoachingHistoryService:
         decision_summary = self._build_decision_summary(summary, state_snapshot)
         query = """
             INSERT INTO coach_decisions (
-                athlete_id,
+                user_id,
                 decision_date,
                 decision_type,
                 readiness_score,
@@ -827,7 +805,7 @@ class CoachingHistoryService:
                 rationale
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(decision_date)s,
                 'daily_plan',
                 %(readiness_score)s,
@@ -840,7 +818,7 @@ class CoachingHistoryService:
         self._execute(
             query,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "decision_date": decision_date,
                 "readiness_score": state_snapshot["readinessScore"],
                 "fatigue_score": state_snapshot["fatigueScore"],
@@ -852,7 +830,7 @@ class CoachingHistoryService:
 
     def summarize_training_background(self, as_of: date) -> dict[str, Any]:
         """최근 6주/12개월/평생 훈련 배경 요약."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         weekly_rows = self._fetchall(
             """
             SELECT
@@ -861,14 +839,14 @@ class CoachingHistoryService:
                 COUNT(*) AS run_count,
                 MAX(distance_km) AS long_run_km
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND activity_date >= %(cutoff)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             GROUP BY 1
             ORDER BY 1 DESC
             LIMIT 6
             """,
-            {"athlete_id": athlete_id, "cutoff": as_of - timedelta(days=42)},
+            {"user_id": user_id, "cutoff": as_of - timedelta(days=42)},
         )
         monthly_rows = self._fetchall(
             """
@@ -877,14 +855,14 @@ class CoachingHistoryService:
                 ROUND(COALESCE(SUM(distance_km), 0)::numeric, 2) AS distance_km,
                 COUNT(*) AS run_count
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND activity_date >= %(cutoff)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             GROUP BY 1
             ORDER BY 1 DESC
             LIMIT 12
             """,
-            {"athlete_id": athlete_id, "cutoff": as_of - timedelta(days=365)},
+            {"user_id": user_id, "cutoff": as_of - timedelta(days=365)},
         )
         lifetime_row = (
             self._fetchone(
@@ -895,10 +873,10 @@ class CoachingHistoryService:
                 ROUND(COALESCE(MAX(distance_km), 0)::numeric, 2) AS longest_run_km,
                 MIN(activity_date) AS first_run_date
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             """,
-                {"athlete_id": athlete_id},
+                {"user_id": user_id},
             )
             or {}
         )
@@ -942,7 +920,7 @@ class CoachingHistoryService:
         from_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """캘린더 표출용 최근 실제 활동 목록."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         start_date = from_date or (as_of - timedelta(days=days - 1))
         rows = self._fetchall(
             """
@@ -972,13 +950,13 @@ class CoachingHistoryService:
               ON we.activity_id = a.activity_id
             LEFT JOIN planned_workouts pw
               ON pw.planned_workout_id = we.planned_workout_id
-            WHERE a.athlete_id = %(athlete_id)s
+            WHERE a.user_id = %(user_id)s
               AND a.activity_date BETWEEN %(from_date)s AND %(to_date)s
               AND a.sport_type IS NOT NULL
             ORDER BY a.activity_date DESC, a.started_at DESC NULLS LAST
             """,
             {
-                "athlete_id": athlete_id,
+                "user_id": user_id,
                 "from_date": start_date,
                 "to_date": as_of,
             },
@@ -1016,28 +994,28 @@ class CoachingHistoryService:
 
     def summarize_planning_constraints(self, as_of: date) -> dict[str, Any]:
         """가용시간/레이스/블록 제약 요약."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         availability_rows = self._fetchall(
             """
             SELECT weekday, is_available, max_duration_minutes, preferred_session_type
             FROM availability_rules
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
             ORDER BY weekday
             """,
-            {"athlete_id": athlete_id},
+            {"user_id": user_id},
         )
         goal_row = (
             self._fetchone(
                 """
             SELECT goal_name, race_date, distance, goal_time, target_pace, priority
             FROM race_goals
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND is_active = TRUE
               AND (race_date IS NULL OR race_date >= %(as_of)s)
             ORDER BY priority ASC, race_date ASC NULLS LAST
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -1046,13 +1024,13 @@ class CoachingHistoryService:
                 """
             SELECT phase, starts_on, ends_on, focus, weekly_volume_target_km
             FROM training_blocks
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND starts_on <= %(as_of)s
               AND ends_on >= %(as_of)s
             ORDER BY starts_on DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -1061,9 +1039,9 @@ class CoachingHistoryService:
                 """
             SELECT coaching_policy
             FROM user_preferences
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
             """,
-                {"athlete_id": athlete_id},
+                {"user_id": user_id},
             )
             or {}
         )
@@ -1127,7 +1105,7 @@ class CoachingHistoryService:
 
     def summarize_coaching_state(self, as_of: date) -> dict[str, Any]:
         """최근 수행/주관 피드백/부상 상태를 반영한 코칭 상태 요약."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         adherence_window_days = 42
         load_row = (
             self._fetchone(
@@ -1172,12 +1150,12 @@ class CoachingHistoryService:
                       )
                 ) AS last_quality_date
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND activity_date >= %(d28)s
               AND sport_type IN ('running', 'treadmill_running', 'trail_running')
             """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "d7": as_of - timedelta(days=6),
                     "d14": as_of - timedelta(days=13),
                     "d21": as_of - timedelta(days=20),
@@ -1230,7 +1208,7 @@ class CoachingHistoryService:
                         2
                     ) AS load_units
                 FROM activities
-                WHERE athlete_id = %(athlete_id)s
+                WHERE user_id = %(user_id)s
                   AND activity_date BETWEEN %(d7)s AND %(as_of)s
                 GROUP BY activity_date
             ),
@@ -1254,7 +1232,7 @@ class CoachingHistoryService:
             FROM normalized_loads
             """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "d7": as_of - timedelta(days=6),
                     "as_of": as_of,
                 },
@@ -1295,7 +1273,7 @@ class CoachingHistoryService:
                         2
                     ) AS load_units
                 FROM activities
-                WHERE athlete_id = %(athlete_id)s
+                WHERE user_id = %(user_id)s
                   AND activity_date BETWEEN %(d42)s AND %(as_of)s
                 GROUP BY activity_date
             )
@@ -1308,7 +1286,7 @@ class CoachingHistoryService:
             ORDER BY ds.day
             """,
             {
-                "athlete_id": athlete_id,
+                "user_id": user_id,
                 "d42": as_of - timedelta(days=41),
                 "as_of": as_of,
             },
@@ -1329,12 +1307,12 @@ class CoachingHistoryService:
                 chronic_load,
                 acwr
             FROM daily_metrics
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND metric_date <= %(as_of)s
             ORDER BY metric_date DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -1344,7 +1322,7 @@ class CoachingHistoryService:
             WITH recent_plans AS (
                 SELECT planned_workout_id, is_rest, workout_date
                 FROM planned_workouts
-                WHERE athlete_id = %(athlete_id)s
+                WHERE user_id = %(user_id)s
                   AND source = %(source)s
                   AND workout_date BETWEEN %(from_date)s AND %(to_date)s
             ),
@@ -1368,7 +1346,7 @@ class CoachingHistoryService:
                 SELECT COUNT(*) AS count
                 FROM workout_executions we
                 CROSS JOIN plan_window pw
-                WHERE we.athlete_id = %(athlete_id)s
+                WHERE we.user_id = %(user_id)s
                   AND we.execution_date BETWEEN %(from_date)s AND %(to_date)s
                   AND pw.first_plan_date IS NOT NULL
                   AND we.execution_date >= pw.first_plan_date
@@ -1398,7 +1376,7 @@ class CoachingHistoryService:
             FROM plan_status
             """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "source": WORKOUT_SOURCE,
                     "from_date": as_of - timedelta(days=adherence_window_days - 1),
                     "to_date": as_of,
@@ -1427,14 +1405,14 @@ class CoachingHistoryService:
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
                       AND execution_date >= (
                           SELECT MIN(workout_date) FROM planned_workouts
-                          WHERE athlete_id = %(athlete_id)s
+                          WHERE user_id = %(user_id)s
                       )
                 ) AS unplanned_session_count,
                 COUNT(*) FILTER (
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
                       AND execution_date >= (
                           SELECT MIN(workout_date) FROM planned_workouts
-                          WHERE athlete_id = %(athlete_id)s
+                          WHERE user_id = %(user_id)s
                       )
                       AND COALESCE(execution_payload->>'actualCategory', '') IN ('recovery', 'base')
                 ) AS unplanned_easy_count,
@@ -1442,7 +1420,7 @@ class CoachingHistoryService:
                     WHERE execution_payload->>'executionStatus' = 'completed_unplanned'
                       AND execution_date >= (
                           SELECT MIN(workout_date) FROM planned_workouts
-                          WHERE athlete_id = %(athlete_id)s
+                          WHERE user_id = %(user_id)s
                       )
                       AND COALESCE(execution_payload->>'actualCategory', '') IN (
                           'quality',
@@ -1460,11 +1438,11 @@ class CoachingHistoryService:
                     WHERE execution_payload->>'executionQuality' = '롱런 후반 강도가 과하게 올라감'
                 ) AS long_run_too_hard_count
             FROM workout_executions
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND execution_date BETWEEN %(from_date)s AND %(to_date)s
             """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "from_date": as_of - timedelta(days=13),
                     "to_date": as_of,
                 },
@@ -1484,12 +1462,12 @@ class CoachingHistoryService:
                 pain_notes,
                 notes
             FROM subjective_feedback
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND feedback_date <= %(as_of)s
             ORDER BY feedback_date DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -1502,13 +1480,13 @@ class CoachingHistoryService:
                 status_date,
                 notes
             FROM injury_status
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND is_active = TRUE
               AND status_date <= %(as_of)s
             ORDER BY severity DESC, status_date DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -1636,12 +1614,12 @@ class CoachingHistoryService:
             },
         }
 
-    def _athlete_id(self) -> str:
-        query = "SELECT athlete_id FROM athletes WHERE external_key = %(external_key)s"
-        rows = self._fetchall(query, {"external_key": self.athlete_key})
+    def _user_id(self) -> str:
+        query = "SELECT user_id FROM users WHERE external_key = %(external_key)s"
+        rows = self._fetchall(query, {"external_key": self.external_key})
         if not rows:
             raise ValueError("Athlete must be created before writing history")
-        return str(rows[0]["athlete_id"])
+        return str(rows[0]["user_id"])
 
     def _execute(self, query: str, params: dict[str, Any]) -> None:
         with self.db.connection() as conn:
@@ -1661,7 +1639,7 @@ class CoachingHistoryService:
 
     def _upsert_workout_execution(
         self,
-        athlete_id: str,
+        user_id: str,
         activity_id: str,
         activity_date: date,
         distance_km: Optional[float],
@@ -1670,7 +1648,7 @@ class CoachingHistoryService:
         actual_category = self._actual_activity_category(activity_id)
         activity_profile = self._activity_execution_profile(activity_id)
         planned = self._select_best_planned_workout(
-            athlete_id=athlete_id,
+            user_id=user_id,
             activity_date=activity_date,
             actual_category=actual_category,
             actual_duration=duration_seconds,
@@ -1718,15 +1696,15 @@ class CoachingHistoryService:
         self._execute(
             """
             DELETE FROM workout_executions
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND activity_id = %(activity_id)s
             """,
-            {"athlete_id": athlete_id, "activity_id": activity_id},
+            {"user_id": user_id, "activity_id": activity_id},
         )
 
         query = """
             INSERT INTO workout_executions (
-                athlete_id,
+                user_id,
                 planned_workout_id,
                 activity_id,
                 execution_date,
@@ -1735,7 +1713,7 @@ class CoachingHistoryService:
                 execution_payload
             )
             VALUES (
-                %(athlete_id)s,
+                %(user_id)s,
                 %(planned_workout_id)s,
                 %(activity_id)s,
                 %(execution_date)s,
@@ -1748,7 +1726,7 @@ class CoachingHistoryService:
         self._execute(
             query,
             {
-                "athlete_id": athlete_id,
+                "user_id": user_id,
                 "planned_workout_id": planned_workout_id,
                 "activity_id": activity_id,
                 "execution_date": activity_date,
@@ -1778,7 +1756,7 @@ class CoachingHistoryService:
 
     def _select_best_planned_workout(
         self,
-        athlete_id: str,
+        user_id: str,
         activity_date: date,
         actual_category: str,
         actual_duration: Optional[int],
@@ -1797,12 +1775,12 @@ class CoachingHistoryService:
                     WHERE we.planned_workout_id = pw.planned_workout_id
                 ) AS already_matched
             FROM planned_workouts pw
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND source = %(source)s
               AND workout_date BETWEEN %(date_from)s AND %(date_to)s
             """,
             {
-                "athlete_id": athlete_id,
+                "user_id": user_id,
                 "date_from": activity_date - timedelta(days=2),
                 "date_to": activity_date + timedelta(days=3),
                 "source": WORKOUT_SOURCE,

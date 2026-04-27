@@ -72,7 +72,7 @@ class AdminSettingsService:
                 """
             SELECT planner_mode, llm_provider, llm_model
             FROM user_preferences
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
                 {"user_id": user_id},
             )
@@ -113,7 +113,7 @@ class AdminSettingsService:
         self._execute(
             """
             INSERT INTO user_preferences (
-                athlete_id,
+                user_id,
                 planner_mode,
                 llm_provider,
                 llm_model,
@@ -126,7 +126,7 @@ class AdminSettingsService:
                 %(llm_model)s,
                 NOW()
             )
-            ON CONFLICT (athlete_id)
+            ON CONFLICT (user_id)
             DO UPDATE SET
                 planner_mode = EXCLUDED.planner_mode,
                 llm_provider = EXCLUDED.llm_provider,

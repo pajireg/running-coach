@@ -112,8 +112,18 @@ The database is the canonical application state store.
 
 ### Core tables
 
-- `athletes`
-  - athlete identity and profile
+- `users`
+  - user identity (external_key, display_name, timezone, locale)
+- `user_preferences`
+  - per-user app behavior (planner_mode, llm_provider/model, schedule_times, run_mode, include_strength, preferred_long_run_day, coaching_policy)
+- `user_profile_history`
+  - time-series physiology snapshot (max_heart_rate, resting_heart_rate, vo2_max, lactate_threshold_*, weight_kg, height_cm); query latest by `effective_from DESC`
+- `user_integration_credentials`
+  - per-user provider credential row (`provider`, `external_account_id`, `encrypted_payload`, `status`); replaces ad-hoc per-provider columns on `users`
+- `user_api_keys`
+  - hashed API keys for the user-facing API
+- `scheduled_user_jobs`
+  - one row per user, used by the worker for due-job claim with lease/backoff
 - `daily_metrics`
   - daily recovery, training-state, and load snapshots
 - `activities`

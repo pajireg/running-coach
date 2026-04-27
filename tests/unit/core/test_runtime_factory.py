@@ -12,11 +12,10 @@ from running_coach.models.user import UserContext
 from running_coach.storage.integration_credentials import IntegrationCredentialRecord
 
 
-def _context(garmin_email: str = "runner@example.com") -> UserContext:
+def _context() -> UserContext:
     return UserContext(
         user_id="user-1",
         external_key="runner-1",
-        garmin_email=garmin_email,
         llm_settings=LLMSettings(
             planner_mode="legacy",
             llm_provider="gemini",
@@ -48,36 +47,7 @@ class FakeIntegrationCredentials:
         return self.payload
 
 
-def test_runtime_factory_uses_env_credentials_for_compat_user(monkeypatch):
-    created = {}
-
-    def fake_create_for_user(**kwargs):
-        created.update(kwargs)
-        return "container"
-
-    monkeypatch.setattr(
-        "running_coach.core.runtime_factory.ServiceContainer.create_for_user",
-        fake_create_for_user,
-    )
-    settings = SimpleNamespace(
-        garmin_email="runner@example.com",
-        garmin_password="env-password",
-    )
-    factory = UserRuntimeFactory(
-        settings=settings,  # type: ignore[arg-type]
-        integration_credentials=FakeIntegrationCredentials(),  # type: ignore[arg-type]
-    )
-
-    container = factory.create_container(_context("runner@example.com"))
-
-    assert container == "container"
-    assert created["garmin_email"] == "runner@example.com"
-    assert created["garmin_password"] == "env-password"
-    assert created["calendar_client"].enabled is True
-    assert created["calendar_client"].token_info is None
-
-
-def test_runtime_factory_uses_db_credentials_for_non_env_user(monkeypatch):
+def test_runtime_factory_uses_db_credentials(monkeypatch):
     created = {}
 
     def fake_create_for_user(**kwargs):
@@ -93,25 +63,67 @@ def test_runtime_factory_uses_db_credentials_for_non_env_user(monkeypatch):
         provider="garmin",
         encrypted_payload="encrypted",
         status="active",
+        external_account_id="runner@example.com",
     )
     factory = UserRuntimeFactory(
-        settings=SimpleNamespace(
-            garmin_email="env@example.com",
-            garmin_password="env-password",
-        ),  # type: ignore[arg-type]
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
         integration_credentials=FakeIntegrationCredentials(
             record=record,
             payload={"email": "runner@example.com", "password": "db-password"},
         ),  # type: ignore[arg-type]
     )
 
-    factory.create_container(_context("runner@example.com"))
+    factory.create_container(_context())
 
-    assert created["garmin_email"] == "runner@example.com"
-    assert created["garmin_password"] == "db-password"
+    assert created["provider_email"] == "runner@example.com"
+    assert created["provider_password"] == "db-password"
 
 
-def test_runtime_factory_rejects_inactive_garmin_credentials():
+def test_runtime_factory_falls_back_to_external_account_id_when_payload_missing_email(
+    monkeypatch,
+):
+    created = {}
+
+    def fake_create_for_user(**kwargs):
+        created.update(kwargs)
+        return "container"
+
+    monkeypatch.setattr(
+        "running_coach.core.runtime_factory.ServiceContainer.create_for_user",
+        fake_create_for_user,
+    )
+    record = IntegrationCredentialRecord(
+        user_id="user-1",
+        provider="garmin",
+        encrypted_payload="encrypted",
+        status="active",
+        external_account_id="runner@example.com",
+    )
+    factory = UserRuntimeFactory(
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
+        integration_credentials=FakeIntegrationCredentials(
+            record=record,
+            payload={"password": "db-password"},
+        ),  # type: ignore[arg-type]
+    )
+
+    factory.create_container(_context())
+
+    assert created["provider_email"] == "runner@example.com"
+    assert created["provider_password"] == "db-password"
+
+
+def test_runtime_factory_rejects_missing_credentials():
+    factory = UserRuntimeFactory(
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
+        integration_credentials=FakeIntegrationCredentials(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match="not configured"):
+        factory.create_container(_context())
+
+
+def test_runtime_factory_rejects_inactive_credentials():
     record = IntegrationCredentialRecord(
         user_id="user-1",
         provider="garmin",
@@ -119,15 +131,12 @@ def test_runtime_factory_rejects_inactive_garmin_credentials():
         status="reauth_required",
     )
     factory = UserRuntimeFactory(
-        settings=SimpleNamespace(
-            garmin_email="env@example.com",
-            garmin_password="env-password",
-        ),  # type: ignore[arg-type]
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
         integration_credentials=FakeIntegrationCredentials(record=record),  # type: ignore[arg-type]
     )
 
     with pytest.raises(ValueError, match="not active"):
-        factory.create_container(_context("runner@example.com"))
+        factory.create_container(_context())
 
 
 def test_runtime_factory_uses_db_google_calendar_token_for_active_user(monkeypatch):
@@ -154,10 +163,7 @@ def test_runtime_factory_uses_db_google_calendar_token_for_active_user(monkeypat
         status="active",
     )
     factory = UserRuntimeFactory(
-        settings=SimpleNamespace(
-            garmin_email="env@example.com",
-            garmin_password="env-password",
-        ),  # type: ignore[arg-type]
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
         integration_credentials=FakeIntegrationCredentials(
             records={
                 "garmin": garmin_record,
@@ -177,14 +183,14 @@ def test_runtime_factory_uses_db_google_calendar_token_for_active_user(monkeypat
         ),  # type: ignore[arg-type]
     )
 
-    factory.create_container(_context("runner@example.com"))
+    factory.create_container(_context())
 
     calendar_client = created["calendar_client"]
     assert calendar_client.enabled is True
     assert calendar_client.token_info["token"] == "access-token"
 
 
-def test_runtime_factory_disables_google_calendar_for_non_env_user_without_token(monkeypatch):
+def test_runtime_factory_disables_google_calendar_when_no_token(monkeypatch):
     created = {}
 
     def fake_create_for_user(**kwargs):
@@ -202,16 +208,13 @@ def test_runtime_factory_disables_google_calendar_for_non_env_user_without_token
         status="active",
     )
     factory = UserRuntimeFactory(
-        settings=SimpleNamespace(
-            garmin_email="env@example.com",
-            garmin_password="env-password",
-        ),  # type: ignore[arg-type]
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
         integration_credentials=FakeIntegrationCredentials(
             records={"garmin": garmin_record},
             payloads={"garmin": {"email": "runner@example.com", "password": "db-password"}},
         ),  # type: ignore[arg-type]
     )
 
-    factory.create_container(_context("runner@example.com"))
+    factory.create_container(_context())
 
     assert created["calendar_client"].enabled is False

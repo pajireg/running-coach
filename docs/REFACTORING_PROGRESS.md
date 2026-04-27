@@ -190,7 +190,47 @@ toward the target architecture in
 - Keep `TrainingOrchestrator` behavior-compatible while moving more workflow
   assembly into application services.
 - Do not push new provider-specific logic into coaching modules.
-- Prefer additive compatibility paths over renaming every `athlete_*` concept at
-  once.
 - Next slice should continue reducing provider-specific storage assumptions
   without expanding raw provider JSON usage.
+
+## 2026-04-28
+
+### Completed in this slice
+
+- Renamed the entire DB schema from `athletes`/`athlete_id` to `users`/`user_id`:
+  - dropped `athletes`, `athlete_preferences` naming; new schema uses `users`,
+    `user_preferences`, `user_profile_history`, `user_integration_credentials`,
+    `user_api_keys`, `scheduled_user_jobs`;
+  - all FK columns renamed to `user_id`; all domain tables have `ON DELETE CASCADE`
+    from `users`.
+- Removed "garmin" from all table names, column names, and application code
+  (except the provider value `"garmin"` and the `clients/garmin/` directory).
+- Introduced `user_profile_history` as a time-series physiological profile store
+  with `(user_id, effective_from)` UNIQUE; `UserProfileHistoryService` exposes
+  `record_snapshot()` and `get_latest_profile()`.
+- Moved provider credential ownership fully into `user_integration_credentials`:
+  - removed `.garmin_tokens/` file-based credential path from product code;
+  - local single-tenant deployments seed credentials from env at startup via
+    `_seed_local_runtime_credentials` in `UserApplicationService`;
+  - `external_account_id` column records provider account identity without
+    duplicating it in user settings.
+- Removed `ensure_user_identity` / `ensure_user_profile` mutation helpers that
+  wrote garmin_email into the users table as a side effect of history reads.
+- Renamed `AthleteSccopedStore` → `UserScopedStore`; updated all storage callers.
+- All 321 unit tests pass; Docker stack rebuilds cleanly with the new 19-table schema.
+
+### What this enables
+
+- No more ambiguity between "athlete" (domain concept) and the DB/code identity.
+- Provider credentials are encrypted, per-user, and DB-backed across all paths.
+- User physiology (max_heart_rate, etc.) is time-series tracked and not coupled
+  to a single flat row on the users table.
+
+### Still not done
+
+- Per-user Garmin token/session migration into the database (beyond encrypted
+  email/password storage).
+- Active Garmin credential re-auth flow.
+- Persist refreshed per-user Google OAuth tokens back into the credential store.
+- Further SQL-level decomposition behind the history facades.
+- Full CLI migration away from direct deployment-config assumptions.

@@ -40,7 +40,10 @@ from ..storage import (
     UserService,
 )
 from ..storage.integration_credentials import IntegrationCredentialRecord
+from ..utils.logger import get_logger
 from .coaching_service import CoachingApplicationService
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -136,20 +139,13 @@ class UserApplicationService:
             "garmin",
             {"email": payload.email, "password": payload.password},
             status="active",
-        )
-        self.update_user_preferences(
-            user_id,
-            UserPreferencesPatch(garminEmail=payload.email),
+            external_account_id=payload.email,
         )
         return self.get_integrations(user_id)
 
     def disconnect_garmin(self, user_id: str) -> UserIntegrationsResponse:
         if self.integration_credentials is not None:
             self.integration_credentials.delete_credential(user_id, "garmin")
-        self.update_user_preferences(
-            user_id,
-            UserPreferencesPatch(garminEmail=None),
-        )
         return self.get_integrations(user_id)
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
@@ -165,9 +161,7 @@ class UserApplicationService:
         return self._context_from_record(self.user_service.get_user_record(user_id))
 
     def list_runnable_user_contexts(self) -> list[UserContext]:
-        records = self.user_service.list_runnable_users(
-            deployment_garmin_email=self.settings.garmin_email,
-        )
+        records = self.user_service.list_runnable_users()
         return [self._context_from_record(record) for record in records]
 
     def claim_due_user_contexts(
@@ -179,7 +173,6 @@ class UserApplicationService:
         if self.scheduled_jobs is None:
             return self.list_runnable_user_contexts()
         claimed_jobs = self.scheduled_jobs.claim_due_users(
-            deployment_garmin_email=self.settings.garmin_email,
             worker_id=worker_id,
             batch_size=batch_size,
         )
@@ -188,15 +181,37 @@ class UserApplicationService:
     def ensure_local_runtime_user_context(self) -> UserContext:
         record = self.user_service.upsert_runtime_user(
             external_key=self.settings.garmin_email.lower(),
-            garmin_email=self.settings.garmin_email,
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times=self.settings.schedule_times,
             run_mode=self.settings.service_run_mode,
             include_strength=self.settings.include_strength,
         )
+        self._seed_local_runtime_credentials(record.user_id)
         self._upsert_schedule(record)
         return self._context_from_record(record)
+
+    def _seed_local_runtime_credentials(self, user_id: str) -> None:
+        """Seed the deployment user's Garmin credential from env vars on bootstrap."""
+        if self.integration_credentials is None:
+            return
+        try:
+            self.integration_credentials.upsert_payload(
+                user_id,
+                "garmin",
+                {
+                    "email": self.settings.garmin_email,
+                    "password": self.settings.garmin_password,
+                },
+                status="active",
+                external_account_id=self.settings.garmin_email,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "배포 사용자 Garmin 인증 정보를 시드하지 못했습니다 "
+                "(APP_ENCRYPTION_KEY 미설정?): %s",
+                exc,
+            )
 
     def run_user_sync(self, user_id: str, run_mode: str = "auto") -> RunSyncResponse:
         context = self.get_user_context(user_id)
@@ -290,7 +305,6 @@ class UserApplicationService:
             userId=record.user_id,
             externalKey=record.external_key,
             displayName=record.display_name,
-            garminEmail=record.garmin_email,
             preferences=UserPreferences(
                 timezone=record.timezone,
                 locale=record.locale or "ko",
@@ -304,8 +318,8 @@ class UserApplicationService:
             ),
             llmSettings=llm_settings,
             integrationStatus=IntegrationStatus(
-                garmin=self._garmin_status(record, integration_statuses),
-                googleCalendar=self._google_calendar_status(integration_statuses),
+                garmin=self._provider_status(integration_statuses, "garmin"),
+                googleCalendar=self._provider_status(integration_statuses, "google_calendar"),
             ),
         )
 
@@ -342,34 +356,11 @@ class UserApplicationService:
                 provider=provider,
                 displayName=display_name,
                 status=status,
-                connected=status in {"active", "configured", "env_compat"},
+                connected=status in {"active", "configured"},
                 source="db",
                 capabilities=capabilities,
+                externalAccountId=credential.external_account_id,
                 lastError=credential.last_error,
-            )
-        if provider == "garmin" and record.garmin_email:
-            status = cast(
-                IntegrationConnectionStatus,
-                "env_compat"
-                if record.garmin_email == self.settings.garmin_email
-                else "configured",
-            )
-            return IntegrationConnection(
-                provider="garmin",
-                displayName=display_name,
-                status=status,
-                connected=True,
-                source="env_compat" if status == "env_compat" else "profile",
-                capabilities=capabilities,
-            )
-        if provider == "google_calendar" and record.garmin_email == self.settings.garmin_email:
-            return IntegrationConnection(
-                provider="google_calendar",
-                displayName=display_name,
-                status="env_compat",
-                connected=True,
-                source="env_compat",
-                capabilities=capabilities,
             )
         return IntegrationConnection(
             provider=provider,
@@ -388,7 +379,7 @@ class UserApplicationService:
             reader = HistoryReadService(
                 CoachingHistoryService(
                     db=self.user_service.db,
-                    athlete_key=context.external_key,
+                    external_key=context.external_key,
                     timezone=context.timezone,
                 )
             )
@@ -425,7 +416,6 @@ class UserApplicationService:
             user_id=record.user_id,
             external_key=record.external_key,
             display_name=record.display_name,
-            garmin_email=record.garmin_email,
             timezone=record.timezone,
             locale=record.locale or "ko",
             schedule_times=record.schedule_times or self.settings.schedule_times,
@@ -474,19 +464,8 @@ class UserApplicationService:
             for provider, status in self.integration_credentials.get_statuses(user_id).items()
         }
 
-    def _garmin_status(self, record: UserRecord, statuses: dict[str, str]) -> str:
-        if "garmin" in statuses:
-            return statuses["garmin"]
-        if record.garmin_email:
-            if record.garmin_email == self.settings.garmin_email:
-                return "env_compat"
-            return "configured"
-        return "not_configured"
-
-    def _google_calendar_status(self, statuses: dict[str, str]) -> str:
-        if "google_calendar" in statuses:
-            return statuses["google_calendar"]
-        return "env_compat"
+    def _provider_status(self, statuses: dict[str, str], provider: str) -> str:
+        return statuses.get(provider, "not_configured")
 
     def _llm_patch_from_preferences(self, patch: UserPreferencesPatch) -> UserLLMSettingsPatch:
         payload: dict[str, object] = {}

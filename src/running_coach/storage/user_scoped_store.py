@@ -1,4 +1,4 @@
-"""Shared DB helpers for athlete-scoped persistence services."""
+"""Shared DB helpers for user-scoped persistence services."""
 
 from __future__ import annotations
 
@@ -7,20 +7,20 @@ from typing import Any, Optional, cast
 from .database import DatabaseClient
 
 
-class AthleteScopedStore:
-    """Base class for storage services scoped to one legacy athlete row."""
+class UserScopedStore:
+    """Base class for storage services scoped to one user row."""
 
-    def __init__(self, db: DatabaseClient, athlete_key: str, timezone: str = "Asia/Seoul"):
+    def __init__(self, db: DatabaseClient, external_key: str, timezone: str = "Asia/Seoul"):
         self.db = db
-        self.athlete_key = athlete_key
+        self.external_key = external_key
         self.timezone = timezone
 
-    def _athlete_id(self) -> str:
-        query = "SELECT athlete_id FROM athletes WHERE external_key = %(external_key)s"
-        rows = self._fetchall(query, {"external_key": self.athlete_key})
+    def _user_id(self) -> str:
+        query = "SELECT user_id FROM users WHERE external_key = %(external_key)s"
+        rows = self._fetchall(query, {"external_key": self.external_key})
         if not rows:
-            raise ValueError("Athlete must be created before writing history")
-        return str(rows[0]["athlete_id"])
+            raise ValueError("User must be created before reading or writing history")
+        return str(rows[0]["user_id"])
 
     def _execute(self, query: str, params: dict[str, Any]) -> None:
         with self.db.connection() as conn:

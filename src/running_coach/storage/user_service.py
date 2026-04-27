@@ -11,6 +11,20 @@ from typing import Any, Optional, cast
 from ..models.user import UserCreateRequest, UserPreferencesPatch, UserRecord
 from .database import DatabaseClient
 
+_USER_SELECT_COLUMNS = """
+    u.user_id,
+    u.external_key,
+    u.display_name,
+    u.timezone,
+    u.locale,
+    up.schedule_times,
+    up.run_mode,
+    up.include_strength,
+    up.planner_mode,
+    up.llm_provider,
+    up.llm_model
+"""
+
 
 class UserService:
     """User-scoped identity and preference storage service."""
@@ -22,64 +36,36 @@ class UserService:
         external_key = payload.external_key or f"user-{uuid.uuid4()}"
         row = self._fetchone(
             """
-            INSERT INTO athletes (
+            INSERT INTO users (
                 external_key,
                 display_name,
-                garmin_email,
-                timezone
+                timezone,
+                locale
             )
             VALUES (
                 %(external_key)s,
                 %(display_name)s,
-                %(garmin_email)s,
-                %(timezone)s
+                %(timezone)s,
+                %(locale)s
             )
-            RETURNING athlete_id AS user_id, external_key, display_name, garmin_email, timezone
+            RETURNING user_id, external_key, display_name, timezone, locale
             """,
             {
                 "external_key": external_key,
                 "display_name": payload.display_name,
-                "garmin_email": payload.garmin_email,
                 "timezone": payload.timezone,
+                "locale": payload.locale,
             },
         )
         if row is None:
             raise ValueError("Failed to create user")
 
         user_id = str(row["user_id"])
-        self._execute(
-            """
-            INSERT INTO user_preferences (
-                athlete_id,
-                locale,
-                schedule_times,
-                run_mode,
-                include_strength,
-                updated_at
-            )
-            VALUES (
-                %(user_id)s,
-                %(locale)s,
-                %(schedule_times)s,
-                %(run_mode)s,
-                %(include_strength)s,
-                NOW()
-            )
-            ON CONFLICT (athlete_id)
-            DO UPDATE SET
-                locale = EXCLUDED.locale,
-                schedule_times = EXCLUDED.schedule_times,
-                run_mode = EXCLUDED.run_mode,
-                include_strength = EXCLUDED.include_strength,
-                updated_at = NOW()
-            """,
-            {
-                "user_id": user_id,
-                "locale": payload.locale,
-                "schedule_times": payload.schedule_times,
-                "run_mode": payload.run_mode,
-                "include_strength": payload.include_strength,
-            },
+        self._upsert_preferences(
+            user_id=user_id,
+            schedule_times=payload.schedule_times,
+            run_mode=payload.run_mode,
+            include_strength=payload.include_strength,
         )
         record = self.get_user_record(user_id)
         raw_api_key = self.create_api_key(user_id=user_id, key_name="default")
@@ -90,16 +76,8 @@ class UserService:
         key_hash = self._hash_api_key(raw_api_key)
         self._execute(
             """
-            INSERT INTO user_api_keys (
-                athlete_id,
-                key_name,
-                key_hash
-            )
-            VALUES (
-                %(user_id)s,
-                %(key_name)s,
-                %(key_hash)s
-            )
+            INSERT INTO user_api_keys (user_id, key_name, key_hash)
+            VALUES (%(user_id)s, %(key_name)s, %(key_hash)s)
             """,
             {"user_id": user_id, "key_name": key_name, "key_hash": key_hash},
         )
@@ -111,24 +89,13 @@ class UserService:
 
         key_hash = self._hash_api_key(api_key)
         row = self._fetchone(
-            """
+            f"""
             SELECT
-                a.athlete_id AS user_id,
-                a.external_key,
-                a.display_name,
-                a.garmin_email,
-                a.timezone,
-                up.locale,
-                up.schedule_times,
-                up.run_mode,
-                up.include_strength,
-                up.planner_mode,
-                up.llm_provider,
-                up.llm_model,
+                {_USER_SELECT_COLUMNS},
                 uak.key_hash
             FROM user_api_keys uak
-            JOIN athletes a ON a.athlete_id = uak.athlete_id
-            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
+            JOIN users u ON u.user_id = uak.user_id
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
             WHERE uak.key_hash = %(key_hash)s
               AND uak.revoked_at IS NULL
             """,
@@ -151,23 +118,11 @@ class UserService:
 
     def get_user_record(self, user_id: str) -> UserRecord:
         row = self._fetchone(
-            """
-            SELECT
-                a.athlete_id AS user_id,
-                a.external_key,
-                a.display_name,
-                a.garmin_email,
-                a.timezone,
-                up.locale,
-                up.schedule_times,
-                up.run_mode,
-                up.include_strength,
-                up.planner_mode,
-                up.llm_provider,
-                up.llm_model
-            FROM athletes a
-            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
-            WHERE a.athlete_id = %(user_id)s
+            f"""
+            SELECT {_USER_SELECT_COLUMNS}
+            FROM users u
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
+            WHERE u.user_id = %(user_id)s
             """,
             {"user_id": user_id},
         )
@@ -177,23 +132,11 @@ class UserService:
 
     def get_user_record_by_external_key(self, external_key: str) -> UserRecord | None:
         row = self._fetchone(
-            """
-            SELECT
-                a.athlete_id AS user_id,
-                a.external_key,
-                a.display_name,
-                a.garmin_email,
-                a.timezone,
-                up.locale,
-                up.schedule_times,
-                up.run_mode,
-                up.include_strength,
-                up.planner_mode,
-                up.llm_provider,
-                up.llm_model
-            FROM athletes a
-            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
-            WHERE a.external_key = %(external_key)s
+            f"""
+            SELECT {_USER_SELECT_COLUMNS}
+            FROM users u
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
+            WHERE u.external_key = %(external_key)s
             """,
             {"external_key": external_key},
         )
@@ -201,44 +144,28 @@ class UserService:
             return None
         return UserRecord.from_row(row)
 
-    def list_runnable_users(self, *, deployment_garmin_email: str | None) -> list[UserRecord]:
-        """Return users that can be executed by the scheduled worker.
+    def list_runnable_users(self) -> list[UserRecord]:
+        """Return users runnable by the scheduled worker.
 
-        The legacy deployment user remains runnable via env credentials. Additional
-        users must have an active Garmin credential row so the worker does not pick
-        up partially configured accounts.
+        A user is runnable when at least one training-data integration credential
+        is active. The single-tenant deployment seeds this row at bootstrap from
+        environment variables, so it appears here like any other user.
         """
         rows = self._fetchall(
-            """
-            SELECT
-                a.athlete_id AS user_id,
-                a.external_key,
-                a.display_name,
-                a.garmin_email,
-                a.timezone,
-                up.locale,
-                up.schedule_times,
-                up.run_mode,
-                up.include_strength,
-                up.planner_mode,
-                up.llm_provider,
-                up.llm_model
-            FROM athletes a
-            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
-            WHERE a.garmin_email IS NOT NULL
-              AND (
-                a.garmin_email = %(deployment_garmin_email)s
-                OR EXISTS (
-                    SELECT 1
-                    FROM user_integration_credentials uic
-                    WHERE uic.athlete_id = a.athlete_id
-                      AND uic.provider = 'garmin'
-                      AND uic.status = 'active'
-                )
-              )
-            ORDER BY a.created_at ASC, a.athlete_id ASC
+            f"""
+            SELECT {_USER_SELECT_COLUMNS}
+            FROM users u
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
+            WHERE EXISTS (
+                SELECT 1
+                FROM user_integration_credentials uic
+                WHERE uic.user_id = u.user_id
+                  AND uic.provider = 'garmin'
+                  AND uic.status = 'active'
+            )
+            ORDER BY u.created_at ASC, u.user_id ASC
             """,
-            {"deployment_garmin_email": deployment_garmin_email},
+            {},
         )
         return [UserRecord.from_row(row) for row in rows]
 
@@ -246,7 +173,6 @@ class UserService:
         self,
         *,
         external_key: str,
-        garmin_email: str | None,
         timezone: str,
         locale: str,
         schedule_times: str,
@@ -256,70 +182,42 @@ class UserService:
     ) -> UserRecord:
         row = self._fetchone(
             """
-            INSERT INTO athletes (
+            INSERT INTO users (
                 external_key,
                 display_name,
-                garmin_email,
-                timezone
+                timezone,
+                locale
             )
             VALUES (
                 %(external_key)s,
                 %(display_name)s,
-                %(garmin_email)s,
-                %(timezone)s
+                %(timezone)s,
+                %(locale)s
             )
             ON CONFLICT (external_key)
             DO UPDATE SET
-                display_name = COALESCE(EXCLUDED.display_name, athletes.display_name),
-                garmin_email = EXCLUDED.garmin_email,
+                display_name = COALESCE(EXCLUDED.display_name, users.display_name),
                 timezone = EXCLUDED.timezone,
+                locale = EXCLUDED.locale,
                 updated_at = NOW()
-            RETURNING athlete_id AS user_id
+            RETURNING user_id
             """,
             {
                 "external_key": external_key,
                 "display_name": display_name,
-                "garmin_email": garmin_email,
                 "timezone": timezone,
+                "locale": locale,
             },
         )
         if row is None:
             raise ValueError(f"Failed to upsert runtime user: {external_key}")
 
         user_id = str(row["user_id"])
-        self._execute(
-            """
-            INSERT INTO user_preferences (
-                athlete_id,
-                locale,
-                schedule_times,
-                run_mode,
-                include_strength,
-                updated_at
-            )
-            VALUES (
-                %(user_id)s,
-                %(locale)s,
-                %(schedule_times)s,
-                %(run_mode)s,
-                %(include_strength)s,
-                NOW()
-            )
-            ON CONFLICT (athlete_id)
-            DO UPDATE SET
-                locale = EXCLUDED.locale,
-                schedule_times = EXCLUDED.schedule_times,
-                run_mode = EXCLUDED.run_mode,
-                include_strength = EXCLUDED.include_strength,
-                updated_at = NOW()
-            """,
-            {
-                "user_id": user_id,
-                "locale": locale,
-                "schedule_times": schedule_times,
-                "run_mode": run_mode,
-                "include_strength": include_strength,
-            },
+        self._upsert_preferences(
+            user_id=user_id,
+            schedule_times=schedule_times,
+            run_mode=run_mode,
+            include_strength=include_strength,
         )
         return self.get_user_record(user_id)
 
@@ -328,7 +226,6 @@ class UserService:
         fields_set = patch.model_fields_set
 
         display_name = patch.display_name if "display_name" in fields_set else current.display_name
-        garmin_email = patch.garmin_email if "garmin_email" in fields_set else current.garmin_email
         timezone = patch.timezone if "timezone" in fields_set else current.timezone
         locale = patch.locale if "locale" in fields_set else current.locale
         schedule_times = (
@@ -343,26 +240,41 @@ class UserService:
 
         self._execute(
             """
-            UPDATE athletes
+            UPDATE users
             SET
                 display_name = %(display_name)s,
-                garmin_email = %(garmin_email)s,
                 timezone = %(timezone)s,
+                locale = %(locale)s,
                 updated_at = NOW()
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {
                 "user_id": user_id,
                 "display_name": display_name,
-                "garmin_email": garmin_email,
                 "timezone": timezone,
+                "locale": locale,
             },
         )
+        self._upsert_preferences(
+            user_id=user_id,
+            schedule_times=schedule_times,
+            run_mode=run_mode,
+            include_strength=include_strength,
+        )
+        return self.get_user_record(user_id)
+
+    def _upsert_preferences(
+        self,
+        *,
+        user_id: str,
+        schedule_times: str | None,
+        run_mode: str | None,
+        include_strength: bool | None,
+    ) -> None:
         self._execute(
             """
             INSERT INTO user_preferences (
-                athlete_id,
-                locale,
+                user_id,
                 schedule_times,
                 run_mode,
                 include_strength,
@@ -370,15 +282,13 @@ class UserService:
             )
             VALUES (
                 %(user_id)s,
-                %(locale)s,
                 %(schedule_times)s,
                 %(run_mode)s,
                 %(include_strength)s,
                 NOW()
             )
-            ON CONFLICT (athlete_id)
+            ON CONFLICT (user_id)
             DO UPDATE SET
-                locale = EXCLUDED.locale,
                 schedule_times = EXCLUDED.schedule_times,
                 run_mode = EXCLUDED.run_mode,
                 include_strength = EXCLUDED.include_strength,
@@ -386,13 +296,11 @@ class UserService:
             """,
             {
                 "user_id": user_id,
-                "locale": locale,
                 "schedule_times": schedule_times,
                 "run_mode": run_mode,
                 "include_strength": include_strength,
             },
         )
-        return self.get_user_record(user_id)
 
     def _hash_api_key(self, api_key: str) -> str:
         return hashlib.sha256(api_key.encode("utf-8")).hexdigest()

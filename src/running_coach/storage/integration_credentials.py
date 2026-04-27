@@ -30,6 +30,7 @@ class IntegrationCredentialRecord:
     provider: IntegrationProvider
     encrypted_payload: str
     status: IntegrationStatusValue
+    external_account_id: str | None = None
     last_error: str | None = None
 
 
@@ -79,7 +80,7 @@ class IntegrationCredentialService:
             """
             SELECT provider, status
             FROM user_integration_credentials
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {"user_id": user_id},
         )
@@ -92,9 +93,9 @@ class IntegrationCredentialService:
         """Return metadata for all provider credentials owned by one user."""
         rows = self._fetchall(
             """
-            SELECT athlete_id AS user_id, provider, encrypted_payload, status, last_error
+            SELECT user_id, provider, external_account_id, encrypted_payload, status, last_error
             FROM user_integration_credentials
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             ORDER BY provider
             """,
             {"user_id": user_id},
@@ -105,6 +106,7 @@ class IntegrationCredentialService:
                 provider=cast(IntegrationProvider, row["provider"]),
                 encrypted_payload=str(row.get("encrypted_payload") or ""),
                 status=cast(IntegrationStatusValue, row["status"]),
+                external_account_id=row.get("external_account_id"),
                 last_error=row.get("last_error"),
             )
             for row in rows
@@ -117,9 +119,9 @@ class IntegrationCredentialService:
     ) -> IntegrationCredentialRecord | None:
         row = self._fetchone(
             """
-            SELECT athlete_id AS user_id, provider, encrypted_payload, status, last_error
+            SELECT user_id, provider, external_account_id, encrypted_payload, status, last_error
             FROM user_integration_credentials
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
               AND provider = %(provider)s
             """,
             {"user_id": user_id, "provider": provider},
@@ -131,6 +133,7 @@ class IntegrationCredentialService:
             provider=cast(IntegrationProvider, row["provider"]),
             encrypted_payload=str(row.get("encrypted_payload") or ""),
             status=cast(IntegrationStatusValue, row["status"]),
+            external_account_id=row.get("external_account_id"),
             last_error=row.get("last_error"),
         )
 
@@ -141,6 +144,7 @@ class IntegrationCredentialService:
         payload: dict[str, Any],
         *,
         status: IntegrationStatusValue = "active",
+        external_account_id: str | None = None,
     ) -> IntegrationCredentialRecord:
         if self.cipher is None:
             raise ValueError("APP_ENCRYPTION_KEY is required to store integration credentials")
@@ -150,6 +154,7 @@ class IntegrationCredentialService:
             provider=provider,
             encrypted_payload=encrypted_payload,
             status=status,
+            external_account_id=external_account_id,
             last_error=None,
         )
         record = self.get_credential(user_id, provider)
@@ -175,6 +180,7 @@ class IntegrationCredentialService:
             provider=provider,
             encrypted_payload="",
             status=status,
+            external_account_id=None,
             last_error=last_error,
         )
 
@@ -187,7 +193,7 @@ class IntegrationCredentialService:
         self._execute(
             """
             DELETE FROM user_integration_credentials
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
               AND provider = %(provider)s
             """,
             {"user_id": user_id, "provider": provider},
@@ -200,13 +206,15 @@ class IntegrationCredentialService:
         provider: IntegrationProvider,
         encrypted_payload: str,
         status: IntegrationStatusValue,
+        external_account_id: str | None,
         last_error: str | None,
     ) -> None:
         self._execute(
             """
             INSERT INTO user_integration_credentials (
-                athlete_id,
+                user_id,
                 provider,
+                external_account_id,
                 encrypted_payload,
                 status,
                 last_error,
@@ -215,13 +223,18 @@ class IntegrationCredentialService:
             VALUES (
                 %(user_id)s,
                 %(provider)s,
+                %(external_account_id)s,
                 %(encrypted_payload)s,
                 %(status)s,
                 %(last_error)s,
                 NOW()
             )
-            ON CONFLICT (athlete_id, provider)
+            ON CONFLICT (user_id, provider)
             DO UPDATE SET
+                external_account_id = COALESCE(
+                    EXCLUDED.external_account_id,
+                    user_integration_credentials.external_account_id
+                ),
                 encrypted_payload = COALESCE(
                     NULLIF(EXCLUDED.encrypted_payload, ''),
                     user_integration_credentials.encrypted_payload
@@ -233,6 +246,7 @@ class IntegrationCredentialService:
             {
                 "user_id": user_id,
                 "provider": provider,
+                "external_account_id": external_account_id,
                 "encrypted_payload": encrypted_payload,
                 "status": status,
                 "last_error": last_error,

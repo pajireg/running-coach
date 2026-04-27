@@ -146,16 +146,7 @@ class TrainingOrchestrator:
             return
 
         try:
-            active_user = getattr(self.container, "user_context", None)
             self.container.history_write_service.db.ping()
-            self.container.history_write_service.ensure_athlete(
-                garmin_email=(
-                    active_user.garmin_email
-                    if active_user is not None and active_user.garmin_email
-                    else self.container.settings.garmin_email
-                ),
-                max_heart_rate=self.container.settings.max_heart_rate,
-            )
             self.container.history_write_service.record_daily_metrics(metrics)
         except Exception as e:
             logger.warning(f"히스토리 저장 실패 (계속 진행): {e}")

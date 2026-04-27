@@ -17,12 +17,6 @@ class HistoryWriteService:
         self.history_service = history_service
         self.db = history_service.db
 
-    def ensure_athlete(self, *, garmin_email: str, max_heart_rate: int | None) -> None:
-        self.history_service.ensure_athlete(
-            garmin_email=garmin_email,
-            max_heart_rate=max_heart_rate,
-        )
-
     def record_daily_metrics(self, metrics: AdvancedMetrics) -> None:
         self.history_service.record_daily_metrics(metrics)
 

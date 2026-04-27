@@ -23,7 +23,6 @@ class FakeUserService(UserService):
             "user_id": user_id,
             "external_key": external_key,
             "display_name": payload.display_name,
-            "garmin_email": payload.garmin_email,
             "timezone": payload.timezone,
             "locale": payload.locale,
             "schedule_times": payload.schedule_times,
@@ -68,7 +67,6 @@ class FakeUserService(UserService):
         self,
         *,
         external_key: str,
-        garmin_email: str | None,
         timezone: str,
         locale: str,
         schedule_times: str,
@@ -84,7 +82,6 @@ class FakeUserService(UserService):
                 "user_id": user_id,
                 "external_key": external_key,
                 "display_name": display_name,
-                "garmin_email": garmin_email,
                 "timezone": timezone,
                 "locale": locale,
                 "schedule_times": schedule_times,
@@ -98,7 +95,6 @@ class FakeUserService(UserService):
 
         row = self.users[existing.user_id]
         row["display_name"] = display_name or row["display_name"]
-        row["garmin_email"] = garmin_email
         row["timezone"] = timezone
         row["locale"] = locale
         row["schedule_times"] = schedule_times
@@ -135,7 +131,6 @@ class QueryCaptureUserService(UserService):
                 "user_id": "user-1",
                 "external_key": "runner-1",
                 "display_name": "Runner One",
-                "garmin_email": "runner@example.com",
                 "timezone": "Asia/Seoul",
                 "locale": "ko",
                 "schedule_times": "05:00,17:00",
@@ -155,7 +150,6 @@ def test_create_user_returns_api_key_and_record():
         UserCreateRequest(
             externalKey="runner-1",
             displayName="Runner One",
-            garminEmail="runner@example.com",
         )
     )
 
@@ -199,7 +193,6 @@ def test_upsert_runtime_user_reuses_external_key():
     first = service.upsert_runtime_user(
         external_key="legacy-user",
         display_name=None,
-        garmin_email="runner@example.com",
         timezone="Asia/Seoul",
         locale="ko",
         schedule_times="05:00,17:00",
@@ -210,7 +203,6 @@ def test_upsert_runtime_user_reuses_external_key():
     updated = service.upsert_runtime_user(
         external_key="legacy-user",
         display_name="Local Runner",
-        garmin_email="runner@example.com",
         timezone="Asia/Seoul",
         locale="en",
         schedule_times="06:00",
@@ -226,12 +218,11 @@ def test_upsert_runtime_user_reuses_external_key():
     assert updated.include_strength is True
 
 
-def test_list_runnable_users_uses_env_or_active_garmin_credential_filter():
+def test_list_runnable_users_filters_by_active_garmin_credential():
     service = QueryCaptureUserService()
 
-    records = service.list_runnable_users(deployment_garmin_email="runner@example.com")
+    records = service.list_runnable_users()
 
     assert [record.user_id for record in records] == ["user-1"]
-    assert service.last_params == {"deployment_garmin_email": "runner@example.com"}
     assert "uic.provider = 'garmin'" in service.last_query
     assert "uic.status = 'active'" in service.last_query

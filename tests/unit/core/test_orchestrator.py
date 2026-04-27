@@ -189,7 +189,7 @@ class _FakeHistoryService:
             "reasons": ["missing_active_plan"],
         }
 
-    def ensure_athlete(self, **_kwargs):
+    def ensure_user_identity(self, **_kwargs):
         return None
 
     def record_daily_metrics(self, _metrics):
@@ -228,8 +228,8 @@ class _FakeHistoryWriteService:
         self.db = history_service.db
         self._history = history_service
 
-    def ensure_athlete(self, **kwargs):
-        return self._history.ensure_athlete(**kwargs)
+    def ensure_user_identity(self, **kwargs):
+        return self._history.ensure_user_identity(**kwargs)
 
     def record_daily_metrics(self, metrics):
         return self._history.record_daily_metrics(metrics)
@@ -295,8 +295,6 @@ def test_run_once_persists_provider_delivery_results():
             race=SimpleNamespace(has_goal=False),
             persist_history=True,
             include_strength=False,
-            garmin_email="user@example.com",
-            max_heart_rate=None,
         ),
         garmin_client=_FakeGarminClient(),
         gemini_client=_FakeGeminiClient(),
@@ -328,8 +326,6 @@ def test_run_once_prefers_provider_neutral_training_data_dependency():
             race=SimpleNamespace(has_goal=False),
             persist_history=True,
             include_strength=False,
-            garmin_email="user@example.com",
-            max_heart_rate=None,
         ),
         garmin_client=SimpleNamespace(),
         training_data_provider=training_data_provider,
@@ -366,8 +362,6 @@ def test_auto_mode_skips_llm_when_plan_is_fresh():
             race=SimpleNamespace(has_goal=False),
             persist_history=True,
             include_strength=False,
-            garmin_email="user@example.com",
-            max_heart_rate=None,
         ),
         garmin_client=garmin_client,
         gemini_client=gemini_client,
@@ -394,8 +388,6 @@ def test_run_once_uses_user_context_include_strength():
             race=SimpleNamespace(has_goal=False),
             persist_history=True,
             include_strength=False,
-            garmin_email="user@example.com",
-            max_heart_rate=None,
         ),
         garmin_client=_FakeGarminClient(),
         gemini_client=gemini_client,
@@ -412,7 +404,6 @@ def test_run_once_uses_user_context_include_strength():
             user_id="user-1",
             external_key="runner-1",
             include_strength=True,
-            garmin_email="user@example.com",
         )
     )
 

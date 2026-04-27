@@ -171,7 +171,7 @@ def _admin_html() -> str:
     <h2>User Override</h2>
     <div class="grid">
       <label>User ID
-        <input id="userId" placeholder="athlete UUID">
+        <input id="userId" placeholder="user UUID">
       </label>
       <label>Planner Override
         <select id="userPlanner">

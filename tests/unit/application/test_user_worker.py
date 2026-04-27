@@ -22,7 +22,6 @@ def _context(
         user_id=user_id,
         external_key=external_key,
         display_name=None,
-        garmin_email=f"{external_key}@example.com",
         timezone=timezone_name,
         locale="ko",
         schedule_times=schedule_times,

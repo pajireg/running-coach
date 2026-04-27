@@ -8,8 +8,8 @@ class _FakeDb:
 
 
 class _CalendarHistoryService(CoachingHistoryService):
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
         if "FROM activities" in query:
@@ -54,8 +54,8 @@ def test_list_recent_completed_activities_returns_calendar_payload():
 
 
 class _UnplannedCalendarHistoryService(CoachingHistoryService):
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
         if "FROM activities" in query:

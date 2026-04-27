@@ -9,19 +9,19 @@ from typing import Any, cast
 from ..config.constants import WORKOUT_SOURCE
 from ..models.training import DailyPlan
 from ..utils.logger import get_logger
-from .athlete_scoped_store import AthleteScopedStore
 from .database import DatabaseClient
+from .user_scoped_store import UserScopedStore
 
 logger = get_logger(__name__)
 
 MEANINGFUL_MATCH_THRESHOLD = 0.75
 
 
-class PlanFreshnessService(AthleteScopedStore):
+class PlanFreshnessService(UserScopedStore):
     """Read service for active plan freshness and extension/replan triggers."""
 
-    def __init__(self, db: DatabaseClient, athlete_key: str, timezone: str = "Asia/Seoul"):
-        super().__init__(db=db, athlete_key=athlete_key, timezone=timezone)
+    def __init__(self, db: DatabaseClient, external_key: str, timezone: str = "Asia/Seoul"):
+        super().__init__(db=db, external_key=external_key, timezone=timezone)
 
     def list_planned_external_workout_ids(
         self,
@@ -34,14 +34,14 @@ class PlanFreshnessService(AthleteScopedStore):
             """
             SELECT external_workout_id
             FROM planned_workouts
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND source = %(source)s
               AND delivery_provider = %(delivery_provider)s
               AND workout_date BETWEEN %(start_date)s AND %(end_date)s
               AND external_workout_id IS NOT NULL
             """,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "source": WORKOUT_SOURCE,
                 "delivery_provider": delivery_provider,
                 "start_date": start_date,
@@ -56,19 +56,19 @@ class PlanFreshnessService(AthleteScopedStore):
 
     def summarize_plan_freshness(self, as_of: date, horizon_days: int = 7) -> dict[str, Any]:
         """Summarize whether the current plan can be reused, extended, or regenerated."""
-        athlete_id = self._athlete_id()
+        user_id = self._user_id()
         end_date = as_of + timedelta(days=horizon_days - 1)
         plan_row = (
             self._fetchone(
                 """
             SELECT COUNT(*) AS active_plan_days
             FROM planned_workouts
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND source = %(source)s
               AND workout_date BETWEEN %(as_of)s AND %(end_date)s
             """,
                 {
-                    "athlete_id": athlete_id,
+                    "user_id": user_id,
                     "source": WORKOUT_SOURCE,
                     "as_of": as_of,
                     "end_date": end_date,
@@ -83,12 +83,12 @@ class PlanFreshnessService(AthleteScopedStore):
                    decision_date AS last_plan_decision_date,
                    rationale
             FROM coach_decisions
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND decision_type = 'daily_plan'
             ORDER BY created_at DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id},
+                {"user_id": user_id},
             )
             or {}
         )
@@ -102,12 +102,12 @@ class PlanFreshnessService(AthleteScopedStore):
                 body_battery,
                 hrv
             FROM daily_metrics
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND metric_date <= %(as_of)s
             ORDER BY metric_date DESC
             LIMIT 1
             """,
-                {"athlete_id": athlete_id, "as_of": as_of},
+                {"user_id": user_id, "as_of": as_of},
             )
             or {}
         )
@@ -116,9 +116,9 @@ class PlanFreshnessService(AthleteScopedStore):
                 """
             SELECT MAX(created_at) AS latest_activity_created_at
             FROM activities
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
             """,
-                {"athlete_id": athlete_id},
+                {"user_id": user_id},
             )
             or {}
         )
@@ -148,13 +148,13 @@ class PlanFreshnessService(AthleteScopedStore):
                 SELECT we.target_match_score
                 FROM workout_executions we
                 JOIN activities a ON a.activity_id = we.activity_id
-                WHERE we.athlete_id = %(athlete_id)s
+                WHERE we.user_id = %(user_id)s
                   AND we.planned_workout_id IS NOT NULL
                   AND a.created_at > %(since)s
                 ORDER BY a.created_at DESC
                 LIMIT 1
                 """,
-                    {"athlete_id": athlete_id, "since": last_plan_created_at},
+                    {"user_id": user_id, "since": last_plan_created_at},
                 )
                 or {}
             )
@@ -212,14 +212,14 @@ class PlanFreshnessService(AthleteScopedStore):
                 LEFT JOIN workout_executions we
                   ON we.planned_workout_id = pw.planned_workout_id
                  AND we.target_match_score >= %(meaningful_match_threshold)s
-                WHERE pw.athlete_id = %(athlete_id)s
+                WHERE pw.user_id = %(user_id)s
                   AND pw.source = %(source)s
                   AND pw.workout_date BETWEEN %(missed_start_date)s AND %(missed_end_date)s
                   AND NOT pw.is_rest
                   AND we.workout_execution_id IS NULL
                 """,
                     {
-                        "athlete_id": athlete_id,
+                        "user_id": user_id,
                         "source": WORKOUT_SOURCE,
                         "missed_start_date": missed_start_date,
                         "missed_end_date": missed_end_date,
@@ -317,14 +317,14 @@ class PlanFreshnessService(AthleteScopedStore):
             """
             SELECT workout_date, workout_name, is_rest, total_duration_seconds, plan_payload
             FROM planned_workouts
-            WHERE athlete_id = %(athlete_id)s
+            WHERE user_id = %(user_id)s
               AND source = %(source)s
               AND workout_date >= %(from_date)s
             ORDER BY workout_date
             LIMIT %(days)s
             """,
             {
-                "athlete_id": self._athlete_id(),
+                "user_id": self._user_id(),
                 "source": WORKOUT_SOURCE,
                 "from_date": from_date,
                 "days": days,

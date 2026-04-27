@@ -32,7 +32,6 @@ class FakeUserApplicationService:
             userId="user-1",
             externalKey="runner-1",
             displayName="Runner One",
-            garminEmail="runner@example.com",
             preferences=UserPreferences(
                 timezone="Asia/Seoul",
                 locale="ko",
@@ -103,7 +102,6 @@ class FakeUserApplicationService:
             user_id="user-1",
             external_key="runner-1",
             display_name="Runner One",
-            garmin_email="runner@example.com",
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times="05:00,17:00",
@@ -114,7 +112,6 @@ class FakeUserApplicationService:
 
     def create_user(self, payload: UserCreateRequest) -> UserCreateResponse:
         self.profile.display_name = payload.display_name
-        self.profile.garmin_email = payload.garmin_email
         self.profile.preferences.timezone = payload.timezone
         self.profile.preferences.locale = payload.locale
         self.profile.preferences.schedule_times = payload.schedule_times
@@ -205,7 +202,6 @@ def test_create_user_returns_one_time_api_key():
         "/v1/users",
         json={
             "displayName": "Runner One",
-            "garminEmail": "runner@example.com",
             "timezone": "Asia/Seoul",
             "locale": "ko",
             "scheduleTimes": "05:00,17:00",

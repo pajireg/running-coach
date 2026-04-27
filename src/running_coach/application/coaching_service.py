@@ -38,7 +38,6 @@ class CoachingApplicationService:
         )
 
     def record_feedback(self, user_context: UserContext, feedback: SubjectiveFeedback) -> None:
-        self._ensure_user_profile(user_context)
         self.user_state_service.record_subjective_feedback(user_context.user_id, feedback)
 
     def update_availability(
@@ -50,7 +49,6 @@ class CoachingApplicationService:
         max_duration_minutes: int | None,
         preferred_session_type: str | None,
     ) -> None:
-        self._ensure_user_profile(user_context)
         self.user_state_service.upsert_availability_rule(
             user_context.user_id,
             weekday=weekday,
@@ -71,7 +69,6 @@ class CoachingApplicationService:
         priority: int,
         is_active: bool = True,
     ) -> None:
-        self._ensure_user_profile(user_context)
         self.user_state_service.upsert_race_goal(
             user_context.user_id,
             goal_name=goal_name,
@@ -93,7 +90,6 @@ class CoachingApplicationService:
         focus: str | None,
         weekly_volume_target_km: float | None,
     ) -> None:
-        self._ensure_user_profile(user_context)
         self.user_state_service.upsert_training_block(
             user_context.user_id,
             phase=phase,
@@ -113,7 +109,6 @@ class CoachingApplicationService:
         notes: str | None,
         is_active: bool,
     ) -> None:
-        self._ensure_user_profile(user_context)
         self.user_state_service.upsert_injury_status(
             user_context.user_id,
             status_date=status_date,
@@ -121,13 +116,4 @@ class CoachingApplicationService:
             severity=severity,
             notes=notes,
             is_active=is_active,
-        )
-
-    def _ensure_user_profile(self, user_context: UserContext) -> None:
-        self.user_state_service.db.ping()
-        self.user_state_service.ensure_user_profile(
-            user_id=user_context.user_id,
-            garmin_email=user_context.garmin_email or self.settings.garmin_email,
-            timezone=user_context.timezone,
-            max_heart_rate=self.settings.max_heart_rate,
         )

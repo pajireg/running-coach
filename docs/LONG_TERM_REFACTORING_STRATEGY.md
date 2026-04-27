@@ -84,7 +84,7 @@ Add a user-scoped integration credential model:
 - encrypted JSON payload;
 - status: `active`, `reauth_required`, `disabled`, `error`;
 - `last_validated_at`, `last_error`, and timestamps;
-- `ON DELETE CASCADE` from `athletes`.
+- `ON DELETE CASCADE` from `users`.
 
 Initial implementation should keep existing env/local-token compatibility as
 `env_compat`, while exposing the DB-backed service and status flow. Do not try
@@ -169,6 +169,10 @@ requires:
   freshness or execution matching is touched;
 - Docker stack verification before completion is reported.
 
-Use additive compatibility and small commits. Do not rename `athletes` or
-`athlete_id` broadly until API, worker, credential, and export/deletion paths
-are stable.
+Use additive compatibility and small commits.
+
+> **Completed (2026-04-28):** The `athletes`/`athlete_id` rename is done. The
+> schema now uses `users` and `user_id` throughout. All storage services,
+> models, tests, and docs have been updated. The `.garmin_tokens/` file-based
+> credential path is replaced by `user_integration_credentials` with
+> app-level encryption. The warning to avoid broad renaming is now historical.

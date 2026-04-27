@@ -1,16 +1,22 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE IF NOT EXISTS athletes (
-    athlete_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- =============================================================================
+-- Identity
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_key TEXT NOT NULL UNIQUE,
-    garmin_email TEXT,
     display_name TEXT,
     timezone TEXT NOT NULL DEFAULT 'Asia/Seoul',
-    preferred_long_run_day TEXT,
-    max_heart_rate INTEGER,
+    locale TEXT NOT NULL DEFAULT 'ko',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- =============================================================================
+-- System-wide settings (global, not per user)
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS system_settings (
     setting_key TEXT PRIMARY KEY,
@@ -18,33 +24,54 @@ CREATE TABLE IF NOT EXISTS system_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- =============================================================================
+-- User app-level preferences (one row per user)
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS user_preferences (
-    athlete_id UUID PRIMARY KEY REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     planner_mode TEXT CHECK (planner_mode IN ('legacy', 'llm_driven')),
     llm_provider TEXT CHECK (llm_provider IN ('gemini', 'openai', 'anthropic')),
     llm_model TEXT,
-    locale TEXT,
     schedule_times TEXT,
     run_mode TEXT CHECK (run_mode IN ('plan', 'auto')),
     include_strength BOOLEAN NOT NULL DEFAULT FALSE,
+    preferred_long_run_day TEXT,
     coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE user_preferences
-    ADD COLUMN IF NOT EXISTS coaching_policy JSONB NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE user_preferences
-    ADD COLUMN IF NOT EXISTS locale TEXT;
-ALTER TABLE user_preferences
-    ADD COLUMN IF NOT EXISTS schedule_times TEXT;
-ALTER TABLE user_preferences
-    ADD COLUMN IF NOT EXISTS run_mode TEXT CHECK (run_mode IN ('plan', 'auto'));
-ALTER TABLE user_preferences
-    ADD COLUMN IF NOT EXISTS include_strength BOOLEAN NOT NULL DEFAULT FALSE;
+-- =============================================================================
+-- User physiological profile time series. Query latest by effective_from DESC.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS user_profile_history (
+    user_profile_history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    effective_from DATE NOT NULL,
+    max_heart_rate INTEGER,
+    resting_heart_rate INTEGER,
+    vo2_max NUMERIC(5, 2),
+    lactate_threshold_pace TEXT,
+    lactate_threshold_heart_rate INTEGER,
+    weight_kg NUMERIC(5, 2),
+    height_cm NUMERIC(5, 2),
+    source TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profile_history_user_effective
+    ON user_profile_history (user_id, effective_from DESC);
+
+-- =============================================================================
+-- API keys for authenticating user app requests
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS user_api_keys (
     user_api_key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     key_name TEXT NOT NULL DEFAULT 'default',
     key_hash TEXT NOT NULL UNIQUE,
     last_used_at TIMESTAMPTZ,
@@ -52,9 +79,17 @@ CREATE TABLE IF NOT EXISTS user_api_keys (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_api_keys_user
+    ON user_api_keys (user_id)
+    WHERE revoked_at IS NULL;
+
+-- =============================================================================
+-- Encrypted per-provider integration credentials
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS user_integration_credentials (
     user_integration_credential_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     provider TEXT NOT NULL CHECK (
         provider IN (
             'garmin',
@@ -64,6 +99,7 @@ CREATE TABLE IF NOT EXISTS user_integration_credentials (
             'google_fit'
         )
     ),
+    external_account_id TEXT,
     encrypted_payload TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'disabled' CHECK (
         status IN ('active', 'reauth_required', 'disabled', 'error')
@@ -72,11 +108,18 @@ CREATE TABLE IF NOT EXISTS user_integration_credentials (
     last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (athlete_id, provider)
+    UNIQUE (user_id, provider)
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_integration_credentials_user_provider
+    ON user_integration_credentials (user_id, provider);
+
+-- =============================================================================
+-- Background coaching job leasing (one row per user)
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS scheduled_user_jobs (
-    athlete_id UUID PRIMARY KEY REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     next_run_at TIMESTAMPTZ NOT NULL,
     lease_until TIMESTAMPTZ,
     locked_by TEXT,
@@ -94,9 +137,13 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_user_jobs_due
     ON scheduled_user_jobs (next_run_at)
     WHERE disabled_at IS NULL;
 
+-- =============================================================================
+-- Coaching domain
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS race_goals (
     race_goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     goal_name TEXT NOT NULL DEFAULT 'Primary Goal',
     race_date DATE,
     distance TEXT,
@@ -109,7 +156,7 @@ CREATE TABLE IF NOT EXISTS race_goals (
 
 CREATE TABLE IF NOT EXISTS training_blocks (
     training_block_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     phase TEXT NOT NULL,
     starts_on DATE NOT NULL,
     ends_on DATE NOT NULL,
@@ -120,18 +167,18 @@ CREATE TABLE IF NOT EXISTS training_blocks (
 
 CREATE TABLE IF NOT EXISTS availability_rules (
     availability_rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
     is_available BOOLEAN NOT NULL DEFAULT TRUE,
     max_duration_minutes INTEGER,
     preferred_session_type TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (athlete_id, weekday)
+    UNIQUE (user_id, weekday)
 );
 
 CREATE TABLE IF NOT EXISTS injury_status (
     injury_status_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     status_date DATE NOT NULL,
     injury_area TEXT NOT NULL,
     severity SMALLINT NOT NULL CHECK (severity BETWEEN 0 AND 10),
@@ -142,7 +189,7 @@ CREATE TABLE IF NOT EXISTS injury_status (
 
 CREATE TABLE IF NOT EXISTS subjective_feedback (
     feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     feedback_date DATE NOT NULL,
     fatigue_score SMALLINT CHECK (fatigue_score BETWEEN 1 AND 10),
     soreness_score SMALLINT CHECK (soreness_score BETWEEN 1 AND 10),
@@ -152,12 +199,12 @@ CREATE TABLE IF NOT EXISTS subjective_feedback (
     pain_notes TEXT,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (athlete_id, feedback_date)
+    UNIQUE (user_id, feedback_date)
 );
 
 CREATE TABLE IF NOT EXISTS daily_metrics (
     daily_metrics_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     metric_date DATE NOT NULL,
     steps INTEGER,
     sleep_score INTEGER,
@@ -179,13 +226,20 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     performance_payload JSONB NOT NULL,
     context_payload JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (athlete_id, metric_date)
+    UNIQUE (user_id, metric_date)
 );
+
+CREATE INDEX IF NOT EXISTS idx_daily_metrics_user_date
+    ON daily_metrics (user_id, metric_date DESC);
+
+-- =============================================================================
+-- Activities (provider-agnostic; provider= 'garmin' | 'healthkit' | ...)
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS activities (
     activity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
-    provider TEXT NOT NULL DEFAULT 'garmin',
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
     provider_activity_id TEXT,
     activity_date DATE NOT NULL,
     started_at TIMESTAMPTZ,
@@ -200,34 +254,11 @@ CREATE TABLE IF NOT EXISTS activities (
     calories INTEGER,
     raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (athlete_id, provider, provider_activity_id)
+    UNIQUE NULLS NOT DISTINCT (user_id, provider, provider_activity_id)
 );
 
-ALTER TABLE activities
-    ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'garmin';
-ALTER TABLE activities
-    ADD COLUMN IF NOT EXISTS provider_activity_id TEXT;
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'activities'
-          AND column_name = 'garmin_activity_id'
-    ) THEN
-        EXECUTE $migrate$
-            UPDATE activities
-            SET provider = COALESCE(provider, 'garmin'),
-                provider_activity_id = COALESCE(provider_activity_id, garmin_activity_id::text)
-            WHERE provider_activity_id IS NULL
-        $migrate$;
-    END IF;
-END $$;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_provider_activity
-    ON activities (athlete_id, provider, provider_activity_id)
-    NULLS NOT DISTINCT;
-ALTER TABLE activities
-    DROP COLUMN IF EXISTS garmin_activity_id;
+CREATE INDEX IF NOT EXISTS idx_activities_user_date
+    ON activities (user_id, activity_date DESC);
 
 CREATE TABLE IF NOT EXISTS activity_laps (
     activity_lap_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -241,9 +272,13 @@ CREATE TABLE IF NOT EXISTS activity_laps (
     UNIQUE (activity_id, lap_index)
 );
 
+-- =============================================================================
+-- Planned workouts (delivery_provider= 'garmin' | etc.)
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS planned_workouts (
     planned_workout_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     workout_date DATE NOT NULL,
     source TEXT NOT NULL DEFAULT 'running_coach',
     workout_name TEXT NOT NULL,
@@ -256,41 +291,15 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     external_workout_id TEXT,
     delivery_status TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (athlete_id, workout_date, source)
+    UNIQUE (user_id, workout_date, source)
 );
 
-ALTER TABLE planned_workouts
-    ADD COLUMN IF NOT EXISTS delivery_provider TEXT;
-ALTER TABLE planned_workouts
-    ADD COLUMN IF NOT EXISTS external_workout_id TEXT;
-ALTER TABLE planned_workouts
-    ADD COLUMN IF NOT EXISTS delivery_status TEXT;
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'planned_workouts'
-          AND column_name = 'garmin_workout_id'
-    ) THEN
-        EXECUTE $migrate$
-            UPDATE planned_workouts
-            SET delivery_provider = COALESCE(delivery_provider, 'garmin'),
-                external_workout_id = COALESCE(external_workout_id, garmin_workout_id),
-                delivery_status = COALESCE(delivery_status, garmin_schedule_status)
-            WHERE external_workout_id IS NULL
-               OR delivery_status IS NULL
-        $migrate$;
-    END IF;
-END $$;
-ALTER TABLE planned_workouts
-    DROP COLUMN IF EXISTS garmin_workout_id;
-ALTER TABLE planned_workouts
-    DROP COLUMN IF EXISTS garmin_schedule_status;
+CREATE INDEX IF NOT EXISTS idx_planned_workouts_user_date
+    ON planned_workouts (user_id, workout_date DESC);
 
 CREATE TABLE IF NOT EXISTS workout_executions (
     workout_execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     planned_workout_id UUID REFERENCES planned_workouts(planned_workout_id) ON DELETE SET NULL,
     activity_id UUID REFERENCES activities(activity_id) ON DELETE SET NULL,
     execution_date DATE NOT NULL,
@@ -302,9 +311,16 @@ CREATE TABLE IF NOT EXISTS workout_executions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_workout_executions_user_date
+    ON workout_executions (user_id, execution_date DESC);
+
+-- =============================================================================
+-- Coaching audit trail
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS coach_decisions (
     coach_decision_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     decision_date DATE NOT NULL,
     decision_type TEXT NOT NULL,
     readiness_score NUMERIC(5, 2),
@@ -315,9 +331,12 @@ CREATE TABLE IF NOT EXISTS coach_decisions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_coach_decisions_user_date
+    ON coach_decisions (user_id, decision_date DESC);
+
 CREATE TABLE IF NOT EXISTS llm_interactions (
     llm_interaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    athlete_id UUID NOT NULL REFERENCES athletes(athlete_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     interaction_type TEXT NOT NULL,
     model_name TEXT NOT NULL,
     prompt_payload JSONB NOT NULL,
@@ -325,17 +344,8 @@ CREATE TABLE IF NOT EXISTS llm_interactions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_daily_metrics_athlete_date
-    ON daily_metrics (athlete_id, metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_interactions_user_created
+    ON llm_interactions (user_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_activities_athlete_date
-    ON activities (athlete_id, activity_date DESC);
-
-CREATE INDEX IF NOT EXISTS idx_planned_workouts_athlete_date
-    ON planned_workouts (athlete_id, workout_date DESC);
-
-CREATE INDEX IF NOT EXISTS idx_feedback_athlete_date
-    ON subjective_feedback (athlete_id, feedback_date DESC);
-
-CREATE INDEX IF NOT EXISTS idx_user_integration_credentials_athlete_provider
-    ON user_integration_credentials (athlete_id, provider);
+CREATE INDEX IF NOT EXISTS idx_subjective_feedback_user_date
+    ON subjective_feedback (user_id, feedback_date DESC);

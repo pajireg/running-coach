@@ -39,7 +39,7 @@ class ScheduledUserJobService:
         self._execute(
             """
             INSERT INTO scheduled_user_jobs (
-                athlete_id,
+                user_id,
                 next_run_at,
                 failure_count,
                 next_retry_at,
@@ -56,7 +56,7 @@ class ScheduledUserJobService:
                 NULL,
                 NOW()
             )
-            ON CONFLICT (athlete_id)
+            ON CONFLICT (user_id)
             DO UPDATE SET
                 next_run_at = EXCLUDED.next_run_at,
                 next_retry_at = NULL,
@@ -69,7 +69,6 @@ class ScheduledUserJobService:
     def claim_due_users(
         self,
         *,
-        deployment_garmin_email: str | None,
         worker_id: str,
         batch_size: int = 25,
         lease_seconds: int = 900,
@@ -80,23 +79,19 @@ class ScheduledUserJobService:
         rows = self._fetchall(
             """
             WITH due AS (
-                SELECT sj.athlete_id
+                SELECT sj.user_id
                 FROM scheduled_user_jobs sj
-                JOIN athletes a ON a.athlete_id = sj.athlete_id
+                JOIN users u ON u.user_id = sj.user_id
                 WHERE sj.disabled_at IS NULL
                   AND sj.next_run_at <= %(now)s
                   AND (sj.next_retry_at IS NULL OR sj.next_retry_at <= %(now)s)
                   AND (sj.lease_until IS NULL OR sj.lease_until < %(now)s)
-                  AND a.garmin_email IS NOT NULL
-                  AND (
-                    a.garmin_email = %(deployment_garmin_email)s
-                    OR EXISTS (
-                        SELECT 1
-                        FROM user_integration_credentials uic
-                        WHERE uic.athlete_id = a.athlete_id
-                          AND uic.provider = 'garmin'
-                          AND uic.status = 'active'
-                    )
+                  AND EXISTS (
+                    SELECT 1
+                    FROM user_integration_credentials uic
+                    WHERE uic.user_id = u.user_id
+                      AND uic.provider = 'garmin'
+                      AND uic.status = 'active'
                   )
                 ORDER BY sj.next_run_at ASC
                 LIMIT %(batch_size)s
@@ -107,16 +102,15 @@ class ScheduledUserJobService:
                 locked_by = %(worker_id)s,
                 updated_at = NOW()
             FROM due
-            JOIN athletes a ON a.athlete_id = due.athlete_id
-            LEFT JOIN user_preferences up ON up.athlete_id = a.athlete_id
-            WHERE sj.athlete_id = due.athlete_id
+            JOIN users u ON u.user_id = due.user_id
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
+            WHERE sj.user_id = due.user_id
             RETURNING
-                a.athlete_id AS user_id,
-                a.external_key,
-                a.display_name,
-                a.garmin_email,
-                a.timezone,
-                up.locale,
+                u.user_id,
+                u.external_key,
+                u.display_name,
+                u.timezone,
+                u.locale,
                 up.schedule_times,
                 up.run_mode,
                 up.include_strength,
@@ -130,7 +124,6 @@ class ScheduledUserJobService:
                 "lease_until": lease_until,
                 "worker_id": worker_id,
                 "batch_size": batch_size,
-                "deployment_garmin_email": deployment_garmin_email,
             },
         )
         return [
@@ -165,7 +158,7 @@ class ScheduledUserJobService:
                 next_retry_at = NULL,
                 last_error = NULL,
                 updated_at = NOW()
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {"user_id": user.user_id, "now": reference_time, "next_run_at": next_run_at},
         )
@@ -189,7 +182,7 @@ class ScheduledUserJobService:
                 next_retry_at = %(next_retry_at)s,
                 last_error = %(last_error)s,
                 updated_at = NOW()
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {
                 "user_id": user.user_id,
@@ -213,7 +206,7 @@ class ScheduledUserJobService:
                 disabled_at,
                 lease_until
             FROM scheduled_user_jobs
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {"user_id": user_id},
         )
@@ -274,7 +267,7 @@ class ScheduledUserJobService:
             """
             SELECT failure_count
             FROM scheduled_user_jobs
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
             """,
             {"user_id": user_id},
         )

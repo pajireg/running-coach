@@ -15,37 +15,11 @@ class UserCoachingStateService:
     def __init__(self, db: DatabaseClient):
         self.db = db
 
-    def ensure_user_profile(
-        self,
-        user_id: str,
-        *,
-        garmin_email: str | None,
-        timezone: str,
-        max_heart_rate: int | None,
-    ) -> None:
-        self._execute(
-            """
-            UPDATE athletes
-            SET
-                garmin_email = %(garmin_email)s,
-                timezone = %(timezone)s,
-                max_heart_rate = %(max_heart_rate)s,
-                updated_at = NOW()
-            WHERE athlete_id = %(user_id)s
-            """,
-            {
-                "user_id": user_id,
-                "garmin_email": garmin_email,
-                "timezone": timezone,
-                "max_heart_rate": max_heart_rate,
-            },
-        )
-
     def record_subjective_feedback(self, user_id: str, feedback: SubjectiveFeedback) -> None:
         self._execute(
             """
             INSERT INTO subjective_feedback (
-                athlete_id,
+                user_id,
                 feedback_date,
                 fatigue_score,
                 soreness_score,
@@ -66,7 +40,7 @@ class UserCoachingStateService:
                 %(pain_notes)s,
                 %(notes)s
             )
-            ON CONFLICT (athlete_id, feedback_date)
+            ON CONFLICT (user_id, feedback_date)
             DO UPDATE SET
                 fatigue_score = EXCLUDED.fatigue_score,
                 soreness_score = EXCLUDED.soreness_score,
@@ -101,7 +75,7 @@ class UserCoachingStateService:
         self._execute(
             """
             INSERT INTO availability_rules (
-                athlete_id,
+                user_id,
                 weekday,
                 is_available,
                 max_duration_minutes,
@@ -114,7 +88,7 @@ class UserCoachingStateService:
                 %(max_duration_minutes)s,
                 %(preferred_session_type)s
             )
-            ON CONFLICT (athlete_id, weekday)
+            ON CONFLICT (user_id, weekday)
             DO UPDATE SET
                 is_available = EXCLUDED.is_available,
                 max_duration_minutes = EXCLUDED.max_duration_minutes,
@@ -150,7 +124,7 @@ class UserCoachingStateService:
         self._execute(
             """
             DELETE FROM training_blocks
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
               AND starts_on = %(starts_on)s
               AND ends_on = %(ends_on)s
             """,
@@ -159,7 +133,7 @@ class UserCoachingStateService:
         self._execute(
             """
             INSERT INTO training_blocks (
-                athlete_id,
+                user_id,
                 phase,
                 starts_on,
                 ends_on,
@@ -204,7 +178,7 @@ class UserCoachingStateService:
             """
             UPDATE race_goals
             SET is_active = FALSE
-            WHERE athlete_id = %(user_id)s
+            WHERE user_id = %(user_id)s
               AND priority = %(priority)s
             """,
             payload,
@@ -212,7 +186,7 @@ class UserCoachingStateService:
         self._execute(
             """
             INSERT INTO race_goals (
-                athlete_id,
+                user_id,
                 goal_name,
                 race_date,
                 distance,
@@ -248,7 +222,7 @@ class UserCoachingStateService:
         self._execute(
             """
             INSERT INTO injury_status (
-                athlete_id,
+                user_id,
                 status_date,
                 injury_area,
                 severity,

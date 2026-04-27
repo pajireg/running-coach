@@ -10,6 +10,7 @@ from .integration_credentials import CredentialCipher, IntegrationCredentialServ
 from .plan_freshness_service import PlanFreshnessService
 from .scheduled_user_jobs import ClaimedUserJob, ScheduledUserJobService
 from .user_coaching_state_service import UserCoachingStateService
+from .user_profile_history_service import UserProfileHistoryService, UserProfileSnapshot
 from .user_service import UserService
 
 __all__ = [
@@ -25,5 +26,7 @@ __all__ = [
     "ClaimedUserJob",
     "ScheduledUserJobService",
     "UserCoachingStateService",
+    "UserProfileHistoryService",
+    "UserProfileSnapshot",
     "UserService",
 ]

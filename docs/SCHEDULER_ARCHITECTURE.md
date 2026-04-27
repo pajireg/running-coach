@@ -33,7 +33,7 @@ user_preferences
   run_mode
 
 scheduled_user_jobs
-  athlete_id
+  user_id
   next_run_at
   lease_until
   locked_by

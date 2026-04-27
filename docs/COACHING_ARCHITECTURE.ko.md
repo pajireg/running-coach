@@ -112,8 +112,18 @@ DB는 애플리케이션의 정본 상태 저장소입니다.
 
 ### 핵심 테이블
 
-- `athletes`
-  - 선수 식별자와 프로필
+- `users`
+  - 사용자 정체성 (external_key, display_name, timezone, locale)
+- `user_preferences`
+  - per-user 앱 동작 설정 (planner_mode, llm_provider/model, schedule_times, run_mode, include_strength, preferred_long_run_day, coaching_policy)
+- `user_profile_history`
+  - 시계열 생리학 스냅샷 (max_heart_rate, resting_heart_rate, vo2_max, lactate_threshold_*, weight_kg, height_cm); 최신값은 `effective_from DESC` 로 조회
+- `user_integration_credentials`
+  - per-user provider 자격증명 (`provider`, `external_account_id`, `encrypted_payload`, `status`); `users` 테이블에 provider별 컬럼을 두지 않음
+- `user_api_keys`
+  - user-facing API 인증용 해시된 API 키
+- `scheduled_user_jobs`
+  - 사용자별 1행, 워커가 lease/backoff 와 함께 due-job claim 에 사용
 - `daily_metrics`
   - 일일 회복, 훈련 상태, 부하 스냅샷
 - `activities`

@@ -82,7 +82,6 @@ Request:
 ```json
 {
   "displayName": "Runner One",
-  "garminEmail": "runner@example.com",
   "timezone": "Asia/Seoul",
   "locale": "ko",
   "scheduleTimes": "05:00,17:00",
@@ -100,7 +99,6 @@ Response:
     "userId": "user-uuid",
     "externalKey": "runner-1",
     "displayName": "Runner One",
-    "garminEmail": "runner@example.com",
     "preferences": {
       "timezone": "Asia/Seoul",
       "locale": "ko",
@@ -114,8 +112,8 @@ Response:
       "llmModel": "gemini-2.5-flash"
     },
     "integrationStatus": {
-      "garmin": "configured",
-      "googleCalendar": "env_compat"
+      "garmin": "active",
+      "googleCalendar": "not_configured"
     }
   }
 }
@@ -149,7 +147,6 @@ Response shape:
     "userId": "user-uuid",
     "externalKey": "runner-1",
     "displayName": "Runner One",
-    "garminEmail": "runner@example.com",
     "preferences": {
       "timezone": "Asia/Seoul",
       "locale": "ko",
@@ -163,8 +160,8 @@ Response shape:
       "llmModel": "gemini-2.5-flash"
     },
     "integrationStatus": {
-      "garmin": "configured",
-      "googleCalendar": "env_compat"
+      "garmin": "active",
+      "googleCalendar": "not_configured"
     }
   },
   "schedule": {
@@ -227,19 +224,21 @@ Response shape:
     {
       "provider": "garmin",
       "displayName": "Garmin Connect",
-      "status": "env_compat",
+      "status": "active",
       "connected": true,
-      "source": "env_compat",
+      "source": "db",
       "capabilities": ["training_data", "workout_delivery"],
+      "externalAccountId": "runner@example.com",
       "lastError": null
     },
     {
       "provider": "google_calendar",
       "displayName": "Google Calendar",
-      "status": "env_compat",
-      "connected": true,
-      "source": "env_compat",
+      "status": "not_configured",
+      "connected": false,
+      "source": "none",
       "capabilities": ["calendar_sync"],
+      "externalAccountId": null,
       "lastError": null
     },
     {

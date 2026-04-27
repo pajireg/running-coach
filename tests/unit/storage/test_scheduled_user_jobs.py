@@ -22,7 +22,6 @@ class QueryCaptureScheduledJobs(ScheduledUserJobService):
                 "user_id": "user-1",
                 "external_key": "runner-1",
                 "display_name": "Runner One",
-                "garmin_email": "runner@example.com",
                 "timezone": "Asia/Seoul",
                 "locale": "ko",
                 "schedule_times": "05:00,17:00",
@@ -64,7 +63,6 @@ def test_claim_due_users_uses_due_index_and_skip_locked_query():
     service = QueryCaptureScheduledJobs()
 
     jobs = service.claim_due_users(
-        deployment_garmin_email="runner@example.com",
         worker_id="worker-1",
         batch_size=10,
         now=datetime(2026, 4, 24, 8, 0, tzinfo=timezone.utc),
@@ -84,5 +82,5 @@ def test_get_status_reads_one_user_schedule_state():
 
     assert status is not None
     assert "FROM scheduled_user_jobs" in service.last_query
-    assert "WHERE athlete_id = %(user_id)s" in service.last_query
+    assert "WHERE user_id = %(user_id)s" in service.last_query
     assert service.last_params == {"user_id": "user-1"}

@@ -64,8 +64,8 @@ class ServiceContainer:
         cls,
         settings: Settings,
         user_context: Optional[UserContext],
-        garmin_email: str | None = None,
-        garmin_password: str | None = None,
+        provider_email: str | None = None,
+        provider_password: str | None = None,
         training_data_provider: TrainingDataProvider | None = None,
         calendar_client: GoogleCalendarClient | None = None,
     ) -> "ServiceContainer":
@@ -73,7 +73,7 @@ class ServiceContainer:
         db = DatabaseClient(settings.database_url)
         history_service = CoachingHistoryService(
             db=db,
-            athlete_key=(
+            external_key=(
                 user_context.external_key
                 if user_context is not None
                 else settings.garmin_email.lower()
@@ -83,7 +83,7 @@ class ServiceContainer:
         context_builder = CoachingContextBuilder(history_service=history_service)
         plan_freshness_service = PlanFreshnessService(
             db=db,
-            athlete_key=history_service.athlete_key,
+            external_key=history_service.external_key,
             timezone=history_service.timezone,
         )
         history_read_service = HistoryReadService(
@@ -132,13 +132,8 @@ class ServiceContainer:
         resolved_training_data_provider = training_data_provider or cast(
             TrainingDataProvider,
             GarminClient(
-                email=garmin_email
-                or (
-                    user_context.garmin_email
-                    if user_context is not None and user_context.garmin_email
-                    else settings.garmin_email
-                ),
-                password=garmin_password or settings.garmin_password,
+                email=provider_email or settings.garmin_email,
+                password=provider_password or settings.garmin_password,
                 settings=settings,
             ),
         )

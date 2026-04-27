@@ -26,7 +26,6 @@ class FakeUserService(UserService):
             user_id="user-1",
             external_key="runner-1",
             display_name="Runner One",
-            garmin_email="runner@example.com",
             timezone="Asia/Seoul",
             locale="ko",
             schedule_times="05:00,17:00",
@@ -36,7 +35,6 @@ class FakeUserService(UserService):
 
     def create_user(self, payload: UserCreateRequest):  # type: ignore[override]
         self.record.display_name = payload.display_name
-        self.record.garmin_email = payload.garmin_email
         self.record.timezone = payload.timezone
         self.record.locale = payload.locale
         self.record.schedule_times = payload.schedule_times
@@ -47,8 +45,7 @@ class FakeUserService(UserService):
         assert user_id == "user-1"
         return self.record
 
-    def list_runnable_users(self, *, deployment_garmin_email: str | None):  # type: ignore[override]
-        assert deployment_garmin_email == "runner@example.com"
+    def list_runnable_users(self):  # type: ignore[override]
         return [self.record]
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserRecord:  # type: ignore[override]
@@ -63,13 +60,10 @@ class FakeUserService(UserService):
             self.record.run_mode = patch.run_mode
         if "include_strength" in patch.model_fields_set:
             self.record.include_strength = patch.include_strength
-        if "garmin_email" in patch.model_fields_set:
-            self.record.garmin_email = patch.garmin_email
         return self.record
 
     def upsert_runtime_user(self, **kwargs) -> UserRecord:  # type: ignore[override]
         self.record.external_key = kwargs["external_key"]
-        self.record.garmin_email = kwargs["garmin_email"]
         self.record.timezone = kwargs["timezone"]
         self.record.locale = kwargs["locale"]
         self.record.schedule_times = kwargs["schedule_times"]
@@ -138,7 +132,7 @@ class FakeAdminSettings:
 class FakeCoachingService(CoachingApplicationService):
     def __init__(self):
         super().__init__(
-            settings=SimpleNamespace(garmin_email="runner@example.com", max_heart_rate=None),  # type: ignore[arg-type]
+            settings=SimpleNamespace(),  # type: ignore[arg-type]
             user_state_service=SimpleNamespace(db=SimpleNamespace(ping=lambda: None)),  # type: ignore[arg-type]
         )
         self.last_sync = None
@@ -178,19 +172,32 @@ class FakeIntegrationCredentials:
         self.statuses = statuses or {}
         self.records = records or []
         self.deleted: list[tuple[str, str]] = []
+        self.upserted: list[dict] = []
 
     def get_statuses(self, user_id: str):
-        assert user_id == "user-1"
         return self.statuses
 
     def list_credentials(self, user_id: str):
-        assert user_id == "user-1"
-        return self.records
+        return [record for record in self.records if record.user_id == user_id]
 
-    def upsert_payload(self, user_id: str, provider: str, payload: dict, *, status: str):
-        assert user_id == "user-1"
-        assert provider == "garmin"
-        assert payload == {"email": "new@example.com", "password": "secret-password"}
+    def upsert_payload(
+        self,
+        user_id: str,
+        provider: str,
+        payload: dict,
+        *,
+        status: str,
+        external_account_id: str | None = None,
+    ):
+        self.upserted.append(
+            {
+                "user_id": user_id,
+                "provider": provider,
+                "payload": payload,
+                "status": status,
+                "external_account_id": external_account_id,
+            }
+        )
         self.records = [
             record
             for record in self.records
@@ -199,15 +206,14 @@ class FakeIntegrationCredentials:
         self.records.append(
             IntegrationCredentialRecord(
                 user_id=user_id,
-                provider="garmin",
+                provider=provider,  # type: ignore[arg-type]
                 encrypted_payload="encrypted",
-                status="active",
+                status=status,  # type: ignore[arg-type]
+                external_account_id=external_account_id,
             )
         )
 
     def delete_credential(self, user_id: str, provider: str):
-        assert user_id == "user-1"
-        assert provider == "garmin"
         self.deleted.append((user_id, provider))
         self.records = [
             record
@@ -230,6 +236,7 @@ def _service(
         admin_settings=admin_settings,  # type: ignore[arg-type]
         settings=SimpleNamespace(
             garmin_email="runner@example.com",
+            garmin_password="secret",
             schedule_times=schedule_times,
             service_run_mode="auto",
             include_strength=include_strength,
@@ -286,7 +293,7 @@ def test_update_user_preferences_exposes_run_mode():
     assert service.get_user_context("user-1").run_mode == "plan"
 
 
-def test_profile_integration_status_prefers_db_status_over_env_fallback():
+def test_profile_integration_status_reflects_db_status():
     service, _, _ = _service(
         integration_statuses={
             "garmin": "reauth_required",
@@ -298,6 +305,15 @@ def test_profile_integration_status_prefers_db_status_over_env_fallback():
 
     assert profile.integration_status.garmin == "reauth_required"
     assert profile.integration_status.google_calendar == "disabled"
+
+
+def test_profile_integration_status_defaults_to_not_configured():
+    service, _, _ = _service()
+
+    profile = service.get_user_profile("user-1")
+
+    assert profile.integration_status.garmin == "not_configured"
+    assert profile.integration_status.google_calendar == "not_configured"
 
 
 def test_get_dashboard_returns_schedule_and_empty_history_when_uninitialized():
@@ -319,6 +335,7 @@ def test_get_integrations_returns_provider_inventory_with_db_statuses():
                 provider="garmin",
                 encrypted_payload="encrypted",
                 status="reauth_required",
+                external_account_id="runner@example.com",
                 last_error="expired",
             )
         ]
@@ -330,25 +347,26 @@ def test_get_integrations_returns_provider_inventory_with_db_statuses():
     assert by_provider["garmin"].status == "reauth_required"
     assert by_provider["garmin"].connected is False
     assert by_provider["garmin"].source == "db"
+    assert by_provider["garmin"].external_account_id == "runner@example.com"
     assert by_provider["garmin"].last_error == "expired"
     assert by_provider["healthkit"].status == "coming_soon"
     assert by_provider["healthkit"].source == "planned"
 
 
-def test_get_integrations_exposes_env_compat_connections_without_secrets():
+def test_get_integrations_defaults_unconfigured_providers():
     service, _, _ = _service()
 
     response = service.get_integrations("user-1")
     by_provider = {item.provider: item for item in response.integrations}
 
-    assert by_provider["garmin"].status == "env_compat"
-    assert by_provider["garmin"].connected is True
-    assert by_provider["google_calendar"].status == "env_compat"
-    assert by_provider["google_calendar"].connected is True
+    assert by_provider["garmin"].status == "not_configured"
+    assert by_provider["garmin"].connected is False
+    assert by_provider["google_calendar"].status == "not_configured"
+    assert by_provider["google_calendar"].connected is False
     assert not hasattr(by_provider["garmin"], "encrypted_payload")
 
 
-def test_connect_garmin_stores_encrypted_credential_and_updates_profile_email():
+def test_connect_garmin_stores_encrypted_credential_with_external_account_id():
     service, _, _ = _service()
 
     response = service.connect_garmin(
@@ -357,13 +375,13 @@ def test_connect_garmin_stores_encrypted_credential_and_updates_profile_email():
     )
     by_provider = {item.provider: item for item in response.integrations}
 
-    assert service.get_user_profile("user-1").garmin_email == "new@example.com"
     assert by_provider["garmin"].status == "active"
     assert by_provider["garmin"].source == "db"
     assert by_provider["garmin"].connected is True
+    assert by_provider["garmin"].external_account_id == "new@example.com"
 
 
-def test_disconnect_garmin_removes_credential_and_profile_email():
+def test_disconnect_garmin_removes_credential():
     service, _, _ = _service(
         integration_records=[
             IntegrationCredentialRecord(
@@ -371,6 +389,7 @@ def test_disconnect_garmin_removes_credential_and_profile_email():
                 provider="garmin",
                 encrypted_payload="encrypted",
                 status="active",
+                external_account_id="runner@example.com",
             )
         ]
     )
@@ -378,7 +397,6 @@ def test_disconnect_garmin_removes_credential_and_profile_email():
     response = service.disconnect_garmin("user-1")
     by_provider = {item.provider: item for item in response.integrations}
 
-    assert service.get_user_profile("user-1").garmin_email is None
     assert by_provider["garmin"].status == "not_configured"
     assert by_provider["garmin"].connected is False
 
@@ -408,7 +426,7 @@ def test_coaching_service_uses_runtime_factory_for_user_run():
         or SimpleNamespace()
     )
     service = CoachingApplicationService(
-        settings=SimpleNamespace(max_heart_rate=None),  # type: ignore[arg-type]
+        settings=SimpleNamespace(),  # type: ignore[arg-type]
         user_state_service=SimpleNamespace(db=SimpleNamespace(ping=lambda: None)),  # type: ignore[arg-type]
         runtime_factory=runtime_factory,
     )

@@ -12,8 +12,8 @@ class _RecordingHistoryService(CoachingHistoryService):
         super().__init__(_FakeDb(), "user@example.com")
         self.executed = []
 
-    def _athlete_id(self) -> str:  # type: ignore[override]
-        return "athlete-1"
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
 
     def _execute(self, query: str, params: dict[str, object]) -> None:  # type: ignore[override]
         self.executed.append((query, params))

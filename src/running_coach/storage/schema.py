@@ -64,6 +64,15 @@ def _split_sql_statements(sql: str) -> list[str]:
             index += 1
             continue
 
+        if not in_single_quote and char == "-" and sql.startswith("--", index):
+            newline = sql.find("\n", index)
+            if newline == -1:
+                index = len(sql)
+            else:
+                current.append("\n")
+                index = newline + 1
+            continue
+
         if not in_single_quote and char == "$":
             end = sql.find("$", index + 1)
             if end != -1:
