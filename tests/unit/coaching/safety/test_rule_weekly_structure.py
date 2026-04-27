@@ -1,4 +1,4 @@
-"""LongRunCap + HardSessionCap + MinRestDays."""
+"""LongRunCap + HardSessionCap + rest day structure rules."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from running_coach.coaching.context import PlanPolicy
 from running_coach.coaching.safety.rules import (
     HardSessionCap,
     LongRunCap,
+    MaxConsecutiveRestDays,
     MinRestDays,
     PreferLongRunAvailability,
 )
@@ -146,3 +147,41 @@ class TestMinRestDays:
         assert len(rest_days) == 2
         assert rule.check(fixed, ctx) == []
         assert "최소 2일" in rule.describe(ctx)
+
+
+class TestMaxConsecutiveRestDays:
+    def test_detects_three_available_rest_days_in_a_row(self, healthy_ctx):
+        plan = make_plan(["rest", "quality", "rest", "rest", "rest", "long_run", "recovery"])
+
+        violations = MaxConsecutiveRestDays().check(plan, healthy_ctx)
+
+        assert [v.day_index for v in violations] == [3]
+
+    def test_corrector_inserts_short_recovery_run(self, healthy_ctx):
+        rule = MaxConsecutiveRestDays()
+        plan = make_plan(["rest", "quality", "rest", "rest", "rest", "long_run", "recovery"])
+
+        fixed = rule.correct(plan, healthy_ctx, rule.check(plan, healthy_ctx))
+
+        assert fixed.plan[3].session_type == "recovery"
+        assert fixed.plan[3].planned_minutes == 30
+        assert rule.check(fixed, healthy_ctx) == []
+
+    def test_allows_rest_streak_when_only_unavailable_days_can_break_it(self, healthy_ctx):
+        ctx = replace(
+            healthy_ctx,
+            availability={
+                **healthy_ctx.availability,
+                2: replace(healthy_ctx.availability[2], is_available=False),
+                3: replace(healthy_ctx.availability[3], is_available=False),
+                4: replace(healthy_ctx.availability[4], is_available=False),
+            },
+        )
+        plan = make_plan(["rest", "quality", "rest", "rest", "rest", "long_run", "recovery"])
+
+        assert MaxConsecutiveRestDays().check(plan, ctx) == []
+
+    def test_allows_rest_streak_for_severe_active_injury(self, injured_ctx):
+        plan = make_plan(["rest", "quality", "rest", "rest", "rest", "long_run", "recovery"])
+
+        assert MaxConsecutiveRestDays().check(plan, injured_ctx) == []

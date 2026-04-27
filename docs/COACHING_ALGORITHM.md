@@ -65,6 +65,10 @@ The system works in four layers:
 - recent 7-day and 30-day running volume
 - recent non-running duration
 
+Completed activity distance and duration are taken from Garmin activity summaries,
+not Garmin calendar activity rows. Calendar activity fields can use inconsistent
+units, so they are not treated as canonical coaching input.
+
 ### User-provided constraints
 
 - `availability_rules`
@@ -573,6 +577,8 @@ The LLM is not allowed to:
 - move dates
 - change session type
 - create unsafe volume spikes
+- create long passive rest streaks when the athlete is available and has no
+  severe active injury
 - break hard constraints from rules, injuries, or availability
 
 After generation, output is normalized again:

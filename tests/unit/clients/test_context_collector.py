@@ -45,7 +45,7 @@ def test_collect_converts_distances_and_preserves_schedule_details():
                     "date": six_days_ago.isoformat(),
                     "itemType": "activity",
                     "title": "Morning Run",
-                    "distance": 12000,
+                    "distance": 823.79,
                     "elapsedDuration": 3600,
                     "averageHR": 150,
                 },
@@ -59,6 +59,7 @@ def test_collect_converts_distances_and_preserves_schedule_details():
                     "distance": 12000,
                     "duration": 3600,
                     "calories": 500,
+                    "averageHR": 150,
                 },
                 {
                     "activityId": 101,
@@ -79,6 +80,7 @@ def test_collect_converts_distances_and_preserves_schedule_details():
     assert context.yesterday_planned[0].title == "Running Coach: Tempo"
     activity_item = next(item for item in context.current_schedule if item.type == "activity")
     assert activity_item.details == "(12.0km, 1h 0m 0s, HR: 150)"
+    assert not any("823.79km" in item for item in context.to_dict()["current_schedule"])
     assert context.recent_7d_run_distance_km == 12.0
     assert context.recent_30d_run_count == 1
     assert context.recent_7d_non_running_duration_minutes == 90

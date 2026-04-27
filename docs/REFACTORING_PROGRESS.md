@@ -141,6 +141,13 @@ toward the target architecture in
     by itself;
   - workout step durations are normalized before persistence/upload so steady
     Garmin steps do not display odd second values such as `9m22s`.
+- Fixed canonical activity context and passive plan shape:
+  - completed activity rows in Garmin calendar are no longer used as canonical
+    distance/duration input because their units can differ from activity
+    summaries;
+  - the planner safety layer now rejects 3+ consecutive rest days when the user
+    is available and has no severe active injury, inserting a short recovery run
+    instead.
 
 ### What this enables
 

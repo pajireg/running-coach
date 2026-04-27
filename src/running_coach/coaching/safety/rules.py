@@ -826,6 +826,71 @@ class MinRestDays:
         return f"7일 계획 범위에서 최소 {ctx.plan_policy.min_rest_days}일 휴식을 보장합니다."
 
 
+class MaxConsecutiveRestDays:
+    """Avoid passive plans with long rest streaks unless availability/injury requires them."""
+
+    rule_id = "max_consecutive_rest_days"
+    severity: Severity = "block"
+    max_rest_days = 2
+
+    def check(self, plan, ctx):
+        if ctx.scores.active_injury_severity >= 6:
+            return []
+        out: list[Violation] = []
+        streak: list[int] = []
+        for i, day in enumerate(plan.plan):
+            if day.session_type == "rest":
+                streak.append(i)
+                continue
+            self._append_violation_for_streak(plan, ctx, streak, out)
+            streak = []
+        self._append_violation_for_streak(plan, ctx, streak, out)
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            slot = ctx.availability_for(day.date.weekday())
+            planned_minutes = min(slot.max_duration_minutes or 30, 30)
+            new_day = _rebuild_day(
+                day,
+                "recovery",
+                ctx.pace_zones,
+                planned_minutes=max(20, planned_minutes),
+                ctx=ctx,
+            )
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return (
+            "부상이나 불가 요일이 아닌 경우 3일 이상 연속 rest 를 만들지 않고 "
+            "짧은 recovery run 으로 리듬을 유지합니다."
+        )
+
+    def _append_violation_for_streak(self, plan, ctx, streak, out) -> None:
+        if len(streak) <= self.max_rest_days:
+            return
+        candidates = [
+            i
+            for i in streak[1:-1] or streak
+            if ctx.availability_for(plan.plan[i].date.weekday()).is_available
+        ]
+        if not candidates:
+            return
+        target = candidates[len(candidates) // 2]
+        out.append(
+            Violation(
+                rule_id=self.rule_id,
+                severity=self.severity,
+                message=f"rest streak {len(streak)} days; inserting recovery on day {target}",
+                day_index=target,
+            )
+        )
+
+
 class AcwrCap:
     """7일 계획 러닝 km / chronic_7d > 사용자 정책 상한 → duration 균등 축소.
 
@@ -1424,6 +1489,7 @@ DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     HardSessionCap(),
     RespectUnavailability(),
     MinRestDays(),
+    MaxConsecutiveRestDays(),
     AcwrCap(),
     MaxDurationPerDay(),
     NonRestHasSteps(),

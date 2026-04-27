@@ -170,34 +170,18 @@ class ContextDataCollector:
                 # 최근 30일 이내인지 확인
                 if thirty_days_ago <= item_date <= target_date:
                     item_type = item.get("itemType")
-                    if item_type in ["workout", "activity"]:
-                        summary = ""
-                        if item_type == "activity":
-                            raw_dist = item.get("activeSplitSummaryDistance") or item.get(
-                                "distance"
-                            )
-                            dist_km = self._calendar_distance_to_km(raw_dist)
-
-                            raw_dur = item.get("elapsedDuration") or (
-                                self._calendar_duration_to_seconds(item.get("duration"))
-                            )
-                            h = int(raw_dur // 3600)
-                            m = int((raw_dur % 3600) // 60)
-                            s = int(raw_dur % 60)
-                            dur_str = f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
-
-                            avg_hr = item.get("averageHR", "N/A")
-                            summary = f"({dist_km}km, {dur_str}, HR: {avg_hr})"
-
+                    if item_type == "workout":
                         schedule_items.append(
                             ScheduleItem(
                                 date=item_date,
                                 title=item.get("title") or "",
-                                type=item_type,
-                                details=summary,
+                                type="workout",
+                                details="",
                             )
                         )
                         seen_ids.add(item_id)
+
+            schedule_items.extend(self._activity_schedule_items(thirty_days_ago, target_date))
 
             # 날짜순 정렬
             schedule_items.sort(key=lambda x: x.date)
@@ -207,6 +191,48 @@ class ContextDataCollector:
 
         except Exception as e:
             logger.warning(f"최근 일정 수집 실패: {e}")
+            return []
+
+    def _activity_schedule_items(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[ScheduleItem]:
+        """Build completed activity schedule rows from activity summaries, not calendar items."""
+        try:
+            items: list[ScheduleItem] = []
+            all_activities = self.garmin.get_activities(0, 200)
+            for act in all_activities:
+                start_time = self._parse_start_time(act.get("startTimeLocal"))
+                if start_time is None:
+                    continue
+                activity_date = start_time.date()
+                if activity_date < start_date or activity_date > end_date:
+                    continue
+                activity_type = act.get("activityType", {})
+                type_key = activity_type.get("typeKey") if isinstance(activity_type, dict) else None
+                if type_key not in RUNNING_TYPES and type_key not in CROSS_TRAINING_TYPES:
+                    continue
+
+                distance_km = self._meters_to_km(act.get("distance"))
+                raw_duration = float(act.get("duration") or 0)
+                h = int(raw_duration // 3600)
+                m = int((raw_duration % 3600) // 60)
+                s = int(raw_duration % 60)
+                dur_str = f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
+                avg_hr = act.get("averageHR", "N/A")
+                distance_label = f"{distance_km}km" if distance_km is not None else "거리 N/A"
+                items.append(
+                    ScheduleItem(
+                        date=activity_date,
+                        title=act.get("activityName") or "",
+                        type="activity",
+                        details=f"({distance_label}, {dur_str}, HR: {avg_hr})",
+                    )
+                )
+            return items
+        except Exception as e:
+            logger.warning(f"최근 활동 일정 수집 실패: {e}")
             return []
 
     def _get_recent_running_activities(self, target_date: date) -> List[Activity]:
@@ -353,28 +379,6 @@ class ContextDataCollector:
             return float(prefix.strip(" ("))
         except ValueError:
             return 0.0
-
-    @staticmethod
-    def _calendar_distance_to_km(value) -> float:
-        """캘린더 distance를 km로 정규화."""
-        if not value:
-            return 0.0
-        raw = float(value)
-        if raw >= 100000:
-            return round(raw / 100000, 2)
-        if raw >= 1000:
-            return round(raw / 1000, 2)
-        return round(raw, 2)
-
-    @staticmethod
-    def _calendar_duration_to_seconds(value) -> float:
-        """캘린더 duration 값을 초 단위로 정규화."""
-        if not value:
-            return 0.0
-        raw = float(value)
-        if raw >= 10000:
-            return raw / 1000
-        return raw
 
     @staticmethod
     def _parse_start_time(value) -> Optional[datetime]:
