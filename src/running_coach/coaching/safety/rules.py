@@ -154,6 +154,51 @@ def _build_step(
     )
 
 
+def _duration_granularity(step_type: str) -> int:
+    if step_type in {"Warmup", "Run", "Cooldown"}:
+        return 60
+    return 30
+
+
+def _round_duration(duration_seconds: int, granularity: int) -> int:
+    rounded = int((duration_seconds + (granularity / 2)) // granularity) * granularity
+    return max(60, rounded)
+
+
+def _normalize_step_durations(steps):
+    """Round executable step durations while preserving the workout's rounded total."""
+    if not steps:
+        return steps
+
+    original_total = sum(s.duration_value for s in steps)
+    target_total = _round_duration(original_total, 60)
+    new_durations = [
+        _round_duration(s.duration_value, _duration_granularity(s.type))
+        for s in steps
+    ]
+    delta = target_total - sum(new_durations)
+    if delta:
+        adjustable_indices = [
+            i for i, step in enumerate(steps) if step.type in {"Run", "Interval", "Recovery"}
+        ]
+        if not adjustable_indices:
+            adjustable_indices = list(range(len(steps)))
+        target_idx = max(adjustable_indices, key=lambda i: new_durations[i])
+        granularity = _duration_granularity(steps[target_idx].type)
+        adjusted = max(60, new_durations[target_idx] + delta)
+        new_durations[target_idx] = _round_duration(adjusted, granularity)
+
+    return [
+        _build_step(
+            s.type,
+            new_duration,
+            s.target_value or "0:00",
+            target_type=s.target_type,
+        )
+        for s, new_duration in zip(steps, new_durations)
+    ]
+
+
 def _default_steps_for(
     session_type: str,
     target_seconds: int,
@@ -1041,6 +1086,55 @@ class MinStepDuration:
         return "각 step duration 은 최소 60초입니다."
 
 
+class StepDurationGranularity:
+    """Garmin-visible steady steps should not show odd second values."""
+
+    rule_id = "step_duration_granularity"
+    severity: Severity = "warn"
+
+    def check(self, plan, ctx):
+        out: list[Violation] = []
+        for i, day in enumerate(plan.plan):
+            if day.session_type == "rest":
+                continue
+            for step in day.workout.steps:
+                granularity = _duration_granularity(step.type)
+                if step.duration_value % granularity != 0:
+                    out.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            severity=self.severity,
+                            message=(
+                                f"day {i} {step.type} duration "
+                                f"{step.duration_value}s not {granularity}s granular"
+                            ),
+                            day_index=i,
+                        )
+                    )
+                    break
+        return out
+
+    def correct(self, plan, ctx, violations):
+        for v in violations:
+            if v.day_index is None:
+                continue
+            day = plan.plan[v.day_index]
+            new_steps = _normalize_step_durations(day.workout.steps)
+            new_workout = day.workout.model_copy(update={"steps": new_steps})
+            new_minutes = sum(s.duration_value for s in new_steps) // 60
+            new_day = day.model_copy(
+                update={"workout": new_workout, "planned_minutes": new_minutes}
+            )
+            plan = _replace_day(plan, v.day_index, new_day)
+        return plan
+
+    def describe(self, ctx):
+        return (
+            "Garmin 표시가 어색하지 않도록 Warmup/Run/Cooldown 은 분 단위, "
+            "반복 구간은 30초 단위 duration 으로 맞춥니다."
+        )
+
+
 class PaceBandIntegrity:
     """step pace 가 선수의 pace safety band 밖이면 해당 스텝만 경계값으로 보정.
 
@@ -1335,6 +1429,7 @@ DEFAULT_SAFETY_RULES: list[SafetyRule] = [
     NonRestHasSteps(),
     InjuryReduceVolume(),
     MinStepDuration(),
+    StepDurationGranularity(),
     PaceBandIntegrity(),
     StandardizeWorkoutName(),  # 마지막: 구조 변경 다 끝난 후 이름 정규화
 ]

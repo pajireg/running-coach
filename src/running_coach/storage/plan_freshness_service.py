@@ -237,7 +237,12 @@ class PlanFreshnessService(AthleteScopedStore):
         has_missed_planned_workout = missed_workout_count > 0
         has_missed_key_workout = missed_key_workout_count > 0
         has_missed_base_volume = missed_base_count >= 2
-        should_replan_for_missed_workout = has_missed_key_workout or has_missed_base_volume
+        has_repeated_missed_workouts = missed_workout_count >= 2
+        should_replan_for_missed_workout = (
+            has_missed_key_workout
+            or has_missed_base_volume
+            or has_repeated_missed_workouts
+        )
 
         should_extend_plan = (
             has_active_plan
@@ -269,6 +274,8 @@ class PlanFreshnessService(AthleteScopedStore):
             reasons.append("missed_key_workout")
         elif has_missed_base_volume:
             reasons.append("missed_base_volume")
+        elif has_repeated_missed_workouts:
+            reasons.append("repeated_missed_workouts")
 
         return {
             "asOf": as_of.isoformat(),
@@ -296,6 +303,7 @@ class PlanFreshnessService(AthleteScopedStore):
             "missedKeyWorkoutCount": missed_key_workout_count,
             "hasMissedPlannedWorkout": has_missed_planned_workout,
             "hasMissedKeyWorkout": has_missed_key_workout,
+            "hasRepeatedMissedWorkouts": has_repeated_missed_workouts,
             "shouldReplanForMissedWorkout": should_replan_for_missed_workout,
             "activityIsNormalExecution": activity_is_normal_execution,
             "shouldExtendPlan": should_extend_plan,

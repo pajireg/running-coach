@@ -302,6 +302,26 @@ def test_summarize_plan_freshness_does_not_replan_after_single_missed_recovery()
     assert freshness["reasons"] == []
 
 
+def test_summarize_plan_freshness_replans_after_repeated_missed_recovery_runs():
+    service = _FreshnessHistoryService(
+        {
+            "active_plan_days": 7,
+            "last_plan_created_at": datetime(2026, 4, 18, 8, tzinfo=timezone.utc),
+            "last_plan_decision_date": date(2026, 4, 18),
+            "latest_activity_created_at": datetime(2026, 4, 17, 8, tzinfo=timezone.utc),
+            "missed_workout_count": 2,
+            "missed_recovery_count": 2,
+        }
+    )
+
+    freshness = service.summarize_plan_freshness(date(2026, 4, 21))
+
+    assert freshness["hasRepeatedMissedWorkouts"] is True
+    assert freshness["shouldReplanForMissedWorkout"] is True
+    assert freshness["shouldGeneratePlan"] is True
+    assert freshness["reasons"] == ["repeated_missed_workouts"]
+
+
 def test_summarize_plan_freshness_replans_after_repeated_missed_base_runs():
     service = _FreshnessHistoryService(
         {

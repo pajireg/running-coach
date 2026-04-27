@@ -1,4 +1,4 @@
-"""NonRestHasSteps + MinStepDuration + PaceBandIntegrity."""
+"""NonRestHasSteps + MinStepDuration + duration granularity + PaceBandIntegrity."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from running_coach.coaching.safety.rules import (
     MinStepDuration,
     NonRestHasSteps,
     PaceBandIntegrity,
+    StepDurationGranularity,
 )
 from running_coach.models.training import DailyPlan, TrainingPlan, Workout
 
@@ -80,6 +81,47 @@ class TestMinStepDuration:
         violations = rule.check(plan, healthy_ctx)
         fixed = rule.correct(plan, healthy_ctx, violations)
         assert all(s.duration_value >= 60 for s in fixed.plan[0].workout.steps)
+        assert rule.check(fixed, healthy_ctx) == []
+
+
+class TestStepDurationGranularity:
+    def test_detects_odd_steady_step_seconds(self, healthy_ctx):
+        days = make_plan(["base"] * 6 + ["rest"]).plan
+        days[0] = make_day(
+            days[0].date,
+            "base",
+            steps=[
+                make_step("Warmup", 562, "7:00"),
+                make_step("Run", 1687, "6:45"),
+                make_step("Cooldown", 281, "7:20"),
+            ],
+        )
+        plan = TrainingPlan(plan=days)
+
+        violations = StepDurationGranularity().check(plan, healthy_ctx)
+
+        assert len(violations) == 1
+        assert violations[0].day_index == 0
+
+    def test_corrector_rounds_steady_steps_to_minutes(self, healthy_ctx):
+        rule = StepDurationGranularity()
+        days = make_plan(["base"] * 6 + ["rest"]).plan
+        days[0] = make_day(
+            days[0].date,
+            "base",
+            steps=[
+                make_step("Warmup", 562, "7:00"),
+                make_step("Run", 1687, "6:45"),
+                make_step("Cooldown", 281, "7:20"),
+            ],
+        )
+        plan = TrainingPlan(plan=days)
+
+        fixed = rule.correct(plan, healthy_ctx, rule.check(plan, healthy_ctx))
+        durations = [s.duration_value for s in fixed.plan[0].workout.steps]
+
+        assert durations == [540, 1680, 300]
+        assert fixed.plan[0].planned_minutes == 42
         assert rule.check(fixed, healthy_ctx) == []
 
 

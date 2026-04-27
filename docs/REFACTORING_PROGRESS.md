@@ -134,6 +134,13 @@ toward the target architecture in
     row and clears the profile Garmin email;
   - responses return the provider inventory only and never echo submitted
     passwords.
+- Tightened coaching refresh and Garmin-visible workout quality:
+  - repeated missed planned workouts now trigger `replan` even when they are not
+    key sessions;
+  - a single missed recovery run still counts as extra rest and does not replan
+    by itself;
+  - workout step durations are normalized before persistence/upload so steady
+    Garmin steps do not display odd second values such as `9m22s`.
 
 ### What this enables
 
