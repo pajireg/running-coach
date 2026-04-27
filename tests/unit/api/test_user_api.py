@@ -139,6 +139,21 @@ class FakeUserApplicationService:
         assert user_id == "user-1"
         return self.integrations
 
+    def connect_garmin(self, user_id: str, payload) -> UserIntegrationsResponse:
+        assert user_id == "user-1"
+        assert payload.email == "runner@example.com"
+        assert payload.password == "secret-password"
+        self.integrations.integrations[0].status = "active"
+        self.integrations.integrations[0].source = "db"
+        return self.integrations
+
+    def disconnect_garmin(self, user_id: str) -> UserIntegrationsResponse:
+        assert user_id == "user-1"
+        self.integrations.integrations[0].status = "not_configured"
+        self.integrations.integrations[0].connected = False
+        self.integrations.integrations[0].source = "none"
+        return self.integrations
+
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
         assert user_id == "user-1"
         if patch.display_name is not None:
@@ -245,6 +260,34 @@ def test_get_me_integrations_returns_provider_inventory():
     assert response.json()["integrations"][0]["connected"] is True
     assert response.json()["integrations"][1]["provider"] == "healthkit"
     assert response.json()["integrations"][1]["status"] == "coming_soon"
+
+
+def test_connect_garmin_uses_secret_payload_without_echoing_password():
+    client = _client()
+
+    response = client.put(
+        "/v1/me/integrations/garmin",
+        headers={"Authorization": "Bearer rcu_test"},
+        json={"email": "runner@example.com", "password": "secret-password"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["integrations"][0]["provider"] == "garmin"
+    assert response.json()["integrations"][0]["status"] == "active"
+    assert "secret-password" not in response.text
+
+
+def test_disconnect_garmin_returns_updated_provider_inventory():
+    client = _client()
+
+    response = client.delete(
+        "/v1/me/integrations/garmin",
+        headers={"Authorization": "Bearer rcu_test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["integrations"][0]["provider"] == "garmin"
+    assert response.json()["integrations"][0]["connected"] is False
 
 
 def test_patch_me_preferences_updates_profile():

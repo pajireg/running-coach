@@ -28,14 +28,15 @@ The backend currently exposes enough API surface for an initial app shell:
 - user profile;
 - app dashboard summary;
 - provider integration inventory;
+- Garmin credential connect/disconnect;
 - preference updates;
 - manual sync trigger;
 - coaching input mutations for feedback, availability, goals, blocks, and
   injuries.
 
 This is not yet a production mobile backend. The biggest missing pieces are
-real mobile auth, credential registration flows, and native HealthKit/Health
-Connect ingestion.
+real mobile auth, Garmin credential validation/reauth UX, Google OAuth, and
+native HealthKit/Health Connect ingestion.
 
 ## Authentication
 
@@ -57,6 +58,8 @@ Build these screens first:
 
 - Home dashboard: consume `GET /v1/me/dashboard`.
 - Integration status: consume `GET /v1/me/integrations`.
+- Garmin connect/disconnect: use `PUT /v1/me/integrations/garmin` and
+  `DELETE /v1/me/integrations/garmin`.
 - Preferences/settings: consume `GET /v1/me` and `PATCH /v1/me/preferences`.
 - Daily feedback input: submit `POST /v1/me/feedback`.
 - Availability editor: submit `POST /v1/me/availability`.
@@ -299,6 +302,36 @@ Known source values:
 
 The app must never expect credential payloads or tokens from this endpoint.
 
+### `PUT /v1/me/integrations/garmin`
+
+Stores a per-user Garmin credential payload and returns the updated provider
+inventory.
+
+Request:
+
+```json
+{
+  "email": "runner@example.com",
+  "password": "garmin-password"
+}
+```
+
+Response shape is the same as `GET /v1/me/integrations`.
+
+Important:
+
+- the password is encrypted at rest when `APP_ENCRYPTION_KEY` is configured;
+- the password is never returned by the API;
+- this endpoint does not perform live Garmin login validation yet;
+- if backend encryption is not configured, the endpoint returns `409`.
+
+### `DELETE /v1/me/integrations/garmin`
+
+Removes the user's stored Garmin credential row, clears the profile Garmin
+email, and returns the updated provider inventory.
+
+Response shape is the same as `GET /v1/me/integrations`.
+
 ### `PATCH /v1/me/preferences`
 
 Updates user-visible preferences.
@@ -459,8 +492,9 @@ Integrations screen:
 - use `connected` as the primary UI boolean;
 - show `reauth_required` and `error` as attention states;
 - show `coming_soon` as disabled/planned provider state;
-- do not ask for Garmin/Google credentials yet because backend write APIs are
-  not implemented.
+- allow Garmin credential entry and disconnect;
+- do not ask for Google credentials yet because Google OAuth write APIs are not
+  implemented.
 
 Settings screen:
 
@@ -481,7 +515,7 @@ Feedback screen:
 Do not implement these flows until backend support is added:
 
 - production login/session/refresh-token flow;
-- Garmin credential registration, deletion, or reauth flow;
+- live Garmin login validation or reauth flow;
 - Google OAuth flow;
 - HealthKit data upload;
 - Health Connect data upload;
@@ -526,7 +560,7 @@ Build a local app prototype with:
 After that, request backend support for:
 
 1. production auth;
-2. Garmin credential connect/disconnect;
+2. live Garmin credential validation and reauth handling;
 3. native health data ingestion contract for HealthKit and Health Connect;
-4. push notification preferences.
-
+4. Google OAuth connect/disconnect;
+5. push notification preferences.

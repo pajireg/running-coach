@@ -127,6 +127,13 @@ toward the target architecture in
   - HealthKit, Health Connect, and Google Fit appear as planned providers so
     the mobile app can render the long-term integration model before concrete
     provider adapters exist.
+- Added Garmin connect/disconnect API:
+  - `PUT /v1/me/integrations/garmin` stores encrypted per-user Garmin
+    credentials and updates the user's Garmin email;
+  - `DELETE /v1/me/integrations/garmin` removes the per-user Garmin credential
+    row and clears the profile Garmin email;
+  - responses return the provider inventory only and never echo submitted
+    passwords.
 
 ### What this enables
 
@@ -146,10 +153,13 @@ toward the target architecture in
   - transport surfaces such as CLI and HTTP
   - app-facing read contracts vs background execution internals
   - provider integration inventory vs provider credential payload storage
+  - provider credential mutation API vs provider runtime validation
 
 ### Still not done
 
 - Per-user Garmin token/session migration into the database
+- Active Garmin credential validation/re-auth flow beyond encrypted credential
+  storage.
 - Persist refreshed per-user Google OAuth tokens back into the credential store
 - Further SQL-level decomposition behind the history facades
 - Replace remaining local compatibility references to legacy Garmin DB columns

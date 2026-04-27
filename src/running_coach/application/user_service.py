@@ -13,6 +13,7 @@ from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
     DashboardActivity,
     DashboardPlannedWorkout,
+    GarminCredentialRequest,
     IntegrationConnection,
     IntegrationConnectionStatus,
     IntegrationProviderName,
@@ -122,6 +123,34 @@ class UserApplicationService:
                 ),
             ]
         )
+
+    def connect_garmin(
+        self,
+        user_id: str,
+        payload: GarminCredentialRequest,
+    ) -> UserIntegrationsResponse:
+        if self.integration_credentials is None:
+            raise ValueError("Integration credential storage is not configured")
+        self.integration_credentials.upsert_payload(
+            user_id,
+            "garmin",
+            {"email": payload.email, "password": payload.password},
+            status="active",
+        )
+        self.update_user_preferences(
+            user_id,
+            UserPreferencesPatch(garminEmail=payload.email),
+        )
+        return self.get_integrations(user_id)
+
+    def disconnect_garmin(self, user_id: str) -> UserIntegrationsResponse:
+        if self.integration_credentials is not None:
+            self.integration_credentials.delete_credential(user_id, "garmin")
+        self.update_user_preferences(
+            user_id,
+            UserPreferencesPatch(garminEmail=None),
+        )
+        return self.get_integrations(user_id)
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserProfile:
         record = self.user_service.update_user_preferences(user_id, patch)

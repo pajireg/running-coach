@@ -17,6 +17,9 @@ class FakeIntegrationCredentialService(IntegrationCredentialService):
 
     def _execute(self, query: str, params: dict[str, object]) -> None:  # type: ignore[override]
         key = (str(params["user_id"]), str(params["provider"]))
+        if query.strip().startswith("DELETE"):
+            self.rows.pop(key, None)
+            return
         existing = self.rows.get(key, {})
         encrypted_payload = str(params.get("encrypted_payload") or "")
         self.rows[key] = {
@@ -92,3 +95,12 @@ def test_integration_credentials_encrypt_and_decrypt_payload():
     assert record.status == "active"
     assert "secret-token" not in record.encrypted_payload
     assert service.decrypt_payload(record) == {"token": "secret-token"}
+
+
+def test_integration_credentials_delete_removes_provider_row():
+    service = FakeIntegrationCredentialService(cipher=CredentialCipher("test-secret"))
+    service.upsert_payload("user-1", "garmin", {"email": "runner@example.com"})
+
+    service.delete_credential("user-1", "garmin")
+
+    assert service.get_credential("user-1", "garmin") is None

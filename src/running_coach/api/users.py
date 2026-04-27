@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from ..application import UserApplicationService
 from ..models.feedback import SubjectiveFeedback
 from ..models.user import (
+    GarminCredentialRequest,
     RunSyncRequest,
     UserContext,
     UserCreateRequest,
@@ -67,6 +68,25 @@ def create_user_router(user_app: UserApplicationService) -> APIRouter:
         current_user: UserContext = Depends(require_current_user),
     ) -> UserIntegrationsResponse:
         return user_app.get_integrations(current_user.user_id)
+
+    @router.put("/me/integrations/garmin", response_model=UserIntegrationsResponse)
+    async def connect_garmin(
+        payload: GarminCredentialRequest,
+        current_user: UserContext = Depends(require_current_user),
+    ) -> UserIntegrationsResponse:
+        try:
+            return user_app.connect_garmin(current_user.user_id, payload)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+    @router.delete("/me/integrations/garmin", response_model=UserIntegrationsResponse)
+    async def disconnect_garmin(
+        current_user: UserContext = Depends(require_current_user),
+    ) -> UserIntegrationsResponse:
+        return user_app.disconnect_garmin(current_user.user_id)
 
     @router.patch("/me/preferences", response_model=UserProfile)
     async def patch_me_preferences(

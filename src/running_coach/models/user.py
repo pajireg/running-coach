@@ -130,6 +130,23 @@ class UserIntegrationsResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class GarminCredentialRequest(BaseModel):
+    """Credential payload for connecting Garmin without echoing secrets."""
+
+    email: str
+    password: str
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    @field_validator("email", "password")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("email and password must not be empty")
+        return normalized
+
+
 class UserProfile(BaseModel):
     """User-facing profile payload."""
 

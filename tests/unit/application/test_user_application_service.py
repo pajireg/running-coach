@@ -9,7 +9,12 @@ from running_coach.application.coaching_service import CoachingApplicationServic
 from running_coach.application.user_service import UserApplicationService
 from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.models.llm_settings import LLMSettings, UserLLMSettings
-from running_coach.models.user import UserCreateRequest, UserPreferencesPatch, UserRecord
+from running_coach.models.user import (
+    GarminCredentialRequest,
+    UserCreateRequest,
+    UserPreferencesPatch,
+    UserRecord,
+)
 from running_coach.storage.integration_credentials import IntegrationCredentialRecord
 from running_coach.storage.user_service import UserService
 
@@ -172,6 +177,7 @@ class FakeIntegrationCredentials:
     ):
         self.statuses = statuses or {}
         self.records = records or []
+        self.deleted: list[tuple[str, str]] = []
 
     def get_statuses(self, user_id: str):
         assert user_id == "user-1"
@@ -180,6 +186,34 @@ class FakeIntegrationCredentials:
     def list_credentials(self, user_id: str):
         assert user_id == "user-1"
         return self.records
+
+    def upsert_payload(self, user_id: str, provider: str, payload: dict, *, status: str):
+        assert user_id == "user-1"
+        assert provider == "garmin"
+        assert payload == {"email": "new@example.com", "password": "secret-password"}
+        self.records = [
+            record
+            for record in self.records
+            if not (record.user_id == user_id and record.provider == provider)
+        ]
+        self.records.append(
+            IntegrationCredentialRecord(
+                user_id=user_id,
+                provider="garmin",
+                encrypted_payload="encrypted",
+                status="active",
+            )
+        )
+
+    def delete_credential(self, user_id: str, provider: str):
+        assert user_id == "user-1"
+        assert provider == "garmin"
+        self.deleted.append((user_id, provider))
+        self.records = [
+            record
+            for record in self.records
+            if not (record.user_id == user_id and record.provider == provider)
+        ]
 
 
 def _service(
@@ -312,6 +346,41 @@ def test_get_integrations_exposes_env_compat_connections_without_secrets():
     assert by_provider["google_calendar"].status == "env_compat"
     assert by_provider["google_calendar"].connected is True
     assert not hasattr(by_provider["garmin"], "encrypted_payload")
+
+
+def test_connect_garmin_stores_encrypted_credential_and_updates_profile_email():
+    service, _, _ = _service()
+
+    response = service.connect_garmin(
+        "user-1",
+        GarminCredentialRequest(email="new@example.com", password="secret-password"),
+    )
+    by_provider = {item.provider: item for item in response.integrations}
+
+    assert service.get_user_profile("user-1").garmin_email == "new@example.com"
+    assert by_provider["garmin"].status == "active"
+    assert by_provider["garmin"].source == "db"
+    assert by_provider["garmin"].connected is True
+
+
+def test_disconnect_garmin_removes_credential_and_profile_email():
+    service, _, _ = _service(
+        integration_records=[
+            IntegrationCredentialRecord(
+                user_id="user-1",
+                provider="garmin",
+                encrypted_payload="encrypted",
+                status="active",
+            )
+        ]
+    )
+
+    response = service.disconnect_garmin("user-1")
+    by_provider = {item.provider: item for item in response.integrations}
+
+    assert service.get_user_profile("user-1").garmin_email is None
+    assert by_provider["garmin"].status == "not_configured"
+    assert by_provider["garmin"].connected is False
 
 
 def test_run_user_sync_delegates_to_coaching_service():

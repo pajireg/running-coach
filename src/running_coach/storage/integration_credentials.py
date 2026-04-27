@@ -178,6 +178,21 @@ class IntegrationCredentialService:
             last_error=last_error,
         )
 
+    def delete_credential(
+        self,
+        user_id: str,
+        provider: IntegrationProvider,
+    ) -> None:
+        """Delete a user's provider credential payload and status row."""
+        self._execute(
+            """
+            DELETE FROM user_integration_credentials
+            WHERE athlete_id = %(user_id)s
+              AND provider = %(provider)s
+            """,
+            {"user_id": user_id, "provider": provider},
+        )
+
     def _upsert(
         self,
         *,
