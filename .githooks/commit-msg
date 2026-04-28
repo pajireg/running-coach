@@ -1,0 +1,2 @@
+#!/bin/sh
+exec rtk .venv/bin/python scripts/validate_commit_message.py "$1"
