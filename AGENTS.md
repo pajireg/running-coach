@@ -22,6 +22,8 @@ Start with:
 
 When changing app-visible API behavior, runtime URLs, port mappings, auth behavior, or cross-repo handoff state, update the vault in the same task. Refresh `openapi/openapi.json` after route/schema changes.
 
+Prefer `obsidian-cli` for vault exploration and note operations when available, especially `list`, `print`, `search-content`, `create`, `move`, and `frontmatter`. If the vault is not registered in Obsidian CLI config or the command cannot perform the needed edit, use direct file edits and keep the same vault conventions.
+
 ## Repository Basics
 
 Application code lives in `src/running_coach/`. Tests live under `tests/unit/`. Database bootstrap SQL lives in `db/init/`, backend docs in `docs/`, and auth/bootstrap scripts in `scripts/`.
