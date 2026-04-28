@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.settings import Settings, get_settings
 from ..core.bootstrap import create_application_runtime
@@ -16,6 +17,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     runtime = create_application_runtime(active_settings)
 
     app = FastAPI(title="Running Coach API")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=active_settings.parsed_api_cors_allow_origins(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health", tags=["health"])
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     app.include_router(
         create_admin_router(
             admin_settings=runtime.admin_settings,

@@ -176,7 +176,7 @@ ANTHROPIC_API_KEY=...
 로컬에서 관리자 웹 앱을 실행하려면:
 
 ```bash
-uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8000
+uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8080
 ```
 
 `/admin`을 열고 관리자 키를 입력하면 전역 LLM 기본값과 사용자별 override의
@@ -190,6 +190,18 @@ Anthropic은 Messages API를 사용합니다.
   - 코칭 히스토리 DB
 - `garmin-coach`
   - 수집, 계획 생성, Garmin 동기화, Google Calendar 동기화
+- `running-coach-api`
+  - 컨테이너 내부 `8080`에서 동작하는 FastAPI 사용자/관리자 API
+
+API 서비스는 호스트의 `API_PORT`를 컨테이너 `8080`에 매핑하며 기본값은
+`8080:8080`입니다. 공유기 포트포워딩에서 외부 포트 `8624`를 이 호스트의
+`8080`으로 전달하면 외부 앱은 `http://<호스트 또는 도메인>:8624`로 접속할 수 있습니다.
+
+API 연결 확인:
+
+```bash
+curl http://localhost:8080/health
+```
 
 Docker에서 Google Calendar를 쓸 경우 `./.google/` 디렉터리가 컨테이너에 마운트되어 있어야 합니다.
 

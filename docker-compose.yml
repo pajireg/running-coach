@@ -52,5 +52,33 @@ services:
       - RACE_GOAL_TIME=${RACE_GOAL_TIME:-}
       - RACE_TARGET_PACE=${RACE_TARGET_PACE:-}
 
+  running-coach-api:
+    build: .
+    container_name: running-coach-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8080}:8080"
+      - "${API_FORWARD_PORT:-8624}:8080"
+    volumes:
+      - ./.garmin_tokens:/app/.garmin_tokens
+      - ./.env:/app/.env
+      - ./.google:/app/.google
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://coach:coach@postgres:5432/running_coach}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - API_CORS_ALLOW_ORIGINS=${API_CORS_ALLOW_ORIGINS:-*}
+      - INCLUDE_STRENGTH=${INCLUDE_STRENGTH:-false}
+      - COACH_SCHEDULE_TIMES=${COACH_SCHEDULE_TIMES:-05:00,17:00}
+      - COACH_SERVICE_RUN_MODE=${COACH_SERVICE_RUN_MODE:-auto}
+      - COACH_PLANNER_MODE=${COACH_PLANNER_MODE:-legacy}
+      - RACE_DATE=${RACE_DATE:-}
+      - RACE_DISTANCE=${RACE_DISTANCE:-}
+      - RACE_GOAL_TIME=${RACE_GOAL_TIME:-}
+      - RACE_TARGET_PACE=${RACE_TARGET_PACE:-}
+    command: uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8080
+
 volumes:
   postgres-data:

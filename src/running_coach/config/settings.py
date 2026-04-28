@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # 관리자 API 설정
     admin_api_key: Optional[str] = None
+    api_cors_allow_origins: str = "*"
 
     # 선택적 설정
     max_heart_rate: Optional[int] = None
@@ -124,6 +125,11 @@ class Settings(BaseSettings):
                 "llmModel": self.llm_model,
             }
         )
+
+    def parsed_api_cors_allow_origins(self) -> list[str]:
+        """API CORS 허용 origin 목록을 반환."""
+        origins = [item.strip() for item in self.api_cors_allow_origins.split(",") if item.strip()]
+        return origins or ["*"]
 
 
 def get_settings() -> Settings:

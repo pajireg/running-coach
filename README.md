@@ -148,6 +148,18 @@ Main services:
   - durable coaching-history database
 - `garmin-coach`
   - ingestion, planning, Garmin sync, and Google Calendar sync
+- `running-coach-api`
+  - FastAPI user/admin API on container port `8080`
+
+The API service maps host `API_PORT` to container `8080` and defaults to
+`8080:8080`. If your router forwards external port `8624` to this host's port
+`8080`, external apps can use `http://<host-or-domain>:8624`.
+
+Check API reachability:
+
+```bash
+curl http://localhost:8080/health
+```
 
 If you use Google Calendar in Docker, keep `./.google/` mounted into the container.
 
@@ -186,7 +198,7 @@ ANTHROPIC_API_KEY=...
 Run the admin web app locally with:
 
 ```bash
-uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8000
+uvicorn running_coach.api.app:create_app --factory --host 0.0.0.0 --port 8080
 ```
 
 Open `/admin` and enter the admin key. The first page manages global LLM
