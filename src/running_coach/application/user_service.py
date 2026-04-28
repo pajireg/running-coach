@@ -29,6 +29,7 @@ from ..models.user import (
     UserProfile,
     UserRecord,
     UserScheduleStatus,
+    UserTrends,
 )
 from ..storage import (
     AdminSettingsService,
@@ -80,6 +81,21 @@ class UserApplicationService:
             currentPlan=current_plan,
             recentActivities=recent_activities,
         )
+
+    def get_trends(self, user_id: str) -> UserTrends:
+        context = self.get_user_context(user_id)
+        try:
+            reader = self._history_reader(context)
+            return UserTrends.model_validate(
+                reader.summarize_trends(as_of=self._today_for_user(context))
+            )
+        except ValueError:
+            return UserTrends(
+                asOf=self._today_for_user(context),
+                acwr=None,
+                weeklyVolume=[],
+                paceTrend=[],
+            )
 
     def get_integrations(self, user_id: str) -> UserIntegrationsResponse:
         record = self.user_service.get_user_record(user_id)
@@ -376,13 +392,7 @@ class UserApplicationService:
         context: UserContext,
     ) -> tuple[list[DashboardPlannedWorkout], list[DashboardActivity]]:
         try:
-            reader = HistoryReadService(
-                CoachingHistoryService(
-                    db=self.user_service.db,
-                    external_key=context.external_key,
-                    timezone=context.timezone,
-                )
-            )
+            reader = self._history_reader(context)
             as_of = self._today_for_user(context)
             planned = [
                 DashboardPlannedWorkout(
@@ -402,6 +412,15 @@ class UserApplicationService:
             return planned, recent
         except ValueError:
             return [], []
+
+    def _history_reader(self, context: UserContext) -> HistoryReadService:
+        return HistoryReadService(
+            CoachingHistoryService(
+                db=self.user_service.db,
+                external_key=context.external_key,
+                timezone=context.timezone,
+            )
+        )
 
     def _today_for_user(self, context: UserContext) -> date:
         try:

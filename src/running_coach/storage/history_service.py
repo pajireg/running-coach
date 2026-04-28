@@ -992,6 +992,127 @@ class CoachingHistoryService:
             for row in rows
         ]
 
+    def summarize_trends(
+        self,
+        *,
+        as_of: date,
+        weeks: int = 12,
+        pace_days: int = 90,
+    ) -> dict[str, Any]:
+        """앱 추이 화면용 주간 볼륨/ACWR/페이스 요약."""
+        user_id = self._user_id()
+        weekly_rows = self._fetchall(
+            """
+            WITH week_series AS (
+                SELECT generate_series(
+                    date_trunc('week', %(as_of)s::date)::date
+                        - ((%(weeks)s - 1) * interval '1 week'),
+                    date_trunc('week', %(as_of)s::date)::date,
+                    interval '1 week'
+                )::date AS week_start
+            ),
+            weekly_runs AS (
+                SELECT
+                    date_trunc('week', activity_date)::date AS week_start,
+                    ROUND(COALESCE(SUM(distance_km), 0)::numeric, 2) AS distance_km,
+                    COUNT(*) AS run_count,
+                    ROUND(COALESCE(MAX(distance_km), 0)::numeric, 2) AS long_run_km
+                FROM activities
+                WHERE user_id = %(user_id)s
+                  AND activity_date >= %(cutoff)s
+                  AND activity_date <= %(as_of)s
+                  AND sport_type IN ('running', 'treadmill_running', 'trail_running')
+                GROUP BY 1
+            ),
+            weekly_metrics AS (
+                SELECT
+                    date_trunc('week', metric_date)::date AS week_start,
+                    ROUND(AVG(acwr)::numeric, 2) AS acwr
+                FROM daily_metrics
+                WHERE user_id = %(user_id)s
+                  AND metric_date >= %(cutoff)s
+                  AND metric_date <= %(as_of)s
+                  AND acwr IS NOT NULL
+                GROUP BY 1
+            )
+            SELECT
+                ws.week_start,
+                COALESCE(wr.distance_km, 0) AS distance_km,
+                COALESCE(wr.run_count, 0) AS run_count,
+                wr.long_run_km,
+                wm.acwr
+            FROM week_series ws
+            LEFT JOIN weekly_runs wr ON wr.week_start = ws.week_start
+            LEFT JOIN weekly_metrics wm ON wm.week_start = ws.week_start
+            ORDER BY ws.week_start
+            """,
+            {
+                "user_id": user_id,
+                "as_of": as_of,
+                "weeks": weeks,
+                "cutoff": as_of - timedelta(days=(weeks * 7) - 1),
+            },
+        )
+        latest_metric = (
+            self._fetchone(
+                """
+            SELECT acwr
+            FROM daily_metrics
+            WHERE user_id = %(user_id)s
+              AND metric_date <= %(as_of)s
+              AND acwr IS NOT NULL
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """,
+                {"user_id": user_id, "as_of": as_of},
+            )
+            or {}
+        )
+        pace_rows = self._fetchall(
+            """
+            SELECT
+                activity_date,
+                name,
+                distance_km,
+                avg_pace
+            FROM activities
+            WHERE user_id = %(user_id)s
+              AND activity_date BETWEEN %(from_date)s AND %(as_of)s
+              AND sport_type IN ('running', 'treadmill_running', 'trail_running')
+              AND avg_pace IS NOT NULL
+            ORDER BY activity_date
+            """,
+            {
+                "user_id": user_id,
+                "from_date": as_of - timedelta(days=pace_days - 1),
+                "as_of": as_of,
+            },
+        )
+        return {
+            "asOf": as_of.isoformat(),
+            "acwr": self._float_or_none(latest_metric.get("acwr")),
+            "weeklyVolume": [
+                {
+                    "weekStart": row["week_start"].isoformat(),
+                    "distanceKm": float(row["distance_km"] or 0.0),
+                    "runCount": int(row["run_count"] or 0),
+                    "longRunKm": self._float_or_none(row.get("long_run_km")),
+                    "acwr": self._float_or_none(row.get("acwr")),
+                }
+                for row in weekly_rows
+            ],
+            "paceTrend": [
+                {
+                    "activityDate": row["activity_date"].isoformat(),
+                    "title": row.get("name") or "Run",
+                    "distanceKm": self._float_or_none(row.get("distance_km")),
+                    "avgPace": row.get("avg_pace"),
+                    "avgPaceSeconds": self._pace_seconds(row.get("avg_pace")),
+                }
+                for row in pace_rows
+            ],
+        }
+
     def summarize_planning_constraints(self, as_of: date) -> dict[str, Any]:
         """가용시간/레이스/블록 제약 요약."""
         user_id = self._user_id()
@@ -2104,6 +2225,22 @@ class CoachingHistoryService:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _pace_seconds(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        parts = str(value).strip().split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+        except ValueError:
+            return None
+        if minutes < 0 or seconds < 0 or seconds >= 60:
+            return None
+        return (minutes * 60) + seconds
 
     @staticmethod
     def _planned_workout_category(planned: Optional[dict[str, Any]]) -> str:

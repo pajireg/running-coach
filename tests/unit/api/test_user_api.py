@@ -23,6 +23,7 @@ from running_coach.models.user import (
     UserPreferences,
     UserPreferencesPatch,
     UserProfile,
+    UserTrends,
 )
 
 
@@ -78,6 +79,28 @@ class FakeUserApplicationService:
                 )
             ],
         )
+        self.trends = UserTrends(
+            asOf=date(2026, 4, 24),
+            acwr=1.08,
+            weeklyVolume=[
+                {
+                    "weekStart": date(2026, 4, 20),
+                    "distanceKm": 43.2,
+                    "runCount": 5,
+                    "longRunKm": 16.0,
+                    "acwr": 1.08,
+                }
+            ],
+            paceTrend=[
+                {
+                    "activityDate": date(2026, 4, 24),
+                    "title": "Morning Run",
+                    "distanceKm": 8.1,
+                    "avgPace": "5:35",
+                    "avgPaceSeconds": 335,
+                }
+            ],
+        )
         self.integrations = UserIntegrationsResponse(
             integrations=[
                 IntegrationConnection(
@@ -131,6 +154,10 @@ class FakeUserApplicationService:
     def get_dashboard(self, user_id: str) -> UserDashboard:
         assert user_id == "user-1"
         return self.dashboard
+
+    def get_trends(self, user_id: str) -> UserTrends:
+        assert user_id == "user-1"
+        return self.trends
 
     def get_integrations(self, user_id: str) -> UserIntegrationsResponse:
         assert user_id == "user-1"
@@ -244,6 +271,18 @@ def test_get_me_dashboard_returns_app_home_summary():
     assert response.json()["schedule"]["nextRunAt"] == "2026-04-24T20:00:00Z"
     assert response.json()["currentPlan"][0]["workoutName"] == "Base Run"
     assert response.json()["recentActivities"][0]["provider"] == "garmin"
+
+
+def test_get_me_trends_returns_chart_ready_summary():
+    client = _client()
+
+    response = client.get("/v1/me/trends", headers={"Authorization": "Bearer rcu_test"})
+
+    assert response.status_code == 200
+    assert response.json()["asOf"] == "2026-04-24"
+    assert response.json()["acwr"] == 1.08
+    assert response.json()["weeklyVolume"][0]["distanceKm"] == 43.2
+    assert response.json()["paceTrend"][0]["avgPaceSeconds"] == 335
 
 
 def test_get_me_integrations_returns_provider_inventory():

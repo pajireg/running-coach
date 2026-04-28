@@ -202,6 +202,38 @@ class _FreshnessHistoryService(PlanFreshnessService):
         return None
 
 
+class _TrendsHistoryService(CoachingHistoryService):
+    def _user_id(self) -> str:  # type: ignore[override]
+        return "runner-1"
+
+    def _fetchall(self, query: str, params: dict[str, object]):  # type: ignore[override]
+        if "WITH week_series AS" in query:
+            return [
+                {
+                    "week_start": date(2026, 4, 13),
+                    "distance_km": 42.5,
+                    "run_count": 5,
+                    "long_run_km": 18.0,
+                    "acwr": 1.08,
+                }
+            ]
+        if "avg_pace IS NOT NULL" in query:
+            return [
+                {
+                    "activity_date": date(2026, 4, 17),
+                    "name": "러닝",
+                    "distance_km": 5.11,
+                    "avg_pace": "5:35",
+                }
+            ]
+        return []
+
+    def _fetchone(self, query: str, params: dict[str, object]):  # type: ignore[override]
+        if "SELECT acwr" in query:
+            return {"acwr": 1.08}
+        return None
+
+
 def test_summarize_training_background_returns_recent_and_lifetime_sections():
     service = _SummaryHistoryService(_FakeDb(), "user@example.com")
 
@@ -216,6 +248,18 @@ def test_summarize_training_background_returns_recent_and_lifetime_sections():
     assert summary["planningConstraints"]["trainingBlock"]["phase"] == "build"
     assert summary["planningConstraints"]["trainingBlock"]["sevenDayVolumeTargetKm"] == 42.0
     assert summary["planningConstraints"]["planPolicy"]["maxLongRuns"] == 2
+
+
+def test_summarize_trends_returns_chart_ready_payload():
+    service = _TrendsHistoryService(_FakeDb(), "user@example.com")
+
+    trends = service.summarize_trends(as_of=date(2026, 4, 17))
+
+    assert trends["asOf"] == "2026-04-17"
+    assert trends["acwr"] == 1.08
+    assert trends["weeklyVolume"][0]["weekStart"] == "2026-04-13"
+    assert trends["weeklyVolume"][0]["distanceKm"] == 42.5
+    assert trends["paceTrend"][0]["avgPaceSeconds"] == 335
 
 
 def test_summarize_plan_freshness_reuses_active_plan_without_new_activity():

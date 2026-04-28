@@ -228,6 +228,41 @@ class UserDashboard(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class TrendWeek(BaseModel):
+    """Weekly training load point for app trend charts."""
+
+    week_start: date = Field(alias="weekStart")
+    distance_km: float = Field(alias="distanceKm")
+    run_count: int = Field(alias="runCount")
+    long_run_km: float | None = Field(default=None, alias="longRunKm")
+    acwr: float | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class PaceTrendPoint(BaseModel):
+    """Completed run pace point for trend charts."""
+
+    activity_date: date = Field(alias="activityDate")
+    title: str
+    distance_km: float | None = Field(default=None, alias="distanceKm")
+    avg_pace: str | None = Field(default=None, alias="avgPace")
+    avg_pace_seconds: int | None = Field(default=None, alias="avgPaceSeconds")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UserTrends(BaseModel):
+    """App trends contract."""
+
+    as_of: date = Field(alias="asOf")
+    acwr: float | None = None
+    weekly_volume: list[TrendWeek] = Field(alias="weeklyVolume")
+    pace_trend: list[PaceTrendPoint] = Field(alias="paceTrend")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class RunSyncRequest(BaseModel):
     """Trigger a user-scoped sync run."""
 

@@ -48,3 +48,10 @@ class HistoryReadService:
 
     def list_recent_completed_activities(self, *, as_of: date, days: int = 2):
         return self.history_service.list_recent_completed_activities(as_of=as_of, days=days)
+
+    def summarize_trends(self, *, as_of: date, weeks: int = 12, pace_days: int = 90):
+        return self.history_service.summarize_trends(
+            as_of=as_of,
+            weeks=weeks,
+            pace_days=pace_days,
+        )
