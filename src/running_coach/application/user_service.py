@@ -34,6 +34,7 @@ from ..models.user import (
     UserScheduleStatus,
     UserTrends,
 )
+from ..models.user_coaching import CoachingInputsResponse
 from ..storage import (
     AdminSettingsService,
     ClaimedUserJob,
@@ -267,6 +268,9 @@ class UserApplicationService:
 
     def record_feedback(self, user_id: str, feedback: SubjectiveFeedback) -> None:
         self.coaching_service.record_feedback(self.get_user_context(user_id), feedback)
+
+    def get_coaching_inputs(self, user_id: str) -> CoachingInputsResponse:
+        return self.coaching_service.get_coaching_inputs(self.get_user_context(user_id))
 
     def update_availability(
         self,

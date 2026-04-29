@@ -74,3 +74,63 @@ class InjuryStatusRequest(BaseModel):
         if not 0 <= value <= 10:
             raise ValueError("severity must be between 0 and 10")
         return value
+
+
+class AvailabilityRule(BaseModel):
+    """Stored availability rule returned to the app."""
+
+    weekday: int
+    is_available: bool = Field(alias="isAvailable")
+    max_duration_minutes: int | None = Field(default=None, alias="maxDurationMinutes")
+    preferred_session_type: str | None = Field(default=None, alias="preferredSessionType")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class RaceGoal(BaseModel):
+    """Stored race goal returned to the app."""
+
+    goal_name: str = Field(alias="goalName")
+    race_date: date | None = Field(default=None, alias="raceDate")
+    distance: str | None = None
+    goal_time: str | None = Field(default=None, alias="goalTime")
+    target_pace: str | None = Field(default=None, alias="targetPace")
+    priority: int
+    is_active: bool = Field(alias="isActive")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TrainingBlock(BaseModel):
+    """Stored training block returned to the app."""
+
+    phase: str
+    starts_on: date = Field(alias="startsOn")
+    ends_on: date = Field(alias="endsOn")
+    focus: str | None = None
+    weekly_volume_target_km: float | None = Field(default=None, alias="weeklyVolumeTargetKm")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class InjuryStatus(BaseModel):
+    """Stored injury status returned to the app."""
+
+    status_date: date = Field(alias="statusDate")
+    injury_area: str = Field(alias="injuryArea")
+    severity: int
+    notes: str | None = None
+    is_active: bool = Field(alias="isActive")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CoachingInputsResponse(BaseModel):
+    """User-owned coaching inputs used by app settings and goals screens."""
+
+    availability: list[AvailabilityRule]
+    goals: list[RaceGoal]
+    blocks: list[TrainingBlock]
+    injuries: list[InjuryStatus]
+
+    model_config = ConfigDict(populate_by_name=True)

@@ -25,6 +25,7 @@ from running_coach.models.user import (
     UserProfile,
     UserTrends,
 )
+from running_coach.models.user_coaching import CoachingInputsResponse
 
 
 class FakeUserApplicationService:
@@ -121,6 +122,45 @@ class FakeUserApplicationService:
                 ),
             ]
         )
+        self.coaching_inputs = CoachingInputsResponse(
+            availability=[
+                {
+                    "weekday": 2,
+                    "isAvailable": True,
+                    "maxDurationMinutes": 45,
+                    "preferredSessionType": "quality",
+                }
+            ],
+            goals=[
+                {
+                    "goalName": "10K PB",
+                    "raceDate": "2026-06-01",
+                    "distance": "10K",
+                    "goalTime": "49:00",
+                    "targetPace": "4:54",
+                    "priority": 1,
+                    "isActive": True,
+                }
+            ],
+            blocks=[
+                {
+                    "phase": "build",
+                    "startsOn": "2026-04-20",
+                    "endsOn": "2026-05-17",
+                    "focus": "threshold",
+                    "weeklyVolumeTargetKm": 45.0,
+                }
+            ],
+            injuries=[
+                {
+                    "statusDate": "2026-04-24",
+                    "injuryArea": "calf",
+                    "severity": 2,
+                    "notes": "mild tightness",
+                    "isActive": True,
+                }
+            ],
+        )
         self.current_user = UserContext(
             user_id="user-1",
             external_key="runner-1",
@@ -197,6 +237,10 @@ class FakeUserApplicationService:
     def record_feedback(self, user_id: str, feedback) -> None:
         assert user_id == "user-1"
         assert feedback.feedback_date == date(2026, 4, 24)
+
+    def get_coaching_inputs(self, user_id: str) -> CoachingInputsResponse:
+        assert user_id == "user-1"
+        return self.coaching_inputs
 
     def update_availability(self, user_id: str, **kwargs) -> None:
         assert user_id == "user-1"
@@ -323,6 +367,22 @@ def test_disconnect_garmin_returns_updated_provider_inventory():
     assert response.status_code == 200
     assert response.json()["integrations"][0]["provider"] == "garmin"
     assert response.json()["integrations"][0]["connected"] is False
+
+
+def test_get_coaching_inputs_returns_user_owned_settings():
+    client = _client()
+
+    response = client.get(
+        "/v1/me/coaching-inputs",
+        headers={"Authorization": "Bearer rcu_test"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["availability"][0]["weekday"] == 2
+    assert payload["goals"][0]["goalName"] == "10K PB"
+    assert payload["blocks"][0]["phase"] == "build"
+    assert payload["injuries"][0]["injuryArea"] == "calf"
 
 
 def test_patch_me_preferences_updates_profile():

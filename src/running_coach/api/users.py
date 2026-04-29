@@ -20,6 +20,7 @@ from ..models.user import (
 )
 from ..models.user_coaching import (
     AvailabilityRuleRequest,
+    CoachingInputsResponse,
     InjuryStatusRequest,
     MutationResponse,
     RaceGoalRequest,
@@ -125,6 +126,12 @@ def create_user_router(user_app: UserApplicationService) -> APIRouter:
     ) -> MutationResponse:
         user_app.record_feedback(current_user.user_id, payload)
         return MutationResponse()
+
+    @router.get("/me/coaching-inputs", response_model=CoachingInputsResponse)
+    async def get_coaching_inputs(
+        current_user: UserContext = Depends(require_current_user),
+    ) -> CoachingInputsResponse:
+        return user_app.get_coaching_inputs(current_user.user_id)
 
     @router.post("/me/availability", response_model=MutationResponse)
     async def update_availability(

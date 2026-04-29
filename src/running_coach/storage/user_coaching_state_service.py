@@ -248,6 +248,72 @@ class UserCoachingStateService:
             },
         )
 
+    def get_coaching_inputs(self, user_id: str) -> dict[str, list[dict[str, Any]]]:
+        """Return app-facing user coaching inputs."""
+        availability = self._fetchall(
+            """
+            SELECT
+                weekday,
+                is_available,
+                max_duration_minutes,
+                preferred_session_type
+            FROM availability_rules
+            WHERE user_id = %(user_id)s
+            ORDER BY weekday ASC
+            """,
+            {"user_id": user_id},
+        )
+        goals = self._fetchall(
+            """
+            SELECT
+                goal_name,
+                race_date,
+                distance,
+                goal_time,
+                target_pace,
+                priority,
+                is_active
+            FROM race_goals
+            WHERE user_id = %(user_id)s
+            ORDER BY is_active DESC, priority ASC, created_at DESC
+            """,
+            {"user_id": user_id},
+        )
+        blocks = self._fetchall(
+            """
+            SELECT
+                phase,
+                starts_on,
+                ends_on,
+                focus,
+                weekly_volume_target_km
+            FROM training_blocks
+            WHERE user_id = %(user_id)s
+            ORDER BY starts_on DESC, ends_on DESC, created_at DESC
+            """,
+            {"user_id": user_id},
+        )
+        injuries = self._fetchall(
+            """
+            SELECT
+                status_date,
+                injury_area,
+                severity,
+                notes,
+                is_active
+            FROM injury_status
+            WHERE user_id = %(user_id)s
+            ORDER BY is_active DESC, status_date DESC, created_at DESC
+            """,
+            {"user_id": user_id},
+        )
+        return {
+            "availability": availability,
+            "goals": goals,
+            "blocks": blocks,
+            "injuries": injuries,
+        }
+
     def _execute(self, query: str, params: dict[str, Any]) -> None:
         with self.db.connection() as conn:
             with conn.cursor() as cur:
@@ -259,3 +325,10 @@ class UserCoachingStateService:
                 cur.execute(query, params)
                 row = cur.fetchone()
                 return cast(Optional[dict[str, Any]], row)
+
+    def _fetchall(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        with self.db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                rows = cur.fetchall()
+                return cast(list[dict[str, Any]], list(rows))

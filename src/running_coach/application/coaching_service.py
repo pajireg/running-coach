@@ -10,6 +10,7 @@ from ..config.settings import Settings
 from ..core.orchestrator import TrainingOrchestrator
 from ..models.feedback import SubjectiveFeedback
 from ..models.user import RunSyncResponse, UserContext
+from ..models.user_coaching import CoachingInputsResponse
 from ..storage import UserCoachingStateService
 
 
@@ -39,6 +40,11 @@ class CoachingApplicationService:
 
     def record_feedback(self, user_context: UserContext, feedback: SubjectiveFeedback) -> None:
         self.user_state_service.record_subjective_feedback(user_context.user_id, feedback)
+
+    def get_coaching_inputs(self, user_context: UserContext) -> CoachingInputsResponse:
+        return CoachingInputsResponse.model_validate(
+            self.user_state_service.get_coaching_inputs(user_context.user_id)
+        )
 
     def update_availability(
         self,

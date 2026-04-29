@@ -16,6 +16,7 @@ from running_coach.models.user import (
     UserPreferencesPatch,
     UserRecord,
 )
+from running_coach.models.user_coaching import CoachingInputsResponse
 from running_coach.storage.integration_credentials import IntegrationCredentialRecord
 from running_coach.storage.user_service import UserService
 
@@ -161,6 +162,19 @@ class FakeCoachingService(CoachingApplicationService):
         )
         self.last_sync = None
         self.feedback_calls = []
+        self.coaching_inputs = CoachingInputsResponse(
+            availability=[
+                {
+                    "weekday": 2,
+                    "isAvailable": True,
+                    "maxDurationMinutes": 45,
+                    "preferredSessionType": "quality",
+                }
+            ],
+            goals=[],
+            blocks=[],
+            injuries=[],
+        )
 
     def run_for_user_context(self, user_context, run_mode: str = "auto"):  # type: ignore[override]
         self.last_sync = (user_context.user_id, run_mode)
@@ -168,6 +182,10 @@ class FakeCoachingService(CoachingApplicationService):
 
     def record_feedback(self, user_context, feedback):  # type: ignore[override]
         self.feedback_calls.append((user_context.user_id, feedback.feedback_date))
+
+    def get_coaching_inputs(self, user_context):  # type: ignore[override]
+        assert user_context.user_id == "user-1"
+        return self.coaching_inputs
 
 
 class FakeScheduledJobs:
@@ -319,6 +337,15 @@ def test_admin_list_users_returns_key_metadata_without_secrets():
     assert response.users[0].user_id == "user-1"
     assert response.users[0].active_api_key_count == 1
     assert response.users[0].last_api_key_used_at is None
+
+
+def test_get_coaching_inputs_delegates_to_coaching_service():
+    service, _, _ = _service()
+
+    response = service.get_coaching_inputs("user-1")
+
+    assert response.availability[0].weekday == 2
+    assert response.availability[0].preferred_session_type == "quality"
 
 
 def test_ensure_local_runtime_user_context_uses_current_settings_defaults():
