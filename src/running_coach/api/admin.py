@@ -7,18 +7,21 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
 
+from ..application import UserApplicationService
 from ..models.llm_settings import (
     AdminLLMSettingsPatch,
     LLMSettings,
     UserLLMSettings,
     UserLLMSettingsPatch,
 )
+from ..models.user import AdminUserProvisionRequest, UserCreateResponse
 from ..storage.admin_settings import AdminSettingsService
 
 
 def create_admin_router(
     admin_settings: AdminSettingsService,
     admin_api_key: Optional[str],
+    user_app: UserApplicationService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -66,6 +69,17 @@ def create_admin_router(
         patch: UserLLMSettingsPatch,
     ) -> dict[str, object]:
         return _user_settings_payload(admin_settings.update_user_llm_settings(user_id, patch))
+
+    if user_app is not None:
+
+        @router.post(
+            "/users",
+            response_model=UserCreateResponse,
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_admin)],
+        )
+        def provision_user(payload: AdminUserProvisionRequest) -> UserCreateResponse:
+            return user_app.provision_user(payload)
 
     return router
 

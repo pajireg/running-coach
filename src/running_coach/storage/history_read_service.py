@@ -40,6 +40,19 @@ class HistoryReadService:
             delivery_provider=delivery_provider,
         )
 
+    def list_planned_delivery_ids(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        delivery_provider: str = "garmin",
+    ) -> dict[str, list[str]]:
+        return self.plan_freshness_service.list_planned_delivery_ids(
+            start_date=start_date,
+            end_date=end_date,
+            delivery_provider=delivery_provider,
+        )
+
     def summarize_plan_freshness(self, *, as_of: date) -> dict[str, Any]:
         return self.plan_freshness_service.summarize_plan_freshness(as_of=as_of)
 

@@ -120,7 +120,7 @@ Garmin/DB/Calendar state first, then skips, extends, or replans only when trigge
 - `python -m running_coach`
   - Collect data, generate a plan, sync Garmin, sync calendars
 - `python -m running_coach run --mode plan`
-  - Force full 7-day plan generation, delete previously generated future Garmin workouts by stored Garmin workout ID, upload new non-rest workouts, and sync calendars
+  - Force full 7-day plan generation, delete previously generated future Garmin workouts by stored Garmin workout/schedule IDs, upload new non-rest workouts, and sync calendars
 - `python -m running_coach run --mode auto`
   - Run one reconciliation pass and generate a plan only when the active plan is stale, missing, extendable, or otherwise triggered
 - `python -m running_coach run --service --times 05:00,17:00 --mode auto`

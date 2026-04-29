@@ -88,11 +88,12 @@ class TrainingOrchestrator:
                         logger.error("계획 연장 실패")
                         return False
                     logger.info(f"\n훈련 계획 연장 완료! ({len(plan.plan)}일)")
-                    existing_workout_ids = self._existing_provider_workout_ids(plan)
+                    existing_delivery_ids = self._existing_provider_delivery_ids(plan)
                     self._persist_plan_history(metrics, plan, training_background)
                     logger.info("기존 Running Coach 워크아웃 정리 중...")
                     self._training_data_provider().cleanup_existing_workouts(
-                        workout_ids=existing_workout_ids or None
+                        workout_ids=existing_delivery_ids["workout_ids"] or None,
+                        schedule_ids=existing_delivery_ids["schedule_ids"] or None,
                     )
                     self._clear_delivery_results(plan)
                     self._upload_provider_workouts(plan)
@@ -118,13 +119,14 @@ class TrainingOrchestrator:
                 return False
 
             logger.info(f"\n훈련 계획 생성 완료! ({len(plan.plan)}일)")
-            existing_workout_ids = self._existing_provider_workout_ids(plan)
+            existing_delivery_ids = self._existing_provider_delivery_ids(plan)
             self._persist_plan_history(metrics, plan, training_background)
 
             # 4. 기존 워크아웃 정리
             logger.info("기존 Running Coach 워크아웃 정리 중...")
             self._training_data_provider().cleanup_existing_workouts(
-                workout_ids=existing_workout_ids or None
+                workout_ids=existing_delivery_ids["workout_ids"] or None,
+                schedule_ids=existing_delivery_ids["schedule_ids"] or None,
             )
             self._clear_delivery_results(plan)
 
@@ -224,20 +226,34 @@ class TrainingOrchestrator:
 
     def _existing_provider_workout_ids(self, plan) -> list[str]:
         """새 계획 범위 + 미실행 과거 provider workout id 조회."""
+        return self._existing_provider_delivery_ids(plan)["workout_ids"]
+
+    def _existing_provider_delivery_ids(self, plan) -> dict[str, list[str]]:
+        """새 계획 범위 + 미실행 과거 provider workout/schedule id 조회."""
         if not self.container.settings.persist_history:
-            return []
+            return {"workout_ids": [], "schedule_ids": []}
         try:
             today = date.today()
             # 오늘 이전 미실행 과거 워크아웃도 포함 (최대 14일)
             earliest = min(plan.start_date, today - timedelta(days=14))
-            return self.container.history_read_service.list_planned_external_workout_ids(
+            if hasattr(self.container.history_read_service, "list_planned_delivery_ids"):
+                return self.container.history_read_service.list_planned_delivery_ids(
+                    start_date=earliest,
+                    end_date=plan.end_date,
+                    delivery_provider="garmin",
+                )
+            workout_ids = self.container.history_read_service.list_planned_external_workout_ids(
                 start_date=earliest,
                 end_date=plan.end_date,
                 delivery_provider="garmin",
             )
+            return {
+                "workout_ids": workout_ids,
+                "schedule_ids": [],
+            }
         except Exception as e:
             logger.warning(f"기존 provider workout id 조회 실패: {e}")
-            return []
+            return {"workout_ids": [], "schedule_ids": []}
 
     def _clear_delivery_results(self, plan) -> None:
         """삭제된 이전 provider workout id를 계획 범위에서 초기화."""
@@ -257,6 +273,7 @@ class TrainingOrchestrator:
         workout_date,
         external_workout_id: str | None,
         delivery_status: str,
+        external_schedule_id: str | None = None,
     ) -> None:
         """Provider delivery result persistence."""
         if not self.container.settings.persist_history:
@@ -267,6 +284,7 @@ class TrainingOrchestrator:
                 workout_date=workout_date,
                 delivery_provider="garmin",
                 external_workout_id=external_workout_id,
+                external_schedule_id=external_schedule_id,
                 delivery_status=delivery_status,
             )
         except Exception as e:
@@ -355,10 +373,11 @@ class TrainingOrchestrator:
             try:
                 workout_id = workout_manager.create_workout(workout)
                 if workout_id:
-                    workout_manager.schedule_workout(workout_id, daily_plan.date)
+                    schedule_result = workout_manager.schedule_workout(workout_id, daily_plan.date)
                     self._persist_delivery_result(
                         workout_date=daily_plan.date,
                         external_workout_id=workout_id,
+                        external_schedule_id=self._extract_schedule_id(schedule_result),
                         delivery_status="scheduled",
                     )
                 else:
@@ -375,6 +394,17 @@ class TrainingOrchestrator:
                     delivery_status=f"error: {str(e)[:90]}",
                 )
                 logger.error(f"워크아웃 업로드 실패: {e}")
+
+    @staticmethod
+    def _extract_schedule_id(schedule_result) -> str | None:
+        """Extract provider scheduled workout id from a Garmin scheduling response."""
+        if not isinstance(schedule_result, dict):
+            return None
+        for key in ("scheduledWorkoutId", "scheduleId", "id"):
+            value = schedule_result.get(key)
+            if value:
+                return str(value)
+        return None
 
     def _training_data_provider(self) -> TrainingDataProvider:
         """Return the provider-neutral training data capability.

@@ -32,6 +32,20 @@ class UserCreateRequest(BaseModel):
         return normalized or None
 
 
+class AdminUserProvisionRequest(UserCreateRequest):
+    """Admin user provisioning request with operator-facing key metadata."""
+
+    key_name: str = Field(default="mobile-app", alias="keyName")
+
+    @field_validator("key_name")
+    @classmethod
+    def validate_key_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("keyName must not be empty")
+        return normalized
+
+
 class UserPreferencesPatch(BaseModel):
     """Patch user-visible preferences."""
 

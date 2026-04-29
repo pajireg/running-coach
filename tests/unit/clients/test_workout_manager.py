@@ -9,6 +9,7 @@ class _FakeGarmin:
         self.uploaded_payload = None
         self.scheduled = None
         self.deleted_ids = []
+        self.unscheduled_ids = []
 
     def upload_workout(self, payload):
         self.uploaded_payload = payload
@@ -16,12 +17,16 @@ class _FakeGarmin:
 
     def schedule_workout(self, workout_id, date_str):
         self.scheduled = (workout_id, date_str)
+        return {"scheduledWorkoutId": "schedule-42"}
 
     def get_workouts(self):
         return [{"workoutName": "Running Coach: Easy", "workoutId": 10}]
 
     def delete_workout(self, workout_id):
         self.deleted_ids.append(workout_id)
+
+    def unschedule_workout(self, scheduled_workout_id):
+        self.unscheduled_ids.append(scheduled_workout_id)
 
 
 def test_create_workout_uses_json_upload_payload():
@@ -94,6 +99,20 @@ def test_cleanup_prefers_database_workout_ids():
 
     assert deleted_count == 2
     assert garmin.deleted_ids == ["100", "101"]
+
+
+def test_cleanup_unschedules_before_deleting_workout_templates():
+    garmin = _FakeGarmin()
+    manager = WorkoutManager(garmin)
+
+    deleted_count = manager.delete_generated_workouts(
+        workout_ids=["100"],
+        schedule_ids=["200"],
+    )
+
+    assert deleted_count == 2
+    assert garmin.unscheduled_ids == ["200"]
+    assert garmin.deleted_ids == ["100"]
 
 
 def test_warmup_and_cooldown_use_wider_pace_margins():

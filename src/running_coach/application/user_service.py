@@ -11,6 +11,7 @@ from ..config.settings import Settings
 from ..models.feedback import SubjectiveFeedback
 from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
+    AdminUserProvisionRequest,
     DashboardActivity,
     DashboardPlannedWorkout,
     GarminCredentialRequest,
@@ -60,6 +61,27 @@ class UserApplicationService:
 
     def create_user(self, payload: UserCreateRequest) -> UserCreateResponse:
         record, api_key = self.user_service.create_user(payload)
+        self._upsert_schedule(record)
+        return UserCreateResponse(apiKey=api_key, user=self._profile_from_record(record))
+
+    def provision_user(self, payload: AdminUserProvisionRequest) -> UserCreateResponse:
+        if payload.external_key:
+            record = self.user_service.upsert_runtime_user(
+                external_key=payload.external_key,
+                timezone=payload.timezone,
+                locale=payload.locale,
+                schedule_times=payload.schedule_times,
+                run_mode=payload.run_mode,
+                include_strength=payload.include_strength,
+                display_name=payload.display_name,
+            )
+            api_key = self.user_service.create_api_key(
+                user_id=record.user_id,
+                key_name=payload.key_name,
+            )
+        else:
+            record, api_key = self.user_service.create_user(payload)
+
         self._upsert_schedule(record)
         return UserCreateResponse(apiKey=api_key, user=self._profile_from_record(record))
 

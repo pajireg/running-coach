@@ -48,11 +48,44 @@ class PlanFreshnessService(UserScopedStore):
                 "end_date": end_date,
             },
         )
-        return [
-            str(row["external_workout_id"])
-            for row in rows
-            if row.get("external_workout_id")
-        ]
+        return [str(row["external_workout_id"]) for row in rows if row.get("external_workout_id")]
+
+    def list_planned_delivery_ids(
+        self,
+        start_date: date,
+        end_date: date,
+        delivery_provider: str = "garmin",
+    ) -> dict[str, list[str]]:
+        """List persisted provider workout and schedule ids for a plan window."""
+        rows = self._fetchall(
+            """
+            SELECT external_workout_id, external_schedule_id
+            FROM planned_workouts
+            WHERE user_id = %(user_id)s
+              AND source = %(source)s
+              AND delivery_provider = %(delivery_provider)s
+              AND workout_date BETWEEN %(start_date)s AND %(end_date)s
+              AND (
+                  external_workout_id IS NOT NULL
+                  OR external_schedule_id IS NOT NULL
+              )
+            """,
+            {
+                "user_id": self._user_id(),
+                "source": WORKOUT_SOURCE,
+                "delivery_provider": delivery_provider,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
+        return {
+            "workout_ids": [
+                str(row["external_workout_id"]) for row in rows if row.get("external_workout_id")
+            ],
+            "schedule_ids": [
+                str(row["external_schedule_id"]) for row in rows if row.get("external_schedule_id")
+            ],
+        }
 
     def summarize_plan_freshness(self, as_of: date, horizon_days: int = 7) -> dict[str, Any]:
         """Summarize whether the current plan can be reused, extended, or regenerated."""
@@ -239,9 +272,7 @@ class PlanFreshnessService(UserScopedStore):
         has_missed_base_volume = missed_base_count >= 2
         has_repeated_missed_workouts = missed_workout_count >= 2
         should_replan_for_missed_workout = (
-            has_missed_key_workout
-            or has_missed_base_volume
-            or has_repeated_missed_workouts
+            has_missed_key_workout or has_missed_base_volume or has_repeated_missed_workouts
         )
 
         should_extend_plan = (

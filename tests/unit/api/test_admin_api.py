@@ -12,6 +12,13 @@ from running_coach.models.llm_settings import (
     UserLLMSettings,
     UserLLMSettingsPatch,
 )
+from running_coach.models.user import (
+    AdminUserProvisionRequest,
+    IntegrationStatus,
+    UserCreateResponse,
+    UserPreferences,
+    UserProfile,
+)
 
 
 class FakeAdminSettings:
@@ -60,12 +67,48 @@ class FakeAdminSettings:
         return self.user_settings
 
 
-def _client(api_key: str | None = "secret") -> TestClient:
+class FakeUserApp:
+    def __init__(self):
+        self.last_payload: AdminUserProvisionRequest | None = None
+
+    def provision_user(self, payload: AdminUserProvisionRequest) -> UserCreateResponse:
+        self.last_payload = payload
+        return UserCreateResponse(
+            apiKey="rcu_admin_generated",
+            user=UserProfile(
+                userId="user-2",
+                externalKey=payload.external_key or "generated-user",
+                displayName=payload.display_name,
+                preferences=UserPreferences(
+                    timezone=payload.timezone,
+                    locale=payload.locale,
+                    scheduleTimes=payload.schedule_times,
+                    runMode=payload.run_mode,
+                    includeStrength=payload.include_strength,
+                ),
+                llmSettings=LLMSettings(
+                    plannerMode="legacy",
+                    llmProvider="gemini",
+                    llmModel="gemini-default",
+                ),
+                integrationStatus=IntegrationStatus(
+                    garmin="not_configured",
+                    googleCalendar="disabled",
+                ),
+            ),
+        )
+
+
+def _client(
+    api_key: str | None = "secret",
+    user_app: FakeUserApp | None = None,
+) -> TestClient:
     app = FastAPI()
     app.include_router(
         create_admin_router(
             admin_settings=FakeAdminSettings(),  # type: ignore[arg-type]
             admin_api_key=api_key,
+            user_app=user_app,  # type: ignore[arg-type]
         )
     )
     return TestClient(app)
@@ -121,3 +164,29 @@ def test_user_override_endpoint_returns_effective_settings():
     assert response.status_code == 200
     assert response.json()["overrides"]["llmModel"] == "gemini-3-pro"
     assert response.json()["effective"]["llmModel"] == "gemini-3-pro"
+
+
+def test_admin_can_provision_user_api_key():
+    user_app = FakeUserApp()
+    client = _client(user_app=user_app)
+
+    response = client.post(
+        "/admin/users",
+        headers={"Authorization": "Bearer secret"},
+        json={
+            "externalKey": "runner@example.com",
+            "displayName": "Runner",
+            "timezone": "Asia/Seoul",
+            "locale": "ko",
+            "scheduleTimes": "05:00",
+            "runMode": "auto",
+            "includeStrength": False,
+            "keyName": "android-test",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["apiKey"] == "rcu_admin_generated"
+    assert response.json()["user"]["externalKey"] == "runner@example.com"
+    assert user_app.last_payload is not None
+    assert user_app.last_payload.key_name == "android-test"

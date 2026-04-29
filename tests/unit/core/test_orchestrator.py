@@ -16,13 +16,14 @@ class _FakeWorkoutManager:
 
     def schedule_workout(self, workout_id, target_date):
         self.scheduled.append((workout_id, target_date.isoformat()))
-        return {"scheduledWorkoutId": workout_id}
+        return {"scheduledWorkoutId": f"schedule-{workout_id}"}
 
 
 class _FakeGarminClient:
     def __init__(self):
         self.workout_manager = _FakeWorkoutManager()
         self.cleanup_ids = None
+        self.cleanup_schedule_ids = None
 
     def login(self):
         return None
@@ -43,8 +44,9 @@ class _FakeGarminClient:
     def get_recent_scheduled_workout_history(self, target_date=None):
         return []
 
-    def cleanup_existing_workouts(self, workout_ids=None):
+    def cleanup_existing_workouts(self, workout_ids=None, schedule_ids=None):
         self.cleanup_ids = workout_ids
+        self.cleanup_schedule_ids = schedule_ids
         return 0
 
 
@@ -210,6 +212,9 @@ class _FakeHistoryService:
     def list_planned_external_workout_ids(self, **_kwargs):
         return ["old-1"]
 
+    def list_planned_delivery_ids(self, **_kwargs):
+        return {"workout_ids": ["old-1"], "schedule_ids": ["schedule-old-1"]}
+
     def clear_delivery_results(self, **kwargs):
         self.cleared.append(kwargs)
 
@@ -253,6 +258,9 @@ class _FakeHistoryReadService:
 
     def list_planned_external_workout_ids(self, **kwargs):
         return self._history.list_planned_external_workout_ids(**kwargs)
+
+    def list_planned_delivery_ids(self, **kwargs):
+        return self._history.list_planned_delivery_ids(**kwargs)
 
     def summarize_plan_freshness(self, **kwargs):
         return self._history.summarize_plan_freshness(**kwargs)
@@ -311,10 +319,12 @@ def test_run_once_persists_provider_delivery_results():
 
     assert result is True
     assert container.garmin_client.cleanup_ids == ["old-1"]
+    assert container.garmin_client.cleanup_schedule_ids == ["schedule-old-1"]
     assert container.history_service.cleared[0]["start_date"].isoformat() == "2026-04-17"
     assert len(container.history_service.synced) == 6
     assert container.history_service.synced[0]["delivery_provider"] == "garmin"
     assert container.history_service.synced[0]["external_workout_id"] == "id-1"
+    assert container.history_service.synced[0]["external_schedule_id"] == "schedule-id-1"
     assert container.history_service.synced[0]["delivery_status"] == "scheduled"
 
 
@@ -342,6 +352,7 @@ def test_run_once_prefers_provider_neutral_training_data_dependency():
 
     assert result is True
     assert training_data_provider.cleanup_ids == ["old-1"]
+    assert training_data_provider.cleanup_schedule_ids == ["schedule-old-1"]
     assert training_data_provider.workout_manager.created
 
 

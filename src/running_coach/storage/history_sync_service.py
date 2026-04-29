@@ -40,10 +40,12 @@ class HistorySyncService:
         delivery_provider: str,
         external_workout_id: str | None,
         delivery_status: str,
+        external_schedule_id: str | None = None,
     ) -> None:
         self.history_service.record_delivery_result(
             workout_date=workout_date,
             delivery_provider=delivery_provider,
             external_workout_id=external_workout_id,
+            external_schedule_id=external_schedule_id,
             delivery_status=delivery_status,
         )

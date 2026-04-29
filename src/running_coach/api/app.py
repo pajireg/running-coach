@@ -33,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_admin_router(
             admin_settings=runtime.admin_settings,
             admin_api_key=active_settings.admin_api_key,
+            user_app=runtime.user_app,
         )
     )
     app.include_router(create_user_router(runtime.user_app))

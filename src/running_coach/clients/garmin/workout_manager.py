@@ -91,21 +91,30 @@ class WorkoutManager:
     def delete_generated_workouts(
         self,
         workout_ids: Optional[list[str]] = None,
+        schedule_ids: Optional[list[str]] = None,
         future_only: bool = True,
     ) -> int:
         """현재 앱이 생성한 기존 워크아웃 삭제.
 
-        DB에 저장된 provider external workout id 기준으로만 삭제한다.
+        DB에 저장된 provider schedule id와 external workout id 기준으로만 삭제한다.
         ID 없이 이름 prefix로 탐색하는 fallback은 StandardizeWorkoutName 적용 이후
         canonical 이름('Recovery Run' 등)과 prefix가 일치하지 않아 항상 0건이며,
         사용자의 동명 워크아웃을 잘못 삭제할 위험이 있으므로 제거했다.
         """
+        schedule_ids_to_delete = [str(sid) for sid in (schedule_ids or []) if sid]
         ids_to_delete = [str(wid) for wid in (workout_ids or []) if wid]
-        if not ids_to_delete:
-            logger.info("삭제할 이전 워크아웃 ID 없음 (건너뜀)")
+        if not schedule_ids_to_delete and not ids_to_delete:
+            logger.info("삭제할 이전 워크아웃/예약 ID 없음 (건너뜀)")
             return 0
 
         deleted_count = 0
+        for schedule_id in schedule_ids_to_delete:
+            try:
+                self._unschedule_workout(schedule_id)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"워크아웃 예약 삭제 실패 (schedule_id={schedule_id}): {e}")
+
         for workout_id in ids_to_delete:
             try:
                 self._delete_workout(workout_id)
@@ -113,8 +122,16 @@ class WorkoutManager:
             except Exception as e:
                 logger.warning(f"워크아웃 삭제 실패 (id={workout_id}): {e}")
 
-        logger.info(f"{deleted_count}/{len(ids_to_delete)}개의 기존 워크아웃 삭제됨")
+        expected_count = len(schedule_ids_to_delete) + len(ids_to_delete)
+        logger.info(f"{deleted_count}/{expected_count}개의 기존 워크아웃/예약 삭제됨")
         return deleted_count
+
+    def _unschedule_workout(self, schedule_id: str | int) -> None:
+        if hasattr(self.garmin, "unschedule_workout"):
+            self.garmin.unschedule_workout(schedule_id)
+            return
+        url = f"/workout-service/schedule/{schedule_id}"
+        self.garmin.garth.delete("connectapi", url, api=True)
 
     def _delete_workout(self, workout_id: str | int) -> None:
         if hasattr(self.garmin, "delete_workout"):

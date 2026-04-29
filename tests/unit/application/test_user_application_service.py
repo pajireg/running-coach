@@ -10,6 +10,7 @@ from running_coach.application.user_service import UserApplicationService
 from running_coach.models.feedback import SubjectiveFeedback
 from running_coach.models.llm_settings import LLMSettings, UserLLMSettings
 from running_coach.models.user import (
+    AdminUserProvisionRequest,
     GarminCredentialRequest,
     UserCreateRequest,
     UserPreferencesPatch,
@@ -32,6 +33,7 @@ class FakeUserService(UserService):
             run_mode="auto",
             include_strength=False,
         )
+        self.created_key_name = None
 
     def create_user(self, payload: UserCreateRequest):  # type: ignore[override]
         self.record.display_name = payload.display_name
@@ -47,6 +49,11 @@ class FakeUserService(UserService):
 
     def list_runnable_users(self):  # type: ignore[override]
         return [self.record]
+
+    def create_api_key(self, user_id: str, key_name: str = "default") -> str:  # type: ignore[override]
+        assert user_id == "user-1"
+        self.created_key_name = key_name
+        return f"rcu_{key_name}"
 
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserRecord:  # type: ignore[override]
         assert user_id == "user-1"
@@ -268,6 +275,23 @@ def test_update_user_preferences_delegates_llm_overrides_to_admin_settings():
     assert profile.llm_settings.planner_mode == "llm_driven"
     assert profile.llm_settings.llm_model == "gemini-2.5-pro"
     assert admin_settings.last_patch is not None
+
+
+def test_admin_provision_user_reuses_existing_external_key_and_issues_key():
+    service, _, _ = _service()
+
+    response = service.provision_user(
+        AdminUserProvisionRequest(
+            externalKey="runner@example.com",
+            displayName="Runner",
+            scheduleTimes="06:00",
+            keyName="android-test",
+        )
+    )
+
+    assert response.api_key == "rcu_android-test"
+    assert response.user.external_key == "runner@example.com"
+    assert response.user.preferences.schedule_times == "06:00"
 
 
 def test_ensure_local_runtime_user_context_uses_current_settings_defaults():

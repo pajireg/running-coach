@@ -289,10 +289,14 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     plan_payload JSONB NOT NULL,
     delivery_provider TEXT,
     external_workout_id TEXT,
+    external_schedule_id TEXT,
     delivery_status TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, workout_date, source)
 );
+
+ALTER TABLE planned_workouts
+    ADD COLUMN IF NOT EXISTS external_schedule_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_planned_workouts_user_date
     ON planned_workouts (user_id, workout_date DESC);

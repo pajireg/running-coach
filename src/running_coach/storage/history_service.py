@@ -447,6 +447,7 @@ class CoachingHistoryService:
         delivery_provider: str,
         external_workout_id: Optional[str],
         delivery_status: str,
+        external_schedule_id: Optional[str] = None,
     ) -> None:
         """Provider workout delivery result persistence."""
         query = """
@@ -454,6 +455,7 @@ class CoachingHistoryService:
             SET
                 delivery_provider = %(delivery_provider)s,
                 external_workout_id = %(external_workout_id)s,
+                external_schedule_id = %(external_schedule_id)s,
                 delivery_status = %(delivery_status)s
             WHERE user_id = %(user_id)s
               AND workout_date = %(workout_date)s
@@ -466,6 +468,7 @@ class CoachingHistoryService:
                 "workout_date": workout_date,
                 "delivery_provider": delivery_provider,
                 "external_workout_id": external_workout_id,
+                "external_schedule_id": external_schedule_id,
                 "delivery_status": delivery_status[:100],
                 "source": WORKOUT_SOURCE,
             },
@@ -483,6 +486,7 @@ class CoachingHistoryService:
             UPDATE planned_workouts
             SET
                 external_workout_id = NULL,
+                external_schedule_id = NULL,
                 delivery_status = NULL
             WHERE user_id = %(user_id)s
               AND source = %(source)s
@@ -515,6 +519,7 @@ class CoachingHistoryService:
                 plan_payload,
                 delivery_provider,
                 external_workout_id,
+                external_schedule_id,
                 delivery_status
             )
             VALUES (
@@ -529,6 +534,7 @@ class CoachingHistoryService:
                 %(plan_payload)s::jsonb,
                 %(delivery_provider)s,
                 %(external_workout_id)s,
+                %(external_schedule_id)s,
                 %(delivery_status)s
             )
             ON CONFLICT (user_id, workout_date, source)
@@ -546,6 +552,10 @@ class CoachingHistoryService:
                 external_workout_id = COALESCE(
                     planned_workouts.external_workout_id,
                     EXCLUDED.external_workout_id
+                ),
+                external_schedule_id = COALESCE(
+                    planned_workouts.external_schedule_id,
+                    EXCLUDED.external_schedule_id
                 ),
                 delivery_status = COALESCE(
                     planned_workouts.delivery_status,
@@ -576,6 +586,7 @@ class CoachingHistoryService:
                     "external_workout_id": (
                         str(item.get("workoutId")) if item.get("workoutId") else None
                     ),
+                    "external_schedule_id": str(item.get("id")) if item.get("id") else None,
                     "delivery_status": "scheduled_backfill",
                 },
             )

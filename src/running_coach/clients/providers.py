@@ -50,6 +50,10 @@ class TrainingDataProvider(Protocol):
         """Return recent provider scheduled workout history."""
         ...
 
-    def cleanup_existing_workouts(self, workout_ids: list[str] | None = None) -> int:
+    def cleanup_existing_workouts(
+        self,
+        workout_ids: list[str] | None = None,
+        schedule_ids: list[str] | None = None,
+    ) -> int:
         """Delete or detach previously generated provider workouts."""
         ...

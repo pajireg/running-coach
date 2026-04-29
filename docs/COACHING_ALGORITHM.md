@@ -366,6 +366,7 @@ Current Garmin upload behavior:
 - main running targets use session-specific pace margins
 - warmup targets use a wider margin
 - cooldown and interval-recovery targets use the widest margins
+- cleanup uses stored Garmin schedule IDs first, then stored workout template IDs
 
 This keeps Garmin guidance useful without making the watch too noisy during easy transitions.
 
