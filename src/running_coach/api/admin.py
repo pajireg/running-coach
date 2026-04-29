@@ -14,7 +14,7 @@ from ..models.llm_settings import (
     UserLLMSettings,
     UserLLMSettingsPatch,
 )
-from ..models.user import AdminUserProvisionRequest, UserCreateResponse
+from ..models.user import AdminUserListResponse, AdminUserProvisionRequest, UserCreateResponse
 from ..storage.admin_settings import AdminSettingsService
 
 
@@ -71,6 +71,14 @@ def create_admin_router(
         return _user_settings_payload(admin_settings.update_user_llm_settings(user_id, patch))
 
     if user_app is not None:
+
+        @router.get(
+            "/users",
+            response_model=AdminUserListResponse,
+            dependencies=[Depends(require_admin)],
+        )
+        def list_users() -> AdminUserListResponse:
+            return user_app.list_admin_users()
 
         @router.post(
             "/users",

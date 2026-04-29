@@ -13,7 +13,9 @@ from running_coach.models.llm_settings import (
     UserLLMSettingsPatch,
 )
 from running_coach.models.user import (
+    AdminUserListResponse,
     AdminUserProvisionRequest,
+    AdminUserSummary,
     IntegrationStatus,
     UserCreateResponse,
     UserPreferences,
@@ -96,6 +98,25 @@ class FakeUserApp:
                     googleCalendar="disabled",
                 ),
             ),
+        )
+
+    def list_admin_users(self) -> AdminUserListResponse:
+        return AdminUserListResponse(
+            users=[
+                AdminUserSummary(
+                    userId="user-1",
+                    externalKey="runner@example.com",
+                    displayName="Runner",
+                    timezone="Asia/Seoul",
+                    locale="ko",
+                    scheduleTimes="05:00",
+                    runMode="auto",
+                    includeStrength=False,
+                    activeApiKeyCount=2,
+                    lastApiKeyUsedAt=None,
+                    createdAt="2026-04-29T00:00:00Z",
+                )
+            ]
         )
 
 
@@ -190,3 +211,18 @@ def test_admin_can_provision_user_api_key():
     assert response.json()["user"]["externalKey"] == "runner@example.com"
     assert user_app.last_payload is not None
     assert user_app.last_payload.key_name == "android-test"
+
+
+def test_admin_can_list_users_without_exposing_key_hashes():
+    client = _client(user_app=FakeUserApp())
+
+    response = client.get(
+        "/admin/users",
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["users"][0]["userId"] == "user-1"
+    assert payload["users"][0]["activeApiKeyCount"] == 2
+    assert "keyHash" not in payload["users"][0]

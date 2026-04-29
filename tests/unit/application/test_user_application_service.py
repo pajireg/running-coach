@@ -55,6 +55,23 @@ class FakeUserService(UserService):
         self.created_key_name = key_name
         return f"rcu_{key_name}"
 
+    def list_admin_user_summaries(self):  # type: ignore[override]
+        return [
+            {
+                "user_id": self.record.user_id,
+                "external_key": self.record.external_key,
+                "display_name": self.record.display_name,
+                "timezone": self.record.timezone,
+                "locale": self.record.locale,
+                "schedule_times": self.record.schedule_times,
+                "run_mode": self.record.run_mode,
+                "include_strength": self.record.include_strength,
+                "active_api_key_count": 1,
+                "last_api_key_used_at": None,
+                "created_at": datetime(2026, 4, 29, tzinfo=timezone.utc),
+            }
+        ]
+
     def update_user_preferences(self, user_id: str, patch: UserPreferencesPatch) -> UserRecord:  # type: ignore[override]
         assert user_id == "user-1"
         if "display_name" in patch.model_fields_set:
@@ -292,6 +309,16 @@ def test_admin_provision_user_reuses_existing_external_key_and_issues_key():
     assert response.api_key == "rcu_android-test"
     assert response.user.external_key == "runner@example.com"
     assert response.user.preferences.schedule_times == "06:00"
+
+
+def test_admin_list_users_returns_key_metadata_without_secrets():
+    service, _, _ = _service()
+
+    response = service.list_admin_users()
+
+    assert response.users[0].user_id == "user-1"
+    assert response.users[0].active_api_key_count == 1
+    assert response.users[0].last_api_key_used_at is None
 
 
 def test_ensure_local_runtime_user_context_uses_current_settings_defaults():

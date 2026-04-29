@@ -182,6 +182,32 @@ class UserCreateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class AdminUserSummary(BaseModel):
+    """Admin-safe user inventory row without credential secrets."""
+
+    user_id: str = Field(alias="userId")
+    external_key: str = Field(alias="externalKey")
+    display_name: str | None = Field(default=None, alias="displayName")
+    timezone: str
+    locale: str | None = None
+    schedule_times: str | None = Field(default=None, alias="scheduleTimes")
+    run_mode: str | None = Field(default=None, alias="runMode")
+    include_strength: bool | None = Field(default=None, alias="includeStrength")
+    active_api_key_count: int = Field(alias="activeApiKeyCount")
+    last_api_key_used_at: datetime | None = Field(default=None, alias="lastApiKeyUsedAt")
+    created_at: datetime = Field(alias="createdAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminUserListResponse(BaseModel):
+    """Admin-safe user inventory response."""
+
+    users: list[AdminUserSummary]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class UserScheduleStatus(BaseModel):
     """Read model for the user's background coaching schedule."""
 

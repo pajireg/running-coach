@@ -169,6 +169,40 @@ class UserService:
         )
         return [UserRecord.from_row(row) for row in rows]
 
+    def list_admin_user_summaries(self) -> list[dict[str, Any]]:
+        """Return admin-safe user rows with API-key metadata only."""
+        return self._fetchall(
+            f"""
+            SELECT
+                {_USER_SELECT_COLUMNS},
+                u.created_at,
+                COUNT(uak.user_api_key_id) FILTER (
+                    WHERE uak.revoked_at IS NULL
+                ) AS active_api_key_count,
+                MAX(uak.last_used_at) FILTER (
+                    WHERE uak.revoked_at IS NULL
+                ) AS last_api_key_used_at
+            FROM users u
+            LEFT JOIN user_preferences up ON up.user_id = u.user_id
+            LEFT JOIN user_api_keys uak ON uak.user_id = u.user_id
+            GROUP BY
+                u.user_id,
+                u.external_key,
+                u.display_name,
+                u.timezone,
+                u.locale,
+                up.schedule_times,
+                up.run_mode,
+                up.include_strength,
+                up.planner_mode,
+                up.llm_provider,
+                up.llm_model,
+                u.created_at
+            ORDER BY u.created_at DESC, u.user_id DESC
+            """,
+            {},
+        )
+
     def upsert_runtime_user(
         self,
         *,

@@ -11,7 +11,9 @@ from ..config.settings import Settings
 from ..models.feedback import SubjectiveFeedback
 from ..models.llm_settings import UserLLMSettingsPatch
 from ..models.user import (
+    AdminUserListResponse,
     AdminUserProvisionRequest,
+    AdminUserSummary,
     DashboardActivity,
     DashboardPlannedWorkout,
     GarminCredentialRequest,
@@ -84,6 +86,14 @@ class UserApplicationService:
 
         self._upsert_schedule(record)
         return UserCreateResponse(apiKey=api_key, user=self._profile_from_record(record))
+
+    def list_admin_users(self) -> AdminUserListResponse:
+        return AdminUserListResponse(
+            users=[
+                AdminUserSummary.model_validate(row)
+                for row in self.user_service.list_admin_user_summaries()
+            ]
+        )
 
     def authenticate_api_key(self, api_key: str) -> UserContext | None:
         record = self.user_service.authenticate_api_key(api_key)
